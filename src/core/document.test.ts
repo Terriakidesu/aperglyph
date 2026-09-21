@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createNode, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
+import { createDocument, createEdge, createNode, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
 import { createTemplateDocument } from './templates';
 
 describe('AperGlyph document model', () => {
@@ -22,6 +22,31 @@ describe('AperGlyph document model', () => {
     const parsed = parseProject(serializeProject(document));
     expect(parsed.id).toBe(document.id);
     expect(parsed.pages[0].nodes[0].position).toEqual({ x: 120, y: 80 });
+  });
+
+  it('round trips free connector endpoints', () => {
+    const document = createDocument('Free endpoint');
+    const target = createNode('rectangle', { x: 300, y: 120 });
+    document.pages[0].nodes.push(target);
+    document.pages[0].edges.push({
+      ...createEdge({ point: { x: 80, y: 90 } }, { nodeId: target.id }),
+      waypoints: [{ x: 180, y: 90 }],
+    });
+    const parsed = parseProject(serializeProject(document));
+    expect(parsed.pages[0].edges[0].source).toEqual({ point: { x: 80, y: 90 } });
+  });
+
+  it('repairs stale free points when an endpoint is attached to a node', () => {
+    const document = createDocument('Attached endpoint');
+    const source = createNode('entity', { x: 0, y: 0 });
+    const target = createNode('entity', { x: 400, y: 0 });
+    document.pages[0].nodes.push(source, target);
+    document.pages[0].edges.push({
+      ...createEdge({ nodeId: source.id, port: 'right', point: { x: 250, y: 44 } }, { nodeId: target.id, port: 'left', point: { x: 150, y: 44 } }),
+    });
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].edges[0].source.point).toBeUndefined();
+    expect(migrated.pages[0].edges[0].target.point).toBeUndefined();
   });
 
   it('rejects unrelated JSON', () => {

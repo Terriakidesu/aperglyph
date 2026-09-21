@@ -11,6 +11,15 @@ export interface EntityField {
   nullable: boolean;
 }
 
+export type EntityVariant = 'key-field' | 'key-field-type' | 'field-type' | 'field' | 'field-nullability' | 'key-field-nullability' | 'key-field-type-nullability';
+export type EntityColumnId = 'key' | 'field' | 'type' | 'nullable';
+export interface EntityColumn {
+  id: EntityColumnId;
+  label: string;
+  x: number;
+  width: number;
+}
+
 export interface ErdDiagnostic {
   severity: 'warning' | 'error';
   message: string;
@@ -18,10 +27,72 @@ export interface ErdDiagnostic {
 }
 
 export const ERD_HEADER_HEIGHT = 34;
+export const ERD_COLUMN_HEADER_HEIGHT = 21;
 export const ERD_ROW_HEIGHT = 27;
 
-export function entityAutoHeight(fields: unknown): number {
-  return ERD_HEADER_HEIGHT + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
+export const entityVariantOptions: Array<{ value: EntityVariant; label: string }> = [
+  { value: 'key-field-type', label: 'Key · Field · Data type' },
+  { value: 'key-field', label: 'Key · Field' },
+  { value: 'field-type', label: 'Field · Data type' },
+  { value: 'field', label: 'Field only' },
+  { value: 'field-nullability', label: 'Field · Nullability' },
+  { value: 'key-field-nullability', label: 'Key · Field · Nullability' },
+  { value: 'key-field-type-nullability', label: 'Key · Field · Data type · Nullability' },
+];
+
+export function normalizeEntityVariant(value: unknown): EntityVariant {
+  return entityVariantOptions.some((option) => option.value === value) ? value as EntityVariant : 'key-field-type';
+}
+
+export function entityAutoHeight(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): number {
+  return ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0) + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
+}
+
+export function entityColumns(variant: unknown, width: number): EntityColumn[] {
+  const ids = columnsForVariant(variant);
+  const keyWidth = ids.includes('key') ? 38 : 0;
+  const typeWidth = ids.includes('type') ? Math.min(82, Math.max(58, width * 0.3)) : 0;
+  const nullableWidth = ids.includes('nullable') ? 62 : 0;
+  const fieldWidth = Math.max(48, width - keyWidth - typeWidth - nullableWidth);
+  const widths: Record<EntityColumnId, number> = { key: keyWidth, field: fieldWidth, type: typeWidth, nullable: nullableWidth };
+  let x = 0;
+  return ids.map((id) => {
+    const column = { id, label: columnLabel(id), x, width: widths[id] };
+    x += column.width;
+    return column;
+  });
+}
+
+export function entityFieldValue(field: EntityField, column: EntityColumnId): string {
+  if (column === 'key') return field.primaryKey && field.foreignKey ? 'PK/FK' : field.primaryKey ? 'PK' : field.foreignKey ? 'FK' : field.unique ? 'UQ' : '';
+  if (column === 'field') return field.name;
+  if (column === 'type') return field.type;
+  return field.nullable ? 'NULL' : 'NOT NULL';
+}
+
+export function entityFieldPortOffset(fields: unknown, index: number, columnHeaders = false): number {
+  const fieldTop = ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
+  const height = entityAutoHeight(fields, 'key-field-type', columnHeaders);
+  return (fieldTop + index * ERD_ROW_HEIGHT + ERD_ROW_HEIGHT / 2) / Math.max(1, height);
+}
+
+function columnsForVariant(value: unknown): EntityColumnId[] {
+  switch (normalizeEntityVariant(value)) {
+    case 'key-field': return ['key', 'field'];
+    case 'field-type': return ['field', 'type'];
+    case 'field': return ['field'];
+    case 'field-nullability': return ['field', 'nullable'];
+    case 'key-field-nullability': return ['key', 'field', 'nullable'];
+    case 'key-field-type-nullability': return ['key', 'field', 'type', 'nullable'];
+    default: return ['key', 'field', 'type'];
+  }
+}
+
+function columnLabel(column: EntityColumnId): string {
+  if (column === 'key') return 'Key';
+  if (column === 'field') return 'Field';
+  if (column === 'type') return 'Data type';
+  return 'Null';
 }
 
 export function createEntityField(overrides: Partial<EntityField> = {}): EntityField {
@@ -90,7 +161,7 @@ export function validateErd(document: DiagramDocument): ErdDiagnostic[] {
       });
     });
     page.edges.forEach((edge) => {
-      if (!entityIds.has(edge.source.nodeId) || !entityIds.has(edge.target.nodeId)) diagnostics.push({ severity: 'warning', message: 'ERD relationships should connect two entities.' });
+      if (!edge.source.nodeId || !edge.target.nodeId || !entityIds.has(edge.source.nodeId) || !entityIds.has(edge.target.nodeId)) diagnostics.push({ severity: 'warning', message: 'ERD relationships should connect two entities.' });
     });
   });
   return diagnostics;

@@ -12,6 +12,9 @@ export interface Size {
   height: number;
 }
 
+/** Boundary model used for connector intersection math. */
+export type ShapeBoundary = 'rectangle' | 'ellipse' | 'diamond';
+
 export interface Bounds extends Point, Size {}
 
 export interface NodeStyle {
@@ -35,8 +38,13 @@ export interface EdgeStyle {
 export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
 
 export interface Endpoint {
-  nodeId: string;
+  /** Attached node. Omit this for a free-standing canvas endpoint. */
+  nodeId?: string;
   port?: string;
+  /** Normalized position along a cardinal node port (0 = top/left, 1 = bottom/right). */
+  offset?: number;
+  /** World-space location used when the endpoint is not attached to a node. */
+  point?: Point;
 }
 
 export interface DiagramNode {
@@ -46,6 +54,8 @@ export interface DiagramNode {
   position: Point;
   size: Size;
   rotation: number;
+  /** Optional persisted geometry for extensible shape definitions. */
+  boundary?: ShapeBoundary;
   style: NodeStyle;
   data: Record<string, unknown>;
   locked?: boolean;

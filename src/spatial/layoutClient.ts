@@ -49,6 +49,7 @@ export class LayoutWorkerClient {
       requestId,
       nodes: nodes.map((node) => ({ id: node.id, width: node.size.width, height: node.size.height })),
       edges: edges.flatMap((edge) => {
+        if (!edge.source.nodeId || !edge.target.nodeId) return [];
         const source = indexById.get(edge.source.nodeId);
         const target = indexById.get(edge.target.nodeId);
         return source === undefined || target === undefined ? [] : [{ source, target }];

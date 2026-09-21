@@ -1,8 +1,9 @@
 import { parseProject, serializeProject } from '../core/document';
-import { normalizeEntityFields } from '../core/erd';
+import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, entityColumns, entityFieldValue, normalizeEntityFields } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
-import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, jumpMaskPaths, pointsToPath } from '../core/routing';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
+import { pluginManager } from '../plugins';
 
 export interface ExportOptions {
   pageId?: string;
@@ -73,18 +74,35 @@ export function readProjectFile(file: File): Promise<DiagramDocument> {
 
 export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], background: string, width: number, height: number, options: { transparent?: boolean; viewBox?: { x: number; y: number; width: number; height: number } } = {}): string {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const routeEntries = edges
+    .filter((edge) => edge.type === 'orthogonal')
+    .map((edge) => ({
+      id: edge.id,
+      points: edgeRoute(edge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes),
+    }));
+  const routeJumps = calculateRouteJumps(routeEntries);
   const edgeMarkup = edges.map((edge) => {
-    const source = nodeMap.get(edge.source.nodeId);
-    const target = nodeMap.get(edge.target.nodeId);
-    if (!source || !target) return '';
+    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
     const route = edgeRoute(edge, source, target, nodes);
-    const path = edge.type === 'curved' ? curvedPath(route) : pointsToPath(route);
+    if (route.length < 2) return '';
     const start = route[0];
     const end = route.at(-1) ?? start;
-    const startDirection = outwardDirection(start, nodeCenter(source));
-    const endDirection = outwardDirection(end, nodeCenter(target));
+    const startDirection = endpointDirection(start, route[1], source);
+    const endDirection = endpointDirection(end, route.at(-2) ?? start, target);
+    const startMarkerDirection = markerDirection(start, route[1], source);
+    const endMarkerDirection = markerDirection(end, route.at(-2) ?? start, target);
+    const startArrowDirection = markerArrowDirection(start, route[1]);
+    const endArrowDirection = markerArrowDirection(end, route.at(-2) ?? start);
+    const curveStartDirection = source ? startDirection : { x: -startDirection.x, y: -startDirection.y };
+    const curveEndDirection = target ? { x: -endDirection.x, y: -endDirection.y } : endDirection;
+    const jumps = routeJumps.get(edge.id) ?? [];
+    const path = edge.type === 'curved' ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, jumps);
+    const masks = edge.type === 'orthogonal'
+      ? jumpMaskPaths(route, jumps).map((mask) => `<path d="${mask}" fill="none" stroke="${escapeXml(background)}" stroke-width="${edge.style.strokeWidth + 4}" stroke-linecap="round"/>`).join('')
+      : '';
     const line = `<path d="${path}" fill="none" stroke="${escapeXml(edge.style.stroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
-    return `${line}${svgEndpointMarker(start, startDirection, edge.style.startMarker, edge.style.stroke, background, 'start')}${svgEndpointMarker(end, endDirection, edge.style.endMarker, edge.style.stroke, background, 'end')}`;
+    return `${masks}${line}${svgEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edge.style.stroke, background, 'start')}${svgEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edge.style.stroke, background, 'end')}`;
   }).join('');
   const nodeMarkup = nodes.map(renderNode).join('');
   const viewBox = options.viewBox ?? { x: 0, y: 0, width, height };
@@ -94,19 +112,19 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
 
 function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, endpoint: 'start' | 'end'): string {
   if (marker === 'none') return '';
-  const angle = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
-  const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
-  const circle = `<circle cx="0" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
-  const bar = `<path d="M 0 -7 L 0 7" ${line}/>`;
-  const crowfoot = (offset = 0) => `<path d="M ${offset} 0 L ${offset - 11} -7 M ${offset} 0 L ${offset - 11} 0 M ${offset} 0 L ${offset - 11} 7" ${line}/>`;
-  const glyph = marker === 'arrow'
-    ? `<path d="${endpoint === 'start' ? 'M 0 0 L -10 -6 L -10 6 Z' : 'M 0 0 L 10 -6 L 10 6 Z'}" fill="${escapeXml(stroke)}"/>`
+  const angle = directionAngle(direction);
+    const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
+   const circle = `<circle cx="6" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
+   const bar = `<path d="M 0 -7 L 0 7" ${line}/>`;
+   const crowfoot = (offset = 0) => `<path d="M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7" ${line}/>`;
+   const glyph = marker === 'arrow'
+     ? `<path d="M 0 0 L 10 -6 L 10 6 Z" fill="${escapeXml(stroke)}"/>`
     : marker === 'bar' ? bar
       : marker === 'circle' ? circle
         : marker === 'crowfoot' ? crowfoot()
-          : marker === 'circle-bar' ? `${circle}<path d="M 10 -7 L 10 7" ${line}/>`
-            : marker === 'bar-crowfoot' ? `${bar}${crowfoot(-5)}`
-              : `${circle}${crowfoot(-8)}`;
+       : marker === 'circle-bar' ? `${circle}<path d="M 12 -7 L 12 7" ${line}/>`
+             : marker === 'bar-crowfoot' ? `${bar}${crowfoot(5)}`
+               : `${circle}${crowfoot(12)}`;
   return `<g transform="translate(${point.x} ${point.y}) rotate(${angle})">${glyph}</g>`;
 }
 
@@ -118,6 +136,34 @@ function outwardDirection(point: Point, neighbor: Point): Point {
   return { x: 1, y: 0 };
 }
 
+function endpointDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
+  return node ? outwardDirection(point, nodeCenter(node)) : { x: point.x - neighbor.x, y: point.y - neighbor.y };
+}
+
+function markerDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
+  if (node) return endpointDirection(point, neighbor, node);
+  return directionBetween(point, neighbor);
+}
+
+function markerArrowDirection(point: Point, neighbor: Point): Point {
+  return directionBetween(point, neighbor);
+}
+
+function directionBetween(from: Point, to: Point): Point {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  return length > 0.001 ? { x: (to.x - from.x) / length, y: (to.y - from.y) / length } : { x: 1, y: 0 };
+}
+
+function directionAngle(direction: Point): number {
+  const angle = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
+  return Math.abs(angle) === 180 ? 180 : angle;
+}
+
+function shapeRenderer(node: DiagramNode): string {
+  return pluginManager.getShape(node.library, node.type)?.renderer
+    ?? (node.library === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
+}
+
 function renderNode(node: DiagramNode): string {
   const { x, y } = node.position;
   const { width, height } = node.size;
@@ -125,48 +171,61 @@ function renderNode(node: DiagramNode): string {
   const stroke = escapeXml(node.style.stroke);
   const label = escapeXml(typeof node.data.label === 'string' ? node.data.label : node.type);
   const radius = node.style.radius;
+  const renderer = shapeRenderer(node);
   const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})`;
-  if (node.type === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (node.type === 'document' || node.type === 'multiple-document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (node.type === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (node.type === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (node.type === 'entity') {
-    const fields = normalizeEntityFields(node.data.fields);
-    const striped = node.data.striped !== false;
-    const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-    const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
-    const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
-    const headerHeight = 34;
-    const rowHeight = 27;
-    const keyColumnWidth = 38;
-    const typeColumnWidth = Math.min(82, Math.max(58, width * 0.3));
-    const typeColumnX = width - typeColumnWidth;
-    const fieldMarkup = fields.map((field, index) => {
-      const rowY = headerHeight + index * rowHeight;
-      const key = field.primaryKey && field.foreignKey ? 'PK/FK' : field.primaryKey ? 'PK' : field.foreignKey ? 'FK' : field.unique ? 'UQ' : '';
-      return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/><line x1="${keyColumnWidth}" y1="${rowY}" x2="${keyColumnWidth}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/><line x1="${typeColumnX}" y1="${rowY}" x2="${typeColumnX}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>${key ? `<text x="${keyColumnWidth / 2}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="9" font-weight="600" text-anchor="middle">${key}</text>` : ''}<text x="${keyColumnWidth + 8}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="10"${field.primaryKey ? ' text-decoration="underline"' : ''}${field.foreignKey ? ' font-style="italic"' : ''}>${escapeXml(field.name)}</text><text x="${typeColumnX + 7}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" fill-opacity="0.68" font-family="monospace" font-size="9">${escapeXml(field.type)}</text></g>`;
-    }).join('');
-     return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''} opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/><g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="13" font-weight="600" text-anchor="middle">${label}</text></g>`;
-  }
-  if (node.library === 'dfd' && node.type === 'process') {
-     return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  }
-  if (node.library === 'dfd' && node.type === 'store') {
-     return `<g transform="${transform}"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  }
-  if (node.type === 'use-case') {
-     return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  }
-  if (node.type === 'actor') {
+  if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'entity') {
+     const fields = normalizeEntityFields(node.data.fields);
+     const columns = entityColumns(node.data.entityVariant, width);
+     const showColumnHeaders = node.data.columnHeaders === true;
+     const striped = node.data.striped !== false;
+     const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
+     const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+     const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
+     const headerHeight = ERD_HEADER_HEIGHT;
+     const rowHeight = ERD_ROW_HEIGHT;
+     const fieldTop = headerHeight + (showColumnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
+     const textColor = escapeXml(node.style.textColor);
+     const columnHeaders = showColumnHeaders
+       ? `<g><rect y="${headerHeight}" width="${width}" height="${ERD_COLUMN_HEADER_HEIGHT}" fill="${escapeXml(headerFill)}" opacity="0.42"/><line x1="0" y1="${fieldTop}" x2="${width}" y2="${fieldTop}" stroke="${stroke}" stroke-opacity="0.55"/>${columns.map((column) => `<text x="${column.id === 'key' ? column.x + column.width / 2 : column.x + 7}" y="${headerHeight + 15}" fill="${textColor}" font-family="monospace" font-size="9" font-weight="600"${column.id === 'key' ? ' text-anchor="middle"' : ''}>${escapeXml(column.label)}</text>`).join('')}</g>`
+       : '';
+     const fieldMarkup = fields.map((field, index) => {
+       const rowY = fieldTop + index * rowHeight;
+       const values = columns.map((column) => {
+         const value = entityFieldValue(field, column.id);
+         if (!value) return '';
+         const isKey = column.id === 'key';
+         const className = isKey ? ' font-weight="600" font-size="9" text-anchor="middle"' : column.id === 'field' ? ` font-size="10"${field.primaryKey ? ' text-decoration="underline"' : ''}${field.foreignKey ? ' font-style="italic"' : ''}` : ' fill-opacity="0.68" font-size="9"';
+         const x = isKey ? column.x + column.width / 2 : column.x + 7;
+         return `<text x="${x}" y="${rowY + 18}" fill="${textColor}" font-family="monospace"${className}>${escapeXml(value)}</text>`;
+       }).join('');
+       const dividers = columns.slice(0, -1).map((column) => `<line x1="${column.x + column.width}" y1="${rowY}" x2="${column.x + column.width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>`).join('');
+       return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/>${dividers}${values}</g>`;
+     }).join('');
+      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''} opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="13" font-weight="600" text-anchor="middle">${label}</text></g>`;
+   }
+   if (renderer === 'ellipse') {
+      return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+   }
+   if (renderer === 'dfd-store' || renderer === 'store') {
+      return `<g transform="${transform}"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+   }
+   if (renderer === 'use-case') {
+      return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+   }
+   if (renderer === 'actor') {
     const center = width / 2;
      return `<g transform="${transform}"><circle cx="${center}" cy="22" r="14" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><path d="M${center} 36 L${center} 84 M${center - 22} 52 L${center + 22} 52 M${center} 84 L${center - 18} 116 M${center} 84 L${center + 18} 116" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round"/><text x="${center}" y="${height - 8}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
   }
-  if (node.type === 'boundary') {
+   if (renderer === 'boundary') {
      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5"/><text x="18" y="27" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="11" font-weight="600">${label}</text></g>`;
   }
-  if (node.type === 'diamond' || node.type === 'decision') {
-     return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  }
+   if (renderer === 'diamond' || renderer === 'decision') {
+      return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+   }
    return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
 }
 
@@ -175,20 +234,23 @@ function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selec
   const selected = new Set(selectionIds);
   const selectedEdges = page.edges.filter((edge) => selected.has(edge.id));
   const selectedNodeIds = new Set(page.nodes.filter((node) => selected.has(node.id)).map((node) => node.id));
-  selectedEdges.forEach((edge) => { selectedNodeIds.add(edge.source.nodeId); selectedNodeIds.add(edge.target.nodeId); });
+  selectedEdges.forEach((edge) => {
+    if (edge.source.nodeId) selectedNodeIds.add(edge.source.nodeId);
+    if (edge.target.nodeId) selectedNodeIds.add(edge.target.nodeId);
+  });
   const nodes = page.nodes.filter((node) => selectedNodeIds.has(node.id));
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = page.edges.filter((edge) => selected.has(edge.id) || (selectedNodeIds.has(edge.source.nodeId) && selectedNodeIds.has(edge.target.nodeId) && selected.has(edge.source.nodeId) && selected.has(edge.target.nodeId)));
+  const edges = page.edges.filter((edge) => selected.has(edge.id) || (edge.source.nodeId !== undefined && edge.target.nodeId !== undefined && selectedNodeIds.has(edge.source.nodeId) && selectedNodeIds.has(edge.target.nodeId) && selected.has(edge.source.nodeId) && selected.has(edge.target.nodeId)));
   return { nodes, edges };
 }
 
 function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number): { x: number; y: number; width: number; height: number } {
-  if (nodes.length === 0) return { x: 0, y: 0, width: pageWidth, height: pageHeight };
   const padding = 32;
   const points = [
     ...nodes.flatMap((node) => [node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height }]),
+    ...edges.flatMap((edge) => [edge.source.point, edge.target.point].filter((point): point is Point => Boolean(point))),
     ...edges.flatMap((edge) => edge.waypoints),
   ];
+  if (points.length === 0) return { x: 0, y: 0, width: pageWidth, height: pageHeight };
   const minX = Math.min(...points.map((point) => point.x)) - padding;
   const minY = Math.min(...points.map((point) => point.y)) - padding;
   const maxX = Math.max(...points.map((point) => point.x)) + padding;

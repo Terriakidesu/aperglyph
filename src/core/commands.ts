@@ -72,7 +72,7 @@ export class CreateEdgeCommand implements DocumentCommand {
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
     const page = getPage(next, this.pageId);
-    if (page && page.nodes.some((node) => node.id === this.edge.source.nodeId) && page.nodes.some((node) => node.id === this.edge.target.nodeId)) {
+    if (page && endpointExists(page.nodes, this.edge.source) && endpointExists(page.nodes, this.edge.target)) {
       page.edges.push(structuredClone(this.edge));
     }
     next.updatedAt = Date.now();
@@ -91,7 +91,7 @@ export class DeleteNodesCommand implements DocumentCommand {
       const ids = new Set(this.selectionIds);
       const removedNodeIds = new Set(page.nodes.filter((node) => ids.has(node.id) && !node.locked).map((node) => node.id));
       page.nodes = page.nodes.filter((node) => !removedNodeIds.has(node.id));
-      page.edges = page.edges.filter((edge) => !ids.has(edge.id) && !removedNodeIds.has(edge.source.nodeId) && !removedNodeIds.has(edge.target.nodeId));
+      page.edges = page.edges.filter((edge) => !ids.has(edge.id) && (edge.source.nodeId === undefined || !removedNodeIds.has(edge.source.nodeId)) && (edge.target.nodeId === undefined || !removedNodeIds.has(edge.target.nodeId)));
     }
     next.updatedAt = Date.now();
     return next;
@@ -402,7 +402,7 @@ export function selectionClipboard(document: DiagramDocument, pageId: string, se
   const ids = new Set(selectionIds);
   const nodes = page.nodes.filter((node) => ids.has(node.id));
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = page.edges.filter((edge) => ids.has(edge.id) || (nodeIds.has(edge.source.nodeId) && nodeIds.has(edge.target.nodeId)));
+  const edges = page.edges.filter((edge) => ids.has(edge.id) || (edge.source.nodeId !== undefined && edge.target.nodeId !== undefined && nodeIds.has(edge.source.nodeId) && nodeIds.has(edge.target.nodeId)));
   return { nodes: structuredClone(nodes), edges: structuredClone(edges) };
 }
 
@@ -440,8 +440,8 @@ export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 
   const edges = payload.edges.map((edge) => ({
     ...structuredClone(edge),
     id: createId('edge'),
-    source: { ...edge.source, nodeId: nodeIds.get(edge.source.nodeId) ?? edge.source.nodeId },
-    target: { ...edge.target, nodeId: nodeIds.get(edge.target.nodeId) ?? edge.target.nodeId },
+    source: offsetEndpoint(edge.source, nodeIds, offset),
+    target: offsetEndpoint(edge.target, nodeIds, offset),
     waypoints: edge.waypoints.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })),
   }));
   return { nodes, edges };
@@ -478,7 +478,11 @@ function isClipboardEdge(value: unknown): value is DiagramEdge {
 }
 
 function isEndpoint(value: unknown): value is DiagramEdge['source'] {
-  return isRecord(value) && typeof value.nodeId === 'string' && (value.port === undefined || typeof value.port === 'string');
+  return isRecord(value)
+    && (typeof value.nodeId === 'string' || isPoint(value.point))
+    && (value.port === undefined || typeof value.port === 'string')
+    && (value.offset === undefined || (typeof value.offset === 'number' && Number.isFinite(value.offset) && value.offset >= 0 && value.offset <= 1))
+    && (value.point === undefined || isPoint(value.point));
 }
 
 function isPoint(value: unknown): value is Point {
@@ -487,6 +491,15 @@ function isPoint(value: unknown): value is Point {
 
 function isSize(value: unknown): value is { width: number; height: number } {
   return isRecord(value) && typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 && typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0;
+}
+
+function endpointExists(nodes: DiagramNode[], endpoint: DiagramEdge['source']): boolean {
+  return endpoint.point !== undefined || (endpoint.nodeId !== undefined && nodes.some((node) => node.id === endpoint.nodeId));
+}
+
+function offsetEndpoint(endpoint: DiagramEdge['source'], nodeIds: Map<string, string>, offset: Point): DiagramEdge['source'] {
+  if (endpoint.nodeId) return { ...endpoint, nodeId: nodeIds.get(endpoint.nodeId) ?? endpoint.nodeId, point: undefined };
+  return endpoint.point ? { ...endpoint, offset: undefined, point: { x: endpoint.point.x + offset.x, y: endpoint.point.y + offset.y } } : { ...endpoint };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -537,8 +550,8 @@ export class ResetEdgeCommand implements DocumentCommand {
       page.edges = page.edges.map((edge) => edge.id !== this.edgeId ? edge : {
         ...edge,
         type: relationship || this.diagramType === 'dfd' ? 'orthogonal' : 'straight',
-        source: { ...edge.source, port: undefined },
-        target: { ...edge.target, port: undefined },
+        source: { ...edge.source, port: undefined, offset: undefined },
+        target: { ...edge.target, port: undefined, offset: undefined },
         waypoints: [],
         style: {
           ...edge.style,

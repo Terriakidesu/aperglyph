@@ -313,7 +313,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (selectedIds.length === 0) return;
       const page = getActivePage(document, activePageId);
       const selectedNodeIds = selectedIds.filter((id) => page?.nodes.some((node) => node.id === id));
-      const removedEdgeIds = page?.edges.filter((edge) => selectedIds.includes(edge.id) || selectedNodeIds.includes(edge.source.nodeId) || selectedNodeIds.includes(edge.target.nodeId)).map((edge) => edge.id) ?? [];
+      const removedEdgeIds = page?.edges.filter((edge) => selectedIds.includes(edge.id) || (edge.source.nodeId !== undefined && selectedNodeIds.includes(edge.source.nodeId)) || (edge.target.nodeId !== undefined && selectedNodeIds.includes(edge.target.nodeId))).map((edge) => edge.id) ?? [];
       const next = manager.execute(new DeleteNodesCommand(activePageId, selectedIds), document);
       updateDocument(next, 'Delete selection');
       set({ selectedIds: [], primarySelectedId: null });

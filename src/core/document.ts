@@ -9,6 +9,7 @@ import type {
   NodeStyle,
   Point,
   SerializedProject,
+  ShapeBoundary,
 } from './types';
 
 export const CURRENT_SCHEMA_VERSION = 1;
@@ -83,7 +84,7 @@ export function createDocument(
 export function createNode(
   type: string,
   position: Point,
-  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data'>> & { style?: Partial<NodeStyle> } = {},
+  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data'>> & { style?: Partial<NodeStyle>; boundary?: ShapeBoundary } = {},
 ): DiagramNode {
   return {
     id: createId('node'),
@@ -92,6 +93,7 @@ export function createNode(
     position: { ...position },
     size: options.size ?? { width: 180, height: 88 },
     rotation: 0,
+    ...(options.boundary ? { boundary: options.boundary } : {}),
     style: { ...defaultNodeStyle, ...options.style },
     data: options.data ?? { label: type },
     zIndex: 0,
@@ -137,8 +139,8 @@ export function clonePageWithNewIds(source: DiagramPage, name = `${source.name} 
   const edges = source.edges.map((edge) => ({
     ...structuredClone(edge),
     id: createId('edge'),
-    source: { ...edge.source, nodeId: nodeIds.get(edge.source.nodeId) ?? edge.source.nodeId },
-    target: { ...edge.target, nodeId: nodeIds.get(edge.target.nodeId) ?? edge.target.nodeId },
+    source: remapEndpoint(edge.source, nodeIds),
+    target: remapEndpoint(edge.target, nodeIds),
   }));
   return {
     ...structuredClone(source),
@@ -235,6 +237,7 @@ function validateNode(value: unknown, path: string, ids: Set<string>, errors: st
   if (!isRecord(value.size)) errors.push(`${path}.size must be an object`);
   else { finiteInRange(value.size.width, `${path}.size.width`, 1, 100000, errors); finiteInRange(value.size.height, `${path}.size.height`, 1, 100000, errors); }
   finiteInRange(value.rotation, `${path}.rotation`, -360000, 360000, errors);
+  if (value.boundary !== undefined && value.boundary !== 'rectangle' && value.boundary !== 'ellipse' && value.boundary !== 'diamond') errors.push(`${path}.boundary is invalid`);
   if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
   if (value.groupId !== undefined) isBoundedString(value.groupId, `${path}.groupId`, 1, 256, errors);
   if (value.zIndex !== undefined) finiteInRange(value.zIndex, `${path}.zIndex`, -100000000, 100000000, errors);
@@ -275,8 +278,13 @@ function validateEdge(value: unknown, path: string, ids: Set<string>, nodeIds: S
 }
 
 function validateEndpoint(value: unknown, path: string, nodeIds: Set<string>, errors: string[]): void {
-  if (!isRecord(value) || !isBoundedString(value.nodeId, `${path}.nodeId`, 1, 256, errors)) return;
-  if (!nodeIds.has(value.nodeId as string)) errors.push(`${path}.nodeId references a missing node`);
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  const hasNode = value.nodeId !== undefined;
+  const hasPoint = value.point !== undefined;
+  if (!hasNode && !hasPoint) errors.push(`${path} must reference a node or contain a free point`);
+  if (hasNode && isBoundedString(value.nodeId, `${path}.nodeId`, 1, 256, errors) && !nodeIds.has(value.nodeId)) errors.push(`${path}.nodeId references a missing node`);
+  if (hasPoint) validatePoint(value.point, `${path}.point`, errors);
+  if (value.offset !== undefined) finiteInRange(value.offset, `${path}.offset`, 0, 1, errors);
   if (value.port !== undefined) isBoundedString(value.port, `${path}.port`, 1, 32, errors);
 }
 
@@ -340,6 +348,7 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
 
 function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramEdge {
   if (edge.type !== 'orthogonal') return edge;
+  if (!edge.source.nodeId || !edge.target.nodeId) return edge;
   const source = nodes.find((node) => node.id === edge.source.nodeId);
   const target = nodes.find((node) => node.id === edge.target.nodeId);
   if (!source || !target) return edge;
@@ -351,7 +360,11 @@ function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramE
 }
 
 function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: DiagramType): DiagramEdge {
-  const anchored = anchorOrthogonalEdge(edge, nodes);
+  const anchored = anchorOrthogonalEdge({
+    ...edge,
+    source: normalizeAttachedEndpoint(edge.source, nodes),
+    target: normalizeAttachedEndpoint(edge.target, nodes),
+  }, nodes);
   if (diagramType !== 'erd' || anchored.style.startMarker !== 'none' || anchored.style.endMarker !== 'arrow') return anchored;
   return {
     ...anchored,
@@ -359,6 +372,16 @@ function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: Diagr
   };
 }
 
+function normalizeAttachedEndpoint(endpoint: DiagramEdge['source'], nodes: DiagramNode[]): DiagramEdge['source'] {
+  if (!endpoint.nodeId || !nodes.some((node) => node.id === endpoint.nodeId)) return endpoint;
+  return { ...endpoint, point: undefined };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function remapEndpoint(endpoint: DiagramEdge['source'], nodeIds: Map<string, string>): DiagramEdge['source'] {
+  if (!endpoint.nodeId) return { ...endpoint, point: endpoint.point ? { ...endpoint.point } : undefined };
+  return { ...endpoint, nodeId: nodeIds.get(endpoint.nodeId) ?? endpoint.nodeId, point: undefined };
 }

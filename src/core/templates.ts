@@ -1,4 +1,5 @@
 import { createDocument, createEdge, createNode } from './document';
+import { entityFieldPortOffset } from './erd';
 import type { DiagramDocument, DiagramType } from './types';
 
 export function createTemplateDocument(
@@ -69,9 +70,9 @@ export function createTemplateDocument(
     page.nodes.push(users, coach, userHabits, habits, checkins, comments);
     page.edges.push(
       createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'crowfoot', endMarker: 'bar' }, data: { label: 'N : 1' } }),
-      createEdge({ nodeId: users.id, port: 'right' }, { nodeId: userHabits.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-      createEdge({ nodeId: habits.id, port: 'left' }, { nodeId: userHabits.id, port: 'right' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-      createEdge({ nodeId: habits.id, port: 'right' }, { nodeId: checkins.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+       createEdge({ nodeId: users.id, port: 'right', offset: entityFieldPortOffset(users.data.fields, 0) }, { nodeId: userHabits.id, port: 'left', offset: entityFieldPortOffset(userHabits.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+       createEdge({ nodeId: habits.id, port: 'left', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: userHabits.id, port: 'right', offset: entityFieldPortOffset(userHabits.data.fields, 2) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+       createEdge({ nodeId: habits.id, port: 'right', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: checkins.id, port: 'left', offset: entityFieldPortOffset(checkins.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
       createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
     );
   } else if (type === 'dfd') {

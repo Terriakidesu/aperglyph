@@ -2,10 +2,11 @@ import {
   ArrowRight, Boxes, Database, FilePlus2, LayoutTemplate, MoreHorizontal,
   Network, Plus, RotateCcw, Search, ShieldCheck, Sparkles, Trash2, Upload, Workflow,
 } from 'lucide-react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createTemplateDocument } from '../core/templates';
 import type { DiagramDocument, DiagramType } from '../core/types';
-import { clearRecoverySnapshot, getRecoverySnapshot, getStorageEstimate, listDocuments, readProjectFile } from '../persistence';
+import { clearRecoverySnapshot, deleteDocument, getRecoverySnapshot, getStorageEstimate, listDocuments, readProjectFile } from '../persistence';
 import type { RecoverySnapshot, StorageEstimate, StoredDocument } from '../persistence';
 import { LogoMark } from './LogoMark';
 
@@ -43,6 +44,7 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
   const [recovery, setRecovery] = useState<RecoverySnapshot | null>(null);
   const [storage, setStorage] = useState<StorageEstimate | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -87,6 +89,24 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
   const discardRecovery = async () => {
     await clearRecoverySnapshot();
     setRecovery(null);
+  };
+
+  const removeDocument = async (event: ReactMouseEvent<HTMLButtonElement>, id: string, name: string) => {
+    event.stopPropagation();
+    if (deletingId || !window.confirm(`Delete “${name}”? This cannot be undone.`)) return;
+    try {
+      setDeletingId(id);
+      await deleteDocument(id);
+      setSavedDocuments((documents) => documents.filter((document) => document.id !== id));
+      if (recovery?.document.id === id) {
+        await clearRecoverySnapshot();
+        setRecovery(null);
+      }
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Unable to delete this project.');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -144,13 +164,17 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
         <section className="section-block recent-section">
            <div className="section-heading"><div><h2>Recent diagrams</h2><p>Continue where you left off.</p></div><div className="recent-tools"><div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search diagrams" /></div><button className="icon-button subtle" title="Clear search" onClick={() => setQuery('')}><MoreHorizontal size={17} /></button></div></div>
           <div className="recent-grid">
-            {visibleItems.map((item, index) => {
-              const Icon = item.icon;
-              return <button key={item.document?.id ?? `${item.name}-${index}`} className="recent-card" onClick={() => ('document' in item && item.document) ? onOpen(item.document) : openTemplate(item.type === 'ERD' ? 'erd' : item.type === 'Use case' ? 'use-case' : 'flowchart', item.name)}>
-                <div className={`recent-preview ${item.color}`}><div className="mini-grid" /><div className="mini-line line-a" /><div className="mini-line line-b" /><div className="mini-node node-a" /><div className="mini-node node-b" /><div className="mini-node node-c" /></div>
-                 <div className="recent-card-footer"><div className={`recent-type ${item.color}`}><Icon size={13} /></div><div className="recent-copy"><strong>{item.name}</strong><span>{item.type} · {item.time}</span></div></div>
-              </button>;
-            })}
+             {visibleItems.map((item, index) => {
+               const Icon = item.icon;
+               const document = item.document;
+               return <article key={document?.id ?? `${item.name}-${index}`} className="recent-card">
+                 <button className="recent-card-open" onClick={() => document ? onOpen(document) : openTemplate(item.type === 'ERD' ? 'erd' : item.type === 'Use case' ? 'use-case' : 'flowchart', item.name)}>
+                   <div className={`recent-preview ${item.color}`}><div className="mini-grid" /><div className="mini-line line-a" /><div className="mini-line line-b" /><div className="mini-node node-a" /><div className="mini-node node-b" /><div className="mini-node node-c" /></div>
+                   <div className="recent-card-footer"><div className={`recent-type ${item.color}`}><Icon size={13} /></div><div className="recent-copy"><strong>{item.name}</strong><span>{item.type} · {item.time}</span></div></div>
+                 </button>
+                 {document && <button className="recent-delete" title={`Delete ${item.name}`} aria-label={`Delete ${item.name}`} disabled={deletingId === document.id} onClick={(event) => void removeDocument(event, document.id, document.name)}><Trash2 size={14} /></button>}
+               </article>;
+             })}
             {visibleItems.length === 0 && <div className="empty-recent"><Search size={17} /><span>No diagrams match “{query}”.</span></div>}
           </div>
         </section>

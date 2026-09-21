@@ -55,6 +55,19 @@ describe('command history', () => {
     expect(withoutEdge.pages[0].edges).toHaveLength(0);
   });
 
+  it('creates and offsets free endpoints', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    document.pages[0].nodes.push(target);
+    const edge = createEdge({ point: { x: 20, y: 30 } }, { nodeId: target.id });
+    const manager = new CommandManager();
+    const next = manager.execute(new CreateEdgeCommand(pageId, edge), document);
+    const payload = selectionClipboard(next, pageId, [edge.id]);
+    const offset = offsetClipboard(payload, { x: 24, y: 18 });
+    expect(offset.edges[0].source.point).toEqual({ x: 44, y: 48 });
+  });
+
   it('supports page lifecycle commands', () => {
     const document = createDocument();
     const page = createPage('Review');

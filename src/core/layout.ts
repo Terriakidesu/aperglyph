@@ -10,6 +10,7 @@ export function layoutNodes(nodes: DiagramNode[], edges: DiagramEdge[], mode: La
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   edges.forEach((edge) => {
+    if (!edge.source.nodeId || !edge.target.nodeId) return;
     if (!nodeIds.has(edge.source.nodeId) || !nodeIds.has(edge.target.nodeId) || edge.source.nodeId === edge.target.nodeId) return;
     outgoing.get(edge.source.nodeId)?.push(edge.target.nodeId);
     indegree.set(edge.target.nodeId, (indegree.get(edge.target.nodeId) ?? 0) + 1);

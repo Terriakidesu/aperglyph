@@ -27,8 +27,8 @@ export function validateDfd(document: DiagramDocument): DfdDiagnostic[] {
     });
 
     page.edges.forEach((edge) => {
-      const source = nodeMap.get(edge.source.nodeId);
-      const target = nodeMap.get(edge.target.nodeId);
+      const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+      const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
       if (!source || !target) {
         diagnostics.push({ severity: 'error', message: 'Data flow references a missing element.', edgeId: edge.id });
         return;

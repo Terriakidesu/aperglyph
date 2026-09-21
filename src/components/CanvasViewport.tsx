@@ -1,25 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { createEdge, createNode as buildNode } from '../core/document';
-import { ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, normalizeEntityFields } from '../core/erd';
+import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
+import type { ShapeDropPayload } from '../core/shapeTransfer';
+import { connectionAnchorPoints as resolveConnectionAnchorPoints } from '../core/anchors';
+import type { ResolvedConnectionAnchor } from '../core/anchors';
+import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, entityColumns, entityFieldValue, normalizeEntityFields } from '../core/erd';
 import { editorEvents } from '../core/events';
-import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, jumpMaskPaths, pointsToPath } from '../core/routing';
+import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, Point, Size, Viewport } from '../core/types';
-import { nearestConnectionPort, nodeCenter, nodeConnectionPoint } from '../core/geometry';
+import { connectionOffset, nearestConnectionPort, nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import type { ConnectionPort } from '../core/geometry';
+import { pluginManager } from '../plugins';
 import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
 import type { AlignmentGuide, SpatialNode } from '../spatial';
 
 interface CanvasSize { width: number; height: number }
 interface Marquee { start: Point; current: Point }
-interface ConnectorAnchor { nodeId: string; port?: ConnectionPort }
+interface ConnectorAnchor { nodeId: string; port?: ConnectionPort; offset?: number }
 type ResizeHandle = 'nw' | 'ne' | 'se' | 'sw';
 interface ContextMenuState { x: number; y: number; target: { kind: 'canvas' | 'node' | 'edge'; id?: string } }
 interface TextEditState { kind: 'node' | 'edge'; id: string; value: string }
 
 interface DragSession {
-  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'resize' | 'endpoint';
+  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'resize' | 'endpoint' | 'connector';
   pointerId: number;
   startWorld: Point;
   startClient: Point;
@@ -31,10 +37,88 @@ interface DragSession {
   resizeHandle?: ResizeHandle;
   initialNode?: { position: Point; size: Size };
   endpoint?: 'source' | 'target';
+  connectorSource?: ConnectorAnchor;
+}
+
+interface EndpointPreview {
+  edgeId: string;
+  endpoint: 'source' | 'target';
+  anchor: Endpoint;
+  point: Point;
+}
+
+interface ConnectorDragPreview {
+  source: ConnectorAnchor;
+  start: Point;
+  current: Point;
+}
+
+interface ShapeDragPreview {
+  payload: ShapeDropPayload;
+  point: Point;
 }
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
+const ENDPOINT_SNAP_DISTANCE = 24;
+
+function asConnectionPort(value: string | null): ConnectionPort | undefined {
+  if (value === 'top' || value === 'right' || value === 'bottom' || value === 'left' || value === 'center' || value === 'north' || value === 'east' || value === 'south' || value === 'west') return value;
+  return undefined;
+}
+
+function distanceBetween(left: Point, right: Point): number {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function rotatePoint(point: Point, center: Point, degrees: number): Point {
+  const radians = degrees * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const x = point.x - center.x;
+  const y = point.y - center.y;
+  return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
+}
+
+function shapeConnectionAnchorPoints(node: DiagramNode): ResolvedConnectionAnchor[] {
+  return resolveConnectionAnchorPoints(node, pluginManager.getShape(node.library, node.type)?.anchors);
+}
+
+function nearestConnectionAnchor(nodes: DiagramNode[], point: Point, excludedNodeId?: string, maxDistance = ENDPOINT_SNAP_DISTANCE): ResolvedConnectionAnchor | null {
+  let nearest: ResolvedConnectionAnchor | null = null;
+  let nearestDistance = maxDistance;
+  nodes.forEach((node) => {
+    if (node.id === excludedNodeId) return;
+    shapeConnectionAnchorPoints(node).forEach((candidate) => {
+      const distance = distanceBetween(candidate.point, point);
+      if (distance <= nearestDistance) {
+        nearestDistance = distance;
+        nearest = candidate;
+      }
+    });
+  });
+  return nearest;
+}
+
+function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Point, nodes: DiagramNode[], sourceNodeId: string): ConnectorAnchor | null {
+  const nearest = nearestConnectionAnchor(nodes, point, sourceNodeId);
+  if (nearest) return nearest.anchor;
+  const element = globalThis.document.elementFromPoint(event.clientX, event.clientY);
+  const portElement = element?.closest?.('[data-connection-port]');
+  const nodeElement = element?.closest?.('[data-node-id]');
+  const nodeId = nodeElement?.getAttribute('data-node-id');
+  if (!nodeId || nodeId === sourceNodeId) return null;
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return null;
+  const explicitPort = asConnectionPort(portElement?.getAttribute('data-connection-port') ?? null);
+  const port = explicitPort ?? nearestConnectionPort(node, point);
+  const rawOffset = portElement?.getAttribute('data-connection-offset');
+  const explicitOffset = rawOffset ? Number(rawOffset) : undefined;
+  const offset = explicitOffset !== undefined && Number.isFinite(explicitOffset)
+    ? explicitOffset
+    : explicitPort ? undefined : connectionOffset(node, point, port);
+  return { nodeId, port, ...(offset === undefined ? {} : { offset }) };
+}
 
 export function CanvasViewport() {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -53,7 +137,10 @@ export function CanvasViewport() {
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
   const [waypointPreview, setWaypointPreview] = useState<{ edgeId: string; index: number; point: Point } | null>(null);
-  const [endpointPreview, setEndpointPreview] = useState<{ edgeId: string; endpoint: 'source' | 'target'; anchor: Endpoint; point: Point } | null>(null);
+  const [endpointPreview, setEndpointPreview] = useState<EndpointPreview | null>(null);
+  const endpointPreviewRef = useRef<EndpointPreview | null>(null);
+  const [connectorDragPreview, setConnectorDragPreview] = useState<ConnectorDragPreview | null>(null);
+  const [shapeDragPreview, setShapeDragPreview] = useState<ShapeDragPreview | null>(null);
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
@@ -64,6 +151,10 @@ export function CanvasViewport() {
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
   const spatialReadyRef = useRef(false);
   const spatialQueryRef = useRef(0);
+
+  // Shape definitions are an external, HMR-aware catalog. Subscribing here
+  // makes updated anchor resolvers visible without restarting the editor.
+  useSyncExternalStore(pluginManager.subscribe, pluginManager.getSnapshot, pluginManager.getSnapshot);
 
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -115,7 +206,7 @@ export function CanvasViewport() {
       textInputRef.current?.focus();
       textInputRef.current?.select();
     }
-  }, [textEdit]);
+  }, [textEdit?.kind, textEdit?.id]);
 
   useEffect(() => {
     if (activeTool !== 'connector') setConnectorStart(null);
@@ -207,6 +298,7 @@ export function CanvasViewport() {
       const copy = buildNode(node.type, { x: node.position.x + 24, y: node.position.y + 24 }, {
         library: node.library,
         size: { ...node.size },
+        boundary: node.boundary,
         style: { ...node.style },
         data: structuredClone(node.data),
       });
@@ -284,6 +376,58 @@ export function CanvasViewport() {
     void queryVisibleNodes();
   }, [queryVisibleNodes]);
 
+  const createConnection = (sourceAnchor: ConnectorAnchor, targetAnchor: ConnectorAnchor): boolean => {
+    if (!page || sourceAnchor.nodeId === targetAnchor.nodeId) return false;
+    const sourceNode = page.nodes.find((candidate) => candidate.id === sourceAnchor.nodeId);
+    const targetNode = page.nodes.find((candidate) => candidate.id === targetAnchor.nodeId);
+    if (!sourceNode || !targetNode) return false;
+    const sourcePort = sourceAnchor.port ?? nearestConnectionPort(sourceNode, nodeCenter(targetNode));
+    const targetPort = targetAnchor.port ?? nearestConnectionPort(targetNode, nodeCenter(sourceNode));
+    const source = { nodeId: sourceNode.id, port: sourcePort, ...(sourceAnchor.offset === undefined ? {} : { offset: sourceAnchor.offset }) };
+    const target = { nodeId: targetNode.id, port: targetPort, ...(targetAnchor.offset === undefined ? {} : { offset: targetAnchor.offset }) };
+    const edgeOptions = document.diagramType === 'erd'
+      ? { type: 'orthogonal' as const, style: { startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
+      : document.diagramType === 'dfd'
+        ? { type: 'orthogonal' as const }
+        : undefined;
+    createConnector(createEdge(source, target, edgeOptions));
+    return true;
+  };
+
+  const dropPosition = (point: Point, shapeSize: Size): Point => {
+    const raw = { x: point.x - shapeSize.width / 2, y: point.y - shapeSize.height / 2 };
+    if (!page?.settings.snapToGrid) return raw;
+    const gridSize = page.settings.gridSize;
+    return { x: Math.round(raw.x / gridSize) * gridSize, y: Math.round(raw.y / gridSize) * gridSize };
+  };
+
+  const handleShapeDragOver = (event: ReactDragEvent<SVGSVGElement>) => {
+    const payload = parseShapeDrop(event.dataTransfer);
+    if (!payload && !Array.from(event.dataTransfer.types).includes(SHAPE_DRAG_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setShapeDragPreview({ payload: payload ?? { libraryId: 'general', type: 'rectangle', label: 'Drop shape', defaultSize: { width: 180, height: 88 } }, point: worldPoint(event) });
+  };
+
+  const handleShapeDrop = (event: ReactDragEvent<SVGSVGElement>) => {
+    const payload = parseShapeDrop(event.dataTransfer);
+    if (!payload) return;
+    event.preventDefault();
+    const point = worldPoint(event);
+    const shapeSize = payload.defaultSize ?? { width: 180, height: 88 };
+    const position = dropPosition(point, shapeSize);
+    const node = buildNode(payload.type, position, {
+      library: payload.libraryId,
+      size: payload.defaultSize,
+      boundary: payload.boundary,
+      style: payload.defaultStyle,
+      data: payload.defaultData ?? { label: payload.label },
+    });
+    addNode(node);
+    setShapeDragPreview(null);
+    setTool('select');
+  };
+
   const beginResizeInteraction = (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => {
     if (activeTool !== 'select' || spacePressed || event.button === 1 || node.locked) return;
     event.preventDefault();
@@ -302,7 +446,7 @@ export function CanvasViewport() {
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
-  const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => {
+  const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => {
     event.preventDefault();
     event.stopPropagation();
     setContextMenu(null);
@@ -317,20 +461,40 @@ export function CanvasViewport() {
       setSelection([node.id], node.id);
       return;
     }
+
+    if (port !== undefined && (activeTool === 'select' || activeTool === 'connector')) {
+      const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
+      if (activeTool === 'connector' && connectorStart) {
+        if (connectorStart.nodeId !== node.id) {
+          createConnection(connectorStart, anchor);
+          setConnectorStart(null);
+          setConnectorDragPreview(null);
+          dragRef.current = null;
+        }
+        return;
+      }
+      if (activeTool === 'select') setSelection([node.id], node.id);
+      setConnectorStart(anchor);
+      const point = worldPoint(event);
+      const startPoint = nodeConnectionPoint(node, point, port, offset);
+      dragRef.current = {
+        mode: 'connector',
+        pointerId: event.pointerId,
+        startWorld: point,
+        startClient: screenPoint(event),
+        connectorSource: anchor,
+      };
+      setConnectorDragPreview({ source: anchor, start: startPoint, current: startPoint });
+      svgRef.current?.setPointerCapture(event.pointerId);
+      return;
+    }
+
     if (activeTool === 'connector') {
-      const anchor = { nodeId: node.id, port } satisfies ConnectorAnchor;
+      const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
       if (!connectorStart) {
         setConnectorStart(anchor);
       } else if (connectorStart.nodeId !== node.id) {
-        const sourceNode = page?.nodes.find((candidate) => candidate.id === connectorStart.nodeId);
-        const source = sourceNode ? { nodeId: connectorStart.nodeId, port: connectorStart.port ?? nearestConnectionPort(sourceNode, nodeCenter(node)) } : connectorStart;
-        const target = { nodeId: node.id, port: port ?? (sourceNode ? nearestConnectionPort(node, nodeCenter(sourceNode)) : undefined) };
-        const edgeOptions = document.diagramType === 'erd'
-          ? { type: 'orthogonal' as const, style: { startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
-          : document.diagramType === 'dfd'
-            ? { type: 'orthogonal' as const }
-            : undefined;
-        createConnector(createEdge(source, target, edgeOptions));
+        createConnection(connectorStart, anchor);
         setConnectorStart(null);
       }
       return;
@@ -442,7 +606,9 @@ export function CanvasViewport() {
       edgeId: edge.id,
       endpoint,
     };
-    setEndpointPreview({ edgeId: edge.id, endpoint, anchor: { ...edge[endpoint] }, point: { ...point } });
+    const preview: EndpointPreview = { edgeId: edge.id, endpoint, anchor: { ...edge[endpoint] }, point: { ...point } };
+    endpointPreviewRef.current = preview;
+    setEndpointPreview(preview);
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
@@ -451,16 +617,29 @@ export function CanvasViewport() {
     const edge = page.edges.find((candidate) => candidate.id === session.edgeId);
     if (!edge) return;
     const oppositeNodeId = session.endpoint === 'source' ? edge.target.nodeId : edge.source.nodeId;
-    const currentAnchor = edge[session.endpoint];
+    const nearest = nearestConnectionAnchor(page.nodes, point, oppositeNodeId);
+    if (nearest) {
+      const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor: nearest.anchor, point: nearest.point };
+      endpointPreviewRef.current = preview;
+      setEndpointPreview(preview);
+      return;
+    }
     const candidate = page.nodes
-      .filter((node) => node.id !== oppositeNodeId)
-      .filter((node) => point.x >= node.position.x && point.x <= node.position.x + node.size.width && point.y >= node.position.y && point.y <= node.position.y + node.size.height)
+      .filter((node) => !oppositeNodeId || node.id !== oppositeNodeId)
+      .filter((node) => point.x >= node.position.x - ENDPOINT_SNAP_DISTANCE && point.x <= node.position.x + node.size.width + ENDPOINT_SNAP_DISTANCE && point.y >= node.position.y - ENDPOINT_SNAP_DISTANCE && point.y <= node.position.y + node.size.height + ENDPOINT_SNAP_DISTANCE)
       .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0]
-      ?? page.nodes.find((node) => node.id === currentAnchor.nodeId);
-    if (!candidate) return;
-    const port = nearestConnectionPort(candidate, point);
-    const anchor = { nodeId: candidate.id, port };
-    setEndpointPreview({ edgeId: edge.id, endpoint: session.endpoint, anchor, point: nodeConnectionPoint(candidate, point, port) });
+    if (candidate) {
+      const port = nearestConnectionPort(candidate, point);
+      const offset = connectionOffset(candidate, point, port);
+      const anchor = { nodeId: candidate.id, port, ...(offset === undefined ? {} : { offset }) };
+      const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor, point: nodeConnectionPoint(candidate, point, port, offset) };
+      endpointPreviewRef.current = preview;
+      setEndpointPreview(preview);
+      return;
+    }
+    const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor: { nodeId: undefined, port: undefined, point: { ...point } }, point: { ...point } };
+    endpointPreviewRef.current = preview;
+    setEndpointPreview(preview);
   };
 
   const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -507,7 +686,10 @@ export function CanvasViewport() {
       return;
     }
     const point = worldPoint(event);
-    if (session.mode === 'endpoint') {
+    if (session.mode === 'connector' && connectorDragPreview) {
+      const snapped = page ? nearestConnectionAnchor(page.nodes, point, session.connectorSource?.nodeId) : null;
+      setConnectorDragPreview({ ...connectorDragPreview, current: snapped?.point ?? point });
+    } else if (session.mode === 'endpoint') {
       updateEndpointPreview(session, point);
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
       const { position, size: initialSize } = session.initialNode;
@@ -561,6 +743,17 @@ export function CanvasViewport() {
       }
       pendingPanRef.current = null;
       isPanningRef.current = false;
+    } else if (session.mode === 'connector' && session.connectorSource) {
+      const moved = distanceBetween(screenPoint(event), session.startClient) > 5;
+      if (moved) {
+        const point = worldPoint(event);
+        const target = page ? connectionDropAnchor(event, point, page.nodes, session.connectorSource.nodeId) : null;
+        if (target) createConnection(session.connectorSource, target);
+        setConnectorStart(null);
+      } else if (activeTool !== 'connector') {
+        setConnectorStart(null);
+      }
+      setConnectorDragPreview(null);
     } else if (session.mode === 'resize') {
       const nodeId = session.nodeId;
       const preview = resizePreview;
@@ -568,14 +761,16 @@ export function CanvasViewport() {
         updateNode(nodeId, { position: preview.position, size: preview.size }, 'Resize node');
         setResizePreview(null);
       }
-    } else if (session.mode === 'endpoint' && session.edgeId && session.endpoint && endpointPreview?.edgeId === session.edgeId && endpointPreview.endpoint === session.endpoint) {
+    } else if (session.mode === 'endpoint' && session.edgeId && session.endpoint && endpointPreviewRef.current?.edgeId === session.edgeId && endpointPreviewRef.current.endpoint === session.endpoint) {
       const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
-      if (edge && !sameEndpoint(edge[session.endpoint], endpointPreview.anchor)) {
+      const preview = endpointPreviewRef.current;
+      if (edge && preview && !sameEndpoint(edge[session.endpoint], preview.anchor)) {
         const changes = session.endpoint === 'source'
-          ? { source: endpointPreview.anchor }
-          : { target: endpointPreview.anchor };
-        updateEdge(edge.id, { ...changes, ...(edge[session.endpoint].nodeId !== endpointPreview.anchor.nodeId ? { waypoints: [] } : {}) }, `Move ${session.endpoint} endpoint`);
+          ? { source: preview.anchor }
+          : { target: preview.anchor };
+        updateEdge(edge.id, { ...changes, ...(edge[session.endpoint].nodeId !== preview.anchor.nodeId ? { waypoints: [] } : {}) }, `Move ${session.endpoint} endpoint`);
       }
+      endpointPreviewRef.current = null;
       setEndpointPreview(null);
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined && waypointPreview?.edgeId === session.edgeId && waypointPreview.index === session.waypointIndex) {
       const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
@@ -631,33 +826,60 @@ export function CanvasViewport() {
     const moved = dragPreview[node.id] ? { ...node, position: dragPreview[node.id] } : node;
     return [node.id, resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved] as const;
   })), [dragPreview, page?.nodes, resizePreview]);
-  const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
+  const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
+  const routeEntries = useMemo(() => renderedEdges.map((edge) => {
+    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+    return { id: edge.id, points: edgeRoute(edge, source, target, [...nodeMap.values()]) };
+  }), [nodeMap, renderedEdges]);
+  const edgeRoutes = useMemo(() => new Map(routeEntries.map((entry) => [entry.id, entry.points])), [routeEntries]);
+  const edgeJumps = useMemo(() => calculateRouteJumps(routeEntries.filter((entry) => renderedEdges.some((edge) => edge.id === entry.id && edge.type === 'orthogonal'))), [renderedEdges, routeEntries]);
   const editBox = useMemo(() => {
     if (!textEdit || !page) return null;
     if (textEdit.kind === 'node') {
       const node = nodeMap.get(textEdit.id);
       if (!node) return null;
       const width = Math.max(110, Math.min(360, node.size.width * viewport.zoom));
+      const isEntity = node.type === 'entity';
+      const isBoundary = node.type === 'boundary';
+      const localAnchor = {
+        x: node.position.x + (isBoundary ? 18 : node.size.width / 2),
+        y: node.position.y + (isEntity ? ERD_HEADER_HEIGHT - 11 : isBoundary ? 27 : node.type === 'actor' ? node.size.height - 10 : node.size.height / 2 + 5),
+      };
+      const anchor = rotatePoint(localAnchor, nodeCenter(node), node.rotation);
+      const anchorScreen = {
+        x: size.width / 2 + (anchor.x + viewport.x) * viewport.zoom,
+        y: size.height / 2 + (anchor.y + viewport.y) * viewport.zoom,
+      };
       return {
-        left: size.width / 2 + (node.position.x + viewport.x) * viewport.zoom + (node.size.width * viewport.zoom - width) / 2,
-        top: size.height / 2 + (node.position.y + viewport.y) * viewport.zoom + (node.size.height * viewport.zoom - 30) / 2,
+        left: anchorScreen.x - (isBoundary ? 0 : width / 2),
+        top: anchorScreen.y - 20,
         width,
+        textAlign: isBoundary ? 'left' as const : 'center' as const,
       };
     }
     const edge = page.edges.find((candidate) => candidate.id === textEdit.id);
-    const source = edge ? nodeMap.get(edge.source.nodeId) : undefined;
-    const target = edge ? nodeMap.get(edge.target.nodeId) : undefined;
-    if (!edge || !source || !target) return null;
+    const source = edge?.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+    const target = edge?.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+    if (!edge) return null;
     const route = edgeRoute(edge, source, target, [...nodeMap.values()]);
+    if (route.length < 2) return null;
     const start = route[0];
     const end = route.at(-1) ?? start;
     const point = route.length === 2 ? { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 } : route[Math.floor(route.length / 2)] ?? start;
-    return { left: size.width / 2 + (point.x + viewport.x) * viewport.zoom - 80, top: size.height / 2 + (point.y + viewport.y) * viewport.zoom - 15, width: 160 };
+     return { left: size.width / 2 + (point.x + viewport.x) * viewport.zoom - 80, top: size.height / 2 + (point.y + viewport.y) * viewport.zoom - 15, width: 160, textAlign: 'center' as const };
   }, [nodeMap, page, size.height, size.width, textEdit, viewport]);
+  const shapePreview = shapeDragPreview
+    ? (() => {
+      const shapeSize = shapeDragPreview.payload.defaultSize ?? { width: 180, height: 88 };
+      const position = dropPosition(shapeDragPreview.point, shapeSize);
+      return { ...shapeSize, position, label: shapeDragPreview.payload.label };
+    })()
+    : null;
 
   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
     <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>
-    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu}>
+    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
         <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="#2c3346" strokeWidth="0.7" opacity="0.62" /></pattern>
         <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
@@ -667,18 +889,25 @@ export function CanvasViewport() {
       <rect className="canvas-background" width={size.width} height={size.height} fill="#0f121a" />
       <g transform={transform}>
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
+        {shapePreview && <g className="shape-drop-preview" transform={`translate(${shapePreview.position.x} ${shapePreview.position.y})`} pointerEvents="none"><rect width={shapePreview.width} height={shapePreview.height} rx="8" /><text x={shapePreview.width / 2} y={shapePreview.height / 2 + 4} textAnchor="middle">{shapePreview.label}</text></g>}
+        {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
         <g className="edge-layer">{renderedEdges.map((edge) => {
           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
             ? (() => { const next = previewEdge.waypoints.slice(); if (waypointPreview.index < next.length) next[waypointPreview.index] = waypointPreview.point; else next.splice(Math.min(waypointPreview.index, next.length), 0, waypointPreview.point); return next; })()
             : previewEdge.waypoints;
           const preview = waypointPreview?.edgeId === edge.id ? { ...previewEdge, waypoints: previewWaypoints } : previewEdge;
-          return <EdgeView key={edge.id} edge={preview} source={nodeMap.get(preview.source.nodeId)} target={nodeMap.get(preview.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onDoubleClick={(event, selectedEdge) => beginTextEdit('edge', selectedEdge.id)} onWaypointPointerDown={beginWaypointInteraction} markerFill={page?.settings.background ?? '#10131c'} />;
+          const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
+          return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={page?.settings.background ?? '#10131c'} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onDoubleClick={(event, selectedEdge) => beginTextEdit('edge', selectedEdge.id)} onWaypointPointerDown={beginWaypointInteraction} />;
         })}</g>
          <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} showPorts={activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+         <g className="edge-marker-layer">{renderedEdges.map((edge) => {
+           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
+           return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} markerFill={page?.settings.background ?? '#10131c'} />;
+         })}</g>
          <g className="edge-endpoint-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
-           return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={nodeMap.get(previewEdge.source.nodeId)} target={nodeMap.get(previewEdge.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEndpointInteraction} />;
+           return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEndpointInteraction} />;
          })}</g>
         <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
           ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
@@ -686,7 +915,7 @@ export function CanvasViewport() {
         {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
       </g>
     </svg>
-    {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
+     {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
     {contextMenu && <div className="canvas-context-menu" style={{ left: Math.min(contextMenu.x, Math.max(8, size.width - 178)), top: Math.min(contextMenu.y, Math.max(8, size.height - 170)) }} onPointerDown={(event) => event.stopPropagation()}>
       {contextMenu.target.kind !== 'canvas' && <button onClick={() => { if (contextMenu.target.kind !== 'canvas' && contextMenu.target.id) beginTextEdit(contextMenu.target.kind, contextMenu.target.id); }}>{contextMenu.target.kind === 'node' ? 'Edit text' : 'Edit label'}</button>}
       {contextMenu.target.kind !== 'canvas' && <button onClick={duplicateContextTarget}>Duplicate</button>}
@@ -697,16 +926,19 @@ export function CanvasViewport() {
   </div>;
 }
 
-function EdgeView({ edge, source, target, obstacles, selected, onPointerDown, onDoubleClick, onWaypointPointerDown, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, edge: DiagramEdge) => void; onWaypointPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => void; markerFill: string }) {
-  if (!source || !target) return null;
-  const route = edgeRoute(edge, source, target, obstacles);
+function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps, background, selected, onPointerDown, onDoubleClick, onWaypointPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; jumps: RouteJump[]; background: string; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, edge: DiagramEdge) => void; onWaypointPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => void }) {
+  const route = providedRoute ?? edgeRoute(edge, source, target, obstacles);
+  if (route.length < 2) return null;
   const start = route[0];
   const end = route[route.length - 1];
-  const path = edge.type === 'curved' ? curvedPath(route) : pointsToPath(route);
   const label = typeof edge.data?.label === 'string' ? edge.data.label : null;
   const labelPoint = route.length === 2 ? { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 } : route[Math.floor(route.length / 2)] ?? start;
-  const startDirection = outwardDirection(start, nodeCenter(source));
-  const endDirection = outwardDirection(end, nodeCenter(target));
+  const startDirection = endpointDirection(start, route[1], source);
+  const endDirection = endpointDirection(end, route.at(-2) ?? start, target);
+  const curveStartDirection = source ? startDirection : { x: -startDirection.x, y: -startDirection.y };
+  const curveEndDirection = target ? { x: -endDirection.x, y: -endDirection.y } : endDirection;
+  const path = edge.type === 'curved' ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, jumps);
+  const masks = edge.type === 'orthogonal' ? jumpMaskPaths(route, jumps) : [];
   const waypointHandles = selected && edge.type === 'orthogonal'
     ? edge.waypoints.length > 0
       ? edge.waypoints.map((point, index) => <circle key={`waypoint-${index}`} className="edge-waypoint" cx={point.x} cy={point.y} r="5" onPointerDown={(event) => onWaypointPointerDown(event, edge, index, point)} />)
@@ -715,18 +947,30 @@ function EdgeView({ edge, source, target, obstacles, selected, onPointerDown, on
   return <g className={`canvas-edge ${selected ? 'selected' : ''}`} data-edge-id={edge.id} onPointerDown={(event) => onPointerDown(event, edge)} onDoubleClick={(event) => onDoubleClick(event, edge)}>
     <path className="edge-shadow" d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" pointerEvents="none" />
     {selected && <path className="edge-selection" d={path} fill="none" stroke="#a28fff" strokeWidth={edge.style.strokeWidth + 5} opacity="0.22" pointerEvents="none" />}
+    {masks.map((mask, index) => <path key={`jump-mask-${index}`} d={mask} fill="none" stroke={background} strokeWidth={edge.style.strokeWidth + 4} strokeLinecap="round" pointerEvents="none" />)}
     <path className="edge-visible" d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
     <path className="edge-hit-area" d={path} fill="none" stroke="#ffffff" strokeOpacity="0" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} pointerEvents="stroke" />
-    {renderEndpointMarker(start, startDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start')}
-    {renderEndpointMarker(end, endDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end')}
     {waypointHandles}
     {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="none"><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke={selected ? '#7968c5' : '#3a4258'} /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}
   </g>;
 }
 
-function EdgeEndpointHandles({ edge, source, target, obstacles, selected, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
-  if (!selected || !source || !target) return null;
+function EdgeMarkersView({ edge, source, target, obstacles, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; markerFill: string }) {
   const route = edgeRoute(edge, source, target, obstacles);
+  if (route.length < 2) return null;
+  const start = route[0];
+  const end = route[route.length - 1];
+  const startMarkerDirection = markerDirection(start, route[1], source);
+  const endMarkerDirection = markerDirection(end, route.at(-2) ?? start, target);
+  const startArrowDirection = markerArrowDirection(start, route[1]);
+  const endArrowDirection = markerArrowDirection(end, route.at(-2) ?? start);
+  return <>{renderEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start')}{renderEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end')}</>;
+}
+
+function EdgeEndpointHandles({ edge, source, target, obstacles, selected, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
+  if (!selected) return null;
+  const route = edgeRoute(edge, source, target, obstacles);
+  if (route.length < 2) return null;
   const start = route[0];
   const end = route.at(-1) ?? start;
   return <>
@@ -743,76 +987,121 @@ function outwardDirection(point: Point, neighbor: Point): Point {
   return { x: 1, y: 0 };
 }
 
+function endpointDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
+  return node ? outwardDirection(point, nodeCenter(node)) : { x: point.x - neighbor.x, y: point.y - neighbor.y };
+}
+
+function markerDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
+  if (node) return endpointDirection(point, neighbor, node);
+  return directionBetween(point, neighbor);
+}
+
+/** Arrowheads follow the actual connector tangent, including diagonal spans. */
+function markerArrowDirection(point: Point, neighbor: Point): Point {
+  return directionBetween(point, neighbor);
+}
+
+function directionBetween(from: Point, to: Point): Point {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  return length > 0.001 ? { x: (to.x - from.x) / length, y: (to.y - from.y) / length } : { x: 1, y: 0 };
+}
+
+function directionAngle(direction: Point): number {
+  const angle = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
+  return Math.abs(angle) === 180 ? 180 : angle;
+}
+
 function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, key: string) {
   if (marker === 'none') return null;
-  const angle = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
+  const angle = directionAngle(direction);
   const strokeWidth = 1.6;
   const lineProps = { fill: 'none', stroke, strokeWidth, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  const circle = <circle cx="0" cy="0" r="6" fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+  // The connector terminates at the shape boundary. The glyph's +X axis
+  // extends back into the connector, keeping the notation outside the shape.
+  const circle = <circle cx="6" cy="0" r="6" fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
   const bar = <path d="M 0 -7 L 0 7" {...lineProps} />;
-  // Crow's-foot prongs face the entity. `direction` points away from the
-  // entity along the connector, so the glyph extends along local -X.
-  const crowfoot = (offset = 0) => <path d={`M ${offset} 0 L ${offset - 11} -7 M ${offset} 0 L ${offset - 11} 0 M ${offset} 0 L ${offset - 11} 7`} {...lineProps} />;
+  const crowfoot = (offset = 0) => <path d={`M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7`} {...lineProps} />;
   const glyph = marker === 'arrow'
-    ? <path d={key === 'start' ? 'M 0 0 L -10 -6 L -10 6 Z' : 'M 0 0 L 10 -6 L 10 6 Z'} fill={stroke} />
+    ? <path d="M 0 0 L 10 -6 L 10 6 Z" fill={stroke} />
     : marker === 'bar' ? bar
       : marker === 'circle' ? circle
         : marker === 'crowfoot' ? crowfoot()
-          : marker === 'circle-bar' ? <>{circle}<path d="M 10 -7 L 10 7" {...lineProps} /></>
-              : marker === 'bar-crowfoot' ? <>{bar}{crowfoot(-5)}</>
-                : <>{circle}{crowfoot(-8)}</>;
+          : marker === 'circle-bar' ? <>{circle}<path d="M 12 -7 L 12 7" {...lineProps} /></>
+              : marker === 'bar-crowfoot' ? <>{bar}{crowfoot(5)}</>
+                : <>{circle}{crowfoot(12)}</>;
   return <g key={key} className="edge-marker" transform={`translate(${point.x} ${point.y}) rotate(${angle})`} pointerEvents="none">{glyph}</g>;
 }
 
 function sameEndpoint(left: Endpoint, right: Endpoint): boolean {
-  return left.nodeId === right.nodeId && left.port === right.port;
+  return left.nodeId === right.nodeId
+    && left.port === right.port
+    && left.offset === right.offset
+    && left.point?.x === right.point?.x
+    && left.point?.y === right.point?.y;
 }
 
-function NodeView({ node, position, selected, connectorStart, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
+function shapeRenderer(node: DiagramNode, diagramType?: string): string {
+  return pluginManager.getShape(node.library, node.type)?.renderer
+    ?? (diagramType === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
+}
+
+function NodeView({ node, position, selected, connectorStart, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
   const width = node.size.width;
   const height = node.size.height;
   const label = typeof node.data.label === 'string' ? node.data.label : node.type;
+  const renderer = shapeRenderer(node, diagramType);
   const commonProps = { fill: node.style.fill, stroke: node.style.stroke, strokeWidth: node.style.strokeWidth, opacity: node.style.opacity };
   const shape = (() => {
-    if (node.type === 'diamond' || node.type === 'decision') {
+    if (renderer === 'diamond' || renderer === 'decision') {
       const points = `${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`;
       return <polygon points={points} {...commonProps} />;
     }
-    if (node.type === 'circle' || node.type === 'use-case' || (diagramType === 'dfd' && node.type === 'process')) return <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...commonProps} />;
-    if (node.type === 'line') return <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} markerEnd="url(#arrow-end)" />;
-    if (node.type === 'actor') return <g><circle cx={width / 2} cy={28} r={16} {...commonProps} /><path d={`M${width / 2} 44 L${width / 2} 91 M${width / 2 - 25} 60 L${width / 2 + 25} 60 M${width / 2} 91 L${width / 2 - 21} 124 M${width / 2} 91 L${width / 2 + 21} 124`} fill="none" stroke={node.style.stroke} strokeWidth="3" strokeLinecap="round" /></g>;
-    if (node.type === 'database') return <path d={`M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}`} {...commonProps} />;
-    if (node.type === 'stored-data') return <path d={`M 12 0 H ${width - 12} Q ${width} 0 ${width} 12 V ${height - 12} Q ${width} ${height} ${width - 12} ${height} H 12 Q 0 ${height} 0 ${height - 12} V 12 Q 0 0 12 0 Z`} {...commonProps} />;
-    if (node.type === 'document' || node.type === 'multiple-document') return <path d={`M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z`} {...commonProps} />;
-    if (node.type === 'manual-input') return <polygon points={`18,0 ${width},0 ${width - 18},${height} 0,${height}`} {...commonProps} />;
-    if (node.type === 'preparation') return <polygon points={`24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}`} {...commonProps} />;
-    if (node.type === 'predefined-process') return <g><rect width={width} height={height} {...commonProps} /><line x1="16" y1="0" x2="16" y2={height} stroke={node.style.stroke} /><line x1={width - 16} y1="0" x2={width - 16} y2={height} stroke={node.style.stroke} /></g>;
-    if (node.type === 'delay') return <path d={`M 0 0 H ${width - 28} A 28 ${height / 2} 0 0 1 ${width - 28} ${height} H 0 Z`} {...commonProps} />;
-    if (node.type === 'display') return <path d={`M 0 0 H ${width - 28} Q ${width} ${height / 2} ${width - 28} ${height} H 0 Q 28 ${height / 2} 0 0 Z`} {...commonProps} />;
-    if (node.type === 'connector') return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2 - 2} {...commonProps} />;
-    if (node.type === 'off-page-connector') return <polygon points={`0,0 ${width},0 ${width},${height * .68} ${width / 2},${height} 0,${height * .68}`} {...commonProps} />;
-    if (node.type === 'entity') {
+    if (renderer === 'ellipse' || renderer === 'circle' || renderer === 'use-case') return <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...commonProps} />;
+    if (renderer === 'line') return <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} markerEnd="url(#arrow-end)" />;
+    if (renderer === 'actor') return <g><circle cx={width / 2} cy={28} r={16} {...commonProps} /><path d={`M${width / 2} 44 L${width / 2} 91 M${width / 2 - 25} 60 L${width / 2 + 25} 60 M${width / 2} 91 L${width / 2 - 21} 124 M${width / 2} 91 L${width / 2 + 21} 124`} fill="none" stroke={node.style.stroke} strokeWidth="3" strokeLinecap="round" /></g>;
+    if (renderer === 'database') return <path d={`M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}`} {...commonProps} />;
+    if (renderer === 'stored-data') return <path d={`M 12 0 H ${width - 12} Q ${width} 0 ${width} 12 V ${height - 12} Q ${width} ${height} ${width - 12} ${height} H 12 Q 0 ${height} 0 ${height - 12} V 12 Q 0 0 12 0 Z`} {...commonProps} />;
+    if (renderer === 'document') return <path d={`M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z`} {...commonProps} />;
+    if (renderer === 'manual-input') return <polygon points={`18,0 ${width},0 ${width - 18},${height} 0,${height}`} {...commonProps} />;
+    if (renderer === 'preparation') return <polygon points={`24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}`} {...commonProps} />;
+    if (renderer === 'predefined-process') return <g><rect width={width} height={height} {...commonProps} /><line x1="16" y1="0" x2="16" y2={height} stroke={node.style.stroke} /><line x1={width - 16} y1="0" x2={width - 16} y2={height} stroke={node.style.stroke} /></g>;
+    if (renderer === 'delay') return <path d={`M 0 0 H ${width - 28} A 28 ${height / 2} 0 0 1 ${width - 28} ${height} H 0 Z`} {...commonProps} />;
+    if (renderer === 'display') return <path d={`M 0 0 H ${width - 28} Q ${width} ${height / 2} ${width - 28} ${height} H 0 Q 28 ${height / 2} 0 0 Z`} {...commonProps} />;
+    if (renderer === 'off-page-connector') return <polygon points={`0,0 ${width},0 ${width},${height * .68} ${width / 2},${height} 0,${height * .68}`} {...commonProps} />;
+    if (renderer === 'entity') {
       const fields = normalizeEntityFields(node.data.fields);
+      const columns = entityColumns(node.data.entityVariant, width);
       const striped = node.data.striped !== false;
+      const showColumnHeaders = node.data.columnHeaders === true;
       const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
       const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
       const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
       const textColor = node.style.textColor;
-      const headerHeight = ERD_HEADER_HEIGHT;
-      const rowHeight = ERD_ROW_HEIGHT;
-      const keyColumnWidth = 38;
-      const typeColumnWidth = Math.min(82, Math.max(58, width * 0.3));
-      const typeColumnX = width - typeColumnWidth;
-      return <g><rect width={width} height={height} rx={node.style.radius} fill={rowFill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={node.data.associative ? '5 3' : undefined} opacity={node.style.opacity} /><rect width={width} height={headerHeight} rx={node.style.radius} fill={headerFill} opacity={node.style.opacity} /><line x1="0" y1={headerHeight} x2={width} y2={headerHeight} stroke={node.style.stroke} strokeWidth="1" />{fields.map((field, index) => { const y = headerHeight + index * rowHeight; const key = field.primaryKey && field.foreignKey ? 'PK/FK' : field.primaryKey ? 'PK' : field.foreignKey ? 'FK' : field.unique ? 'UQ' : ''; return <g key={field.id}><rect x="0" y={y} width={width} height={rowHeight} fill={striped && index % 2 === 1 ? stripeFill : rowFill} /><line x1="0" y1={y + rowHeight} x2={width} y2={y + rowHeight} stroke={node.style.stroke} strokeOpacity="0.34" /><line x1={keyColumnWidth} y1={y} x2={keyColumnWidth} y2={y + rowHeight} stroke={node.style.stroke} strokeOpacity="0.45" /><line x1={typeColumnX} y1={y} x2={typeColumnX} y2={y + rowHeight} stroke={node.style.stroke} strokeOpacity="0.45" />{key && <text className="node-field-key" style={{ fill: textColor }} x={keyColumnWidth / 2} y={y + 18}>{key}</text>}<text className="node-field-name" style={{ fill: textColor, textDecoration: field.primaryKey ? 'underline' : undefined, fontStyle: field.foreignKey ? 'italic' : undefined }} x={keyColumnWidth + 8} y={y + 18}>{field.name}</text><text className="node-field-type" style={{ fill: textColor }} x={typeColumnX + 7} y={y + 18}>{field.type}</text></g>; })}<text className="node-entity-title" style={{ fill: node.style.textColor === '#f4f5fa' ? '#ffffff' : textColor }} x={width / 2} y="23" textAnchor="middle">{label}</text></g>;
+      const fieldTop = ERD_HEADER_HEIGHT + (showColumnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
+      return <g>
+        <rect width={width} height={height} rx={node.style.radius} fill={rowFill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={node.data.associative ? '5 3' : undefined} opacity={node.style.opacity} />
+        <rect width={width} height={ERD_HEADER_HEIGHT} rx={node.style.radius} fill={headerFill} opacity={node.style.opacity} />
+        <line x1="0" y1={ERD_HEADER_HEIGHT} x2={width} y2={ERD_HEADER_HEIGHT} stroke={node.style.stroke} strokeWidth="1" />
+        {showColumnHeaders && <g className="entity-column-headers"><rect y={ERD_HEADER_HEIGHT} width={width} height={ERD_COLUMN_HEADER_HEIGHT} fill={headerFill} opacity="0.42" /><line x1="0" y1={fieldTop} x2={width} y2={fieldTop} stroke={node.style.stroke} strokeOpacity="0.55" />{columns.map((column) => <text key={column.id} className="node-field-column-header" x={column.id === 'key' ? column.x + column.width / 2 : column.x + 7} y={ERD_HEADER_HEIGHT + 15} textAnchor={column.id === 'key' ? 'middle' : undefined}>{column.label}</text>)}</g>}
+        {fields.map((field, index) => { const y = fieldTop + index * ERD_ROW_HEIGHT; return <g key={field.id}><rect x="0" y={y} width={width} height={ERD_ROW_HEIGHT} fill={striped && index % 2 === 1 ? stripeFill : rowFill} /><line x1="0" y1={y + ERD_ROW_HEIGHT} x2={width} y2={y + ERD_ROW_HEIGHT} stroke={node.style.stroke} strokeOpacity="0.34" />{columns.slice(0, -1).map((column) => <line key={`divider-${column.id}`} x1={column.x + column.width} y1={y} x2={column.x + column.width} y2={y + ERD_ROW_HEIGHT} stroke={node.style.stroke} strokeOpacity="0.45" />)}{columns.map((column) => { const value = entityFieldValue(field, column.id); if (!value) return null; const isKey = column.id === 'key'; return <text key={column.id} className={isKey ? 'node-field-key' : column.id === 'field' ? 'node-field-name' : 'node-field-type'} style={{ fill: textColor, textDecoration: column.id === 'field' && field.primaryKey ? 'underline' : undefined, fontStyle: column.id === 'field' && field.foreignKey ? 'italic' : undefined }} x={isKey ? column.x + column.width / 2 : column.x + 7} y={y + 18} textAnchor={isKey ? 'middle' : undefined}>{value}</text>; })}</g>; })}
+        <text className="node-entity-title" style={{ fill: node.style.textColor === '#f4f5fa' ? '#ffffff' : textColor }} x={width / 2} y="23" textAnchor="middle">{label}</text>
+      </g>;
     }
-    if (diagramType === 'dfd' && node.type === 'store') return <g><line x1="0" y1="10" x2={width} y2="10" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} /><line x1="0" y1={height - 10} x2={width} y2={height - 10} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
-    if (node.type === 'store') return <g><rect width={width} height={height} rx="4" {...commonProps} /><line x1="0" y1="12" x2={width} y2="12" stroke={node.style.stroke} opacity="0.5" /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
-    if (node.type === 'boundary') return <g><rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray="7 5" /><text className="boundary-label" x="18" y="27">{label}</text></g>;
-    const radius = node.type === 'rounded-rectangle' || node.type === 'start' || node.type === 'use-case' ? Math.min(node.style.radius || 22, height / 2) : node.style.radius;
+    if (renderer === 'dfd-store' || (diagramType === 'dfd' && renderer === 'store')) return <g><line x1="0" y1="10" x2={width} y2="10" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} /><line x1="0" y1={height - 10} x2={width} y2={height - 10} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
+    if (renderer === 'store') return <g><rect width={width} height={height} rx="4" {...commonProps} /><line x1="0" y1="12" x2={width} y2="12" stroke={node.style.stroke} opacity="0.5" /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
+    if (renderer === 'boundary') return <g><rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray="7 5" /><text className="boundary-label" x="18" y="27">{label}</text></g>;
+    const radius = renderer === 'rounded-rectangle' || renderer === 'start' || renderer === 'use-case' ? Math.min(node.style.radius || 22, height / 2) : node.style.radius;
     return <rect width={width} height={height} rx={radius} {...commonProps} />;
   })();
-  const labelNode = !['entity', 'actor', 'store', 'boundary', 'line'].includes(node.type) ? <text className={`node-label ${node.type === 'start' || node.type === 'use-case' ? 'node-label-strong' : ''}`} x={width / 2} y={height / 2 + 5}>{label}</text> : node.type === 'actor' ? <text className="node-label" x={width / 2} y={height - 10}>{label}</text> : null;
-  const ports: Array<{ id: ConnectionPort; x: number; y: number }> = [{ id: 'top', x: width / 2, y: 0 }, { id: 'right', x: width, y: height / 2 }, { id: 'bottom', x: width / 2, y: height }, { id: 'left', x: 0, y: height / 2 }];
+  const labelNode = !['entity', 'actor', 'store', 'dfd-store', 'boundary', 'line'].includes(renderer) ? <text className={`node-label ${renderer === 'start' || renderer === 'use-case' ? 'node-label-strong' : ''}`} x={width / 2} y={height / 2 + 5}>{label}</text> : renderer === 'actor' ? <text className="node-label" x={width / 2} y={height - 10}>{label}</text> : null;
+  const ports = shapeConnectionAnchorPoints(node).map(({ anchor, localPoint }) => ({
+    id: anchor.id,
+    port: anchor.port,
+    offset: anchor.offset,
+    x: localPoint.x - node.position.x,
+    y: localPoint.y - node.position.y,
+    fieldPort: anchor.id.startsWith('field-'),
+  }));
   const resizeHandles: Array<{ id: ResizeHandle; x: number; y: number; cursor: string }> = [
     { id: 'nw', x: -4, y: -4, cursor: 'nwse-resize' },
     { id: 'ne', x: width - 4, y: -4, cursor: 'nesw-resize' },
@@ -822,7 +1111,7 @@ function NodeView({ node, position, selected, connectorStart, showPorts, diagram
   return <g className={`canvas-node ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
     {shape}
     {labelNode}
-    {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className="connection-port" data-port={port.id} cx={port.x} cy={port.y} r="5" onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.id); }} />)}</g>}
+     {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset); }} />)}</g>}
      {selected && <g className="node-handles" pointerEvents="all"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" pointerEvents="none" />{resizeHandles.map((handle) => <rect key={handle.id} className="handle" x={handle.x} y={handle.y} width="8" height="8" style={{ cursor: handle.cursor }} onPointerDown={(event) => onResizePointerDown(event, node, handle.id)} />)}</g>}
   </g>;
 }

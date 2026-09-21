@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode } from './document';
-import { entityAutoHeight, entityFieldLabel, normalizeEntityFields, validateErd } from './erd';
+import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, normalizeEntityFields, validateErd } from './erd';
 
 describe('ERD semantic model', () => {
   it('normalizes legacy compact attributes', () => {
@@ -21,5 +21,16 @@ describe('ERD semantic model', () => {
     expect(entityAutoHeight(['id · uuid', 'name · varchar'])).toBe(88);
     expect(entityAutoHeight(['id · uuid', 'name · varchar', 'created · date'])).toBe(115);
     expect(entityAutoHeight([])).toBe(61);
+  });
+
+  it('supports selectable entity column variants and row anchors', () => {
+    expect(entityColumns('key-field', 230).map((column) => column.id)).toEqual(['key', 'field']);
+    expect(entityColumns('key-field-type', 230).map((column) => column.id)).toEqual(['key', 'field', 'type']);
+    const field = normalizeEntityFields(['id · uuid · PK · NN'])[0];
+    expect(entityFieldValue(field, 'key')).toBe('PK');
+    expect(entityFieldValue(field, 'field')).toBe('id');
+    expect(entityFieldValue(field, 'type')).toBe('uuid');
+    expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(74.5 / 88);
+    expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(109);
   });
 });

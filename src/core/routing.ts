@@ -1,25 +1,34 @@
 import { nodeCenter, nodeConnectionPoint } from './geometry';
-import type { DiagramEdge, DiagramNode, Point } from './types';
+import type { DiagramEdge, DiagramNode, Endpoint, Point } from './types';
 
 const ROUTE_PADDING = 18;
 const EPSILON = 0.001;
+const JUMP_HALF_LENGTH = 8;
+const JUMP_HEIGHT = 7;
+
+export interface RouteJump {
+  segmentIndex: number;
+  point: Point;
+  orientation: 'horizontal' | 'vertical';
+}
 
 /**
  * Returns the rendered connector route. Orthogonal routes use a small
  * visibility-grid search so bends stay outside node rectangles instead of
  * taking a dogleg through a nearby shape.
  */
-export function edgeRoute(edge: DiagramEdge, source: DiagramNode, target: DiagramNode, obstacles: DiagramNode[] = []): Point[] {
-  const start = nodeConnectionPoint(source, nodeCenter(target), edge.source.port);
-  const end = nodeConnectionPoint(target, nodeCenter(source), edge.target.port);
+export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: DiagramNode, obstacles: DiagramNode[] = []): Point[] {
+  const start = resolveEndpointPoint(edge.source, source, edge.target.point ?? (target ? nodeCenter(target) : undefined));
+  const end = resolveEndpointPoint(edge.target, target, edge.source.point ?? (source ? nodeCenter(source) : undefined));
+  if (!start || !end) return [];
   if (edge.type !== 'orthogonal') return [start, end];
   if (obstacles.length === 0) return legacyOrthogonalRoute(start, end, edge.waypoints);
 
   const rectangles = obstacles.map((node) => inflate(node, ROUTE_PADDING));
-  const startDirection = exitDirection(source, start, nodeCenter(target));
-  const endDirection = exitDirection(target, end, nodeCenter(source));
-  const startExit = shift(start, startDirection, ROUTE_PADDING);
-  const endEntry = shift(end, endDirection, ROUTE_PADDING);
+  const startDirection = source ? exitDirection(source, start, end) : cardinalDirection(start, end);
+  const endDirection = target ? exitDirection(target, end, start) : cardinalDirection(end, start);
+  const startExit = source ? shift(start, startDirection, ROUTE_PADDING) : start;
+  const endEntry = target ? shift(end, endDirection, ROUTE_PADDING) : end;
   const route: Point[] = [start];
   appendPoint(route, startExit);
 
@@ -32,16 +41,138 @@ export function edgeRoute(edge: DiagramEdge, source: DiagramNode, target: Diagra
   return simplifyRoute(route);
 }
 
-export function pointsToPath(points: Point[]): string {
-  if (points.length === 0) return '';
-  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+/** Resolves an endpoint to its current world-space location. */
+export function resolveEndpointPoint(endpoint: Endpoint, node?: DiagramNode, toward?: Point): Point | null {
+  // An attached endpoint is authoritative even if an older document also
+  // contains a stale free-point value. Otherwise the stale point can leave a
+  // visible gap between the connector notation and the node boundary.
+  if (node && endpoint.nodeId) return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
+  if (endpoint.point) return { ...endpoint.point };
+  if (!node) return null;
+  return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
 }
 
-export function curvedPath(points: Point[]): string {
+export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = []): string {
+  if (points.length === 0) return '';
+  const commands = [`M ${points[0].x} ${points[0].y}`];
+  for (let segmentIndex = 0; segmentIndex < points.length - 1; segmentIndex += 1) {
+    const from = points[segmentIndex];
+    const to = points[segmentIndex + 1];
+    const segmentJumps = jumps
+      .filter((jump) => jump.segmentIndex === segmentIndex)
+      .sort((left, right) => distanceAlongSegment(left.point, from) - distanceAlongSegment(right.point, from));
+    let cursor = from;
+    segmentJumps.forEach((jump) => {
+      const span = jumpSpan(jump.point, from, to);
+      if (!span || distanceBetween(cursor, span.before) < EPSILON) return;
+      commands.push(`L ${span.before.x} ${span.before.y}`);
+      const control = jump.orientation === 'horizontal'
+        ? { x: jump.point.x, y: jump.point.y - JUMP_HEIGHT }
+        : { x: jump.point.x + JUMP_HEIGHT, y: jump.point.y };
+      commands.push(`Q ${control.x} ${control.y} ${span.after.x} ${span.after.y}`);
+      cursor = span.after;
+    });
+    commands.push(`L ${to.x} ${to.y}`);
+  }
+  return commands.join(' ');
+}
+
+/** Finds interior crossings between orthogonal routes and assigns the jump to
+ * the later route so the wire order stays deterministic. */
+export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: Point[] }>): Map<string, RouteJump[]> {
+  const jumps = new Map<string, RouteJump[]>();
+  routes.forEach((route) => jumps.set(route.id, []));
+  for (let leftIndex = 0; leftIndex < routes.length; leftIndex += 1) {
+    const left = routes[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < routes.length; rightIndex += 1) {
+      const right = routes[rightIndex];
+      for (let leftSegment = 0; leftSegment < left.points.length - 1; leftSegment += 1) {
+        for (let rightSegment = 0; rightSegment < right.points.length - 1; rightSegment += 1) {
+          const crossing = orthogonalCrossing(left.points[leftSegment], left.points[leftSegment + 1], right.points[rightSegment], right.points[rightSegment + 1]);
+          if (!crossing) continue;
+          const routeJumps = jumps.get(right.id) ?? [];
+          if (!routeJumps.some((jump) => distanceBetween(jump.point, crossing.point) < JUMP_HALF_LENGTH * 2)) {
+            routeJumps.push({ segmentIndex: rightSegment, point: crossing.point, orientation: crossing.orientation });
+            jumps.set(right.id, routeJumps);
+          }
+        }
+      }
+    }
+  }
+  return jumps;
+}
+
+/** Returns straight spans that should be painted over lower wires before the
+ * curved jump is drawn. */
+export function jumpMaskPaths(points: Point[], jumps: readonly RouteJump[]): string[] {
+  return jumps.flatMap((jump) => {
+    const from = points[jump.segmentIndex];
+    const to = points[jump.segmentIndex + 1];
+    if (!from || !to) return [];
+    const span = jumpSpan(jump.point, from, to);
+    return span ? [`M ${span.before.x} ${span.before.y} L ${span.after.x} ${span.after.y}`] : [];
+  });
+}
+
+interface OrthogonalCrossing { point: Point; orientation: 'horizontal' | 'vertical' }
+
+function orthogonalCrossing(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): OrthogonalCrossing | null {
+  const leftHorizontal = almostEqual(leftStart.y, leftEnd.y) && !almostEqual(leftStart.x, leftEnd.x);
+  const rightHorizontal = almostEqual(rightStart.y, rightEnd.y) && !almostEqual(rightStart.x, rightEnd.x);
+  if (leftHorizontal === rightHorizontal) return null;
+  const horizontalStart = leftHorizontal ? leftStart : rightStart;
+  const horizontalEnd = leftHorizontal ? leftEnd : rightEnd;
+  const verticalStart = leftHorizontal ? rightStart : leftStart;
+  const verticalEnd = leftHorizontal ? rightEnd : leftEnd;
+  const point = { x: verticalStart.x, y: horizontalStart.y };
+  if (!strictlyBetween(point.x, horizontalStart.x, horizontalEnd.x, JUMP_HALF_LENGTH) || !strictlyBetween(point.y, verticalStart.y, verticalEnd.y, JUMP_HALF_LENGTH)) return null;
+  return { point, orientation: leftHorizontal ? 'vertical' : 'horizontal' };
+}
+
+function jumpSpan(point: Point, from: Point, to: Point): { before: Point; after: Point } | null {
+  const length = distanceBetween(from, to);
+  if (length < EPSILON) return null;
+  const unit = { x: (to.x - from.x) / length, y: (to.y - from.y) / length };
+  return {
+    before: { x: point.x - unit.x * JUMP_HALF_LENGTH, y: point.y - unit.y * JUMP_HALF_LENGTH },
+    after: { x: point.x + unit.x * JUMP_HALF_LENGTH, y: point.y + unit.y * JUMP_HALF_LENGTH },
+  };
+}
+
+function strictlyBetween(value: number, first: number, second: number, margin: number): boolean {
+  return value > Math.min(first, second) + margin && value < Math.max(first, second) - margin;
+}
+
+function distanceAlongSegment(point: Point, from: Point): number {
+  return Math.hypot(point.x - from.x, point.y - from.y);
+}
+
+function distanceBetween(left: Point, right: Point): number {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+export function curvedPath(points: Point[], startDirection?: Point, endDirection?: Point): string {
   if (points.length < 2) return pointsToPath(points);
   const [start, end] = [points[0], points[points.length - 1]];
-  const curve = Math.max(70, Math.abs(end.x - start.x) * .42);
-  return `M ${start.x} ${start.y} C ${start.x + (end.x > start.x ? curve : -curve)} ${start.y}, ${end.x - (end.x > start.x ? curve : -curve)} ${end.y}, ${end.x} ${end.y}`;
+  const distance = Math.max(1, Math.hypot(end.x - start.x, end.y - start.y));
+  const handle = Math.max(70, distance * .42);
+  const startTangent = normalizeDirection(startDirection ?? dominantDirection(start, end));
+  const endTangent = normalizeDirection(endDirection ?? dominantDirection(start, end));
+  const firstControl = { x: start.x + startTangent.x * handle, y: start.y + startTangent.y * handle };
+  const secondControl = { x: end.x - endTangent.x * handle, y: end.y - endTangent.y * handle };
+  return `M ${start.x} ${start.y} C ${firstControl.x} ${firstControl.y}, ${secondControl.x} ${secondControl.y}, ${end.x} ${end.y}`;
+}
+
+function dominantDirection(from: Point, to: Point): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+  return { x: 0, y: Math.sign(dy) || 1 };
+}
+
+function normalizeDirection(direction: Point): Point {
+  const length = Math.hypot(direction.x, direction.y);
+  return length > EPSILON ? { x: direction.x / length, y: direction.y / length } : { x: 1, y: 0 };
 }
 
 interface Rect { left: number; right: number; top: number; bottom: number }
@@ -157,6 +288,13 @@ function exitDirection(node: DiagramNode, boundary: Point, fallbackTarget: Point
     dx = fallbackTarget.x - center.x;
     dy = fallbackTarget.y - center.y;
   }
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+  return { x: 0, y: Math.sign(dy) || 1 };
+}
+
+function cardinalDirection(from: Point, to: Point): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
   if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
   return { x: 0, y: Math.sign(dy) || 1 };
 }

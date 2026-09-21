@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { edgeRoute, pointsToPath } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, jumpMaskPaths, pointsToPath } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -31,6 +31,37 @@ describe('connector routing', () => {
     })).toBe(true);
     expect(route.some((point) => point.y < blocker.position.y || point.y > blocker.position.y + blocker.size.height)).toBe(true);
     expect(route.slice(1).some((point, index) => segmentCrossesRect(route[index], point, blocker))).toBe(false);
+  });
+
+  it('supports free-standing connector endpoints', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } });
+    expect(edgeRoute(edge)).toEqual([{ x: 40, y: 80 }, { x: 300, y: 220 }]);
+  });
+
+  it('keeps free endpoint marker directions outside the connector', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } });
+    const route = edgeRoute(edge);
+    const sourceDirection = { x: route[0].x - route[1].x, y: route[0].y - route[1].y };
+    const targetDirection = { x: route[1].x - route[0].x, y: route[1].y - route[0].y };
+    expect(sourceDirection.x).toBeLessThan(0);
+    expect(targetDirection.x).toBeGreaterThan(0);
+  });
+
+  it('uses endpoint tangents for curved connectors', () => {
+    const path = curvedPath([{ x: 100, y: 20 }, { x: 100, y: 280 }], { x: 0, y: 1 }, { x: 0, y: 1 });
+    expect(path).toContain('C 100 129.2, 100 170.8, 100 280');
+  });
+
+  it('adds a bridge to the later orthogonal route at a crossing', () => {
+    const routes = [
+      { id: 'horizontal', points: [{ x: 0, y: 50 }, { x: 100, y: 50 }] },
+      { id: 'vertical', points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] },
+    ];
+    const jumps = calculateRouteJumps(routes);
+    expect(jumps.get('horizontal')).toHaveLength(0);
+    expect(jumps.get('vertical')).toEqual([{ segmentIndex: 0, point: { x: 50, y: 50 }, orientation: 'vertical' }]);
+    expect(pointsToPath(routes[1].points, jumps.get('vertical'))).toContain('Q 57 50 50 58');
+    expect(jumpMaskPaths(routes[1].points, jumps.get('vertical') ?? [])).toEqual(['M 50 42 L 50 58']);
   });
 });
 

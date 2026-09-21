@@ -22,7 +22,7 @@ describe('native file helpers', () => {
     const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } });
     const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
     expect(svg).toContain('M 0 -7 L 0 7');
-    expect(svg).toContain('M 0 0 L -11 -7');
+    expect(svg).toContain('M 0 0 L 11 -7');
   });
 
   it('orients end arrowheads into the target node', () => {
@@ -31,6 +31,34 @@ describe('native file helpers', () => {
     const edge = createEdge({ nodeId: source.id }, { nodeId: target.id }, { style: { endMarker: 'arrow' } });
     const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
     expect(svg).toContain('<g transform="translate(300 44) rotate(180)"><path d="M 0 0 L 10 -6 L 10 6 Z"');
+  });
+
+  it('turns straight arrowheads along the line direction', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } }, { style: { endMarker: 'arrow' } });
+    const svg = documentToSvg([], [edge], '#10131c', 400, 300);
+    expect(svg).toContain('translate(300 220) rotate(-151.69924423399362)');
+  });
+
+  it('keeps start arrowheads pointed into the connector', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } }, { style: { startMarker: 'arrow', endMarker: 'none' } });
+    const svg = documentToSvg([], [edge], '#10131c', 400, 300);
+    expect(svg).toContain('translate(40 80) rotate(28.30075576600638)');
+  });
+
+  it('rotates attached straight arrowheads with a diagonal connector tangent', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 50 } });
+    const target = createNode('rectangle', { x: 300, y: 200 }, { size: { width: 100, height: 50 } });
+    const edge = createEdge({ nodeId: source.id }, { nodeId: target.id }, { style: { endMarker: 'arrow' } });
+    const svg = documentToSvg([source, target], [edge], '#10131c', 500, 400);
+    expect(svg).toContain('translate(312.5 200) rotate(-146.30993247402023)');
+  });
+
+  it('exports bridge jumps where orthogonal connectors cross', () => {
+    const horizontal = createEdge({ point: { x: 0, y: 50 } }, { point: { x: 100, y: 50 } }, { type: 'orthogonal' });
+    const vertical = createEdge({ point: { x: 50, y: 0 } }, { point: { x: 50, y: 100 } }, { type: 'orthogonal' });
+    const svg = documentToSvg([], [horizontal, vertical], '#10131c', 160, 160);
+    expect(svg).toContain('Q 57 50 50 58');
+    expect(svg).toContain('stroke="#10131c"');
   });
 
   it('exports standard ERD key columns and standard DFD/UML silhouettes', () => {
@@ -47,5 +75,17 @@ describe('native file helpers', () => {
     expect(svg).toContain('<ellipse cx="60" cy="60" rx="60" ry="60"');
     expect(svg).toContain('<line x1="0" y1="10" x2="160" y2="10"');
     expect(svg).toContain('<ellipse cx="90" cy="36" rx="90" ry="36"');
+  });
+
+  it('exports the selected ERD column variant and optional headings', () => {
+    const entity = createNode('entity', { x: 0, y: 0 }, {
+      library: 'erd',
+      size: { width: 230, height: 109 },
+      data: { label: 'Users', entityVariant: 'key-field', columnHeaders: true, fields: ['id · uuid · PK'] },
+    });
+    const svg = documentToSvg([entity], [], '#10131c', 400, 300);
+    expect(svg).toContain('>Key</text>');
+    expect(svg).toContain('>Field</text>');
+    expect(svg).not.toContain('>Data type</text>');
   });
 });
