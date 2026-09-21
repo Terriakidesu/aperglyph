@@ -1018,17 +1018,19 @@ function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker
   const lineProps = { fill: 'none', stroke, strokeWidth, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   // The connector terminates at the shape boundary. The glyph's +X axis
   // extends back into the connector, keeping the notation outside the shape.
-  const circle = <circle cx="6" cy="0" r="6" fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
-  const bar = <path d="M 0 -7 L 0 7" {...lineProps} />;
-  const crowfoot = (offset = 0) => <path d={`M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7`} {...lineProps} />;
+  const circle = (center = 6) => <circle cx={center} cy="0" r="6" fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+  const bar = (offset = 0) => <path d={`M ${offset} -7 L ${offset} 7`} {...lineProps} />;
+  // +X points back into the connector. Keep combined notation ordered from
+  // the connector toward the shape: bar/circle first, crowfoot last.
+  const crowfoot = (junction = 11) => <path d={`M ${junction} 0 L 0 -7 M ${junction} 0 L 0 0 M ${junction} 0 L 0 7`} {...lineProps} />;
   const glyph = marker === 'arrow'
     ? <path d="M 0 0 L 10 -6 L 10 6 Z" fill={stroke} />
-    : marker === 'bar' ? bar
-      : marker === 'circle' ? circle
+    : marker === 'bar' ? bar()
+      : marker === 'circle' ? circle()
         : marker === 'crowfoot' ? crowfoot()
-          : marker === 'circle-bar' ? <>{circle}<path d="M 12 -7 L 12 7" {...lineProps} /></>
-              : marker === 'bar-crowfoot' ? <>{bar}{crowfoot(5)}</>
-                : <>{circle}{crowfoot(12)}</>;
+          : marker === 'circle-bar' ? <>{circle(18)}{bar()}</>
+              : marker === 'bar-crowfoot' ? <>{bar(16)}{crowfoot()}</>
+                : <>{circle(18)}{crowfoot()}</>;
   return <g key={key} className="edge-marker" transform={`translate(${point.x} ${point.y}) rotate(${angle})`} pointerEvents="none">{glyph}</g>;
 }
 

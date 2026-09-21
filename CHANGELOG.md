@@ -26,6 +26,12 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.
 - Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
 
+## [0.10.1] - 2026-09-21
+
+### Fixed
+
+- Corrected combined ERD cardinality markers so bars/circles stay toward the connector and Crow's Foot prongs face the entity.
+
 ## [0.10.0] - 2026-09-21
 
 ### Added

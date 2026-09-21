@@ -113,18 +113,18 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
 function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, endpoint: 'start' | 'end'): string {
   if (marker === 'none') return '';
   const angle = directionAngle(direction);
-    const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
-   const circle = `<circle cx="6" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
-   const bar = `<path d="M 0 -7 L 0 7" ${line}/>`;
-   const crowfoot = (offset = 0) => `<path d="M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7" ${line}/>`;
-   const glyph = marker === 'arrow'
-     ? `<path d="M 0 0 L 10 -6 L 10 6 Z" fill="${escapeXml(stroke)}"/>`
-    : marker === 'bar' ? bar
-      : marker === 'circle' ? circle
+  const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
+  const circle = (center = 6) => `<circle cx="${center}" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
+  const bar = (offset = 0) => `<path d="M ${offset} -7 L ${offset} 7" ${line}/>`;
+  const crowfoot = (junction = 11) => `<path d="M ${junction} 0 L 0 -7 M ${junction} 0 L 0 0 M ${junction} 0 L 0 7" ${line}/>`;
+  const glyph = marker === 'arrow'
+    ? `<path d="M 0 0 L 10 -6 L 10 6 Z" fill="${escapeXml(stroke)}"/>`
+    : marker === 'bar' ? bar()
+      : marker === 'circle' ? circle()
         : marker === 'crowfoot' ? crowfoot()
-       : marker === 'circle-bar' ? `${circle}<path d="M 12 -7 L 12 7" ${line}/>`
-             : marker === 'bar-crowfoot' ? `${bar}${crowfoot(5)}`
-               : `${circle}${crowfoot(12)}`;
+          : marker === 'circle-bar' ? `${circle(18)}${bar()}`
+            : marker === 'bar-crowfoot' ? `${bar(16)}${crowfoot()}`
+              : `${circle(18)}${crowfoot()}`;
   return `<g transform="translate(${point.x} ${point.y}) rotate(${angle})">${glyph}</g>`;
 }
 

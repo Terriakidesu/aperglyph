@@ -22,7 +22,15 @@ describe('native file helpers', () => {
     const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } });
     const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
     expect(svg).toContain('M 0 -7 L 0 7');
-    expect(svg).toContain('M 0 0 L 11 -7');
+    expect(svg).toContain('M 11 0 L 0 -7');
+  });
+
+  it('keeps combined cardinality symbols outside the entity boundary', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 80 } }, { style: { startMarker: 'bar-crowfoot', endMarker: 'circle-crowfoot' } });
+    const svg = documentToSvg([], [edge], '#10131c', 400, 200);
+    expect(svg).toContain('M 16 -7 L 16 7');
+    expect(svg).toContain('cx="18" cy="0" r="6"');
+    expect(svg).toContain('M 11 0 L 0 -7 M 11 0 L 0 0 M 11 0 L 0 7');
   });
 
   it('orients end arrowheads into the target node', () => {
