@@ -1,4 +1,5 @@
 import { parseProject, serializeProject } from '../core/document';
+import { nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import type { DiagramDocument, DiagramEdge, DiagramNode } from '../core/types';
 
 export function downloadProject(document: DiagramDocument): void {
@@ -22,10 +23,12 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const source = nodeMap.get(edge.source.nodeId);
     const target = nodeMap.get(edge.target.nodeId);
     if (!source || !target) return '';
-    const sx = source.position.x + source.size.width / 2;
-    const sy = source.position.y + source.size.height / 2;
-    const tx = target.position.x + target.size.width / 2;
-    const ty = target.position.y + target.size.height / 2;
+    const sourcePoint = nodeConnectionPoint(source, nodeCenter(target), edge.source.port);
+    const targetPoint = nodeConnectionPoint(target, nodeCenter(source), edge.target.port);
+    const sx = sourcePoint.x;
+    const sy = sourcePoint.y;
+    const tx = targetPoint.x;
+    const ty = targetPoint.y;
     const curve = Math.max(70, Math.abs(tx - sx) * .42);
     const path = `M ${sx} ${sy} C ${sx + (tx > sx ? curve : -curve)} ${sy}, ${tx - (tx > sx ? curve : -curve)} ${ty}, ${tx} ${ty}`;
     return `<path d="${path}" fill="none" stroke="${escapeXml(edge.style.stroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : ''} marker-end="url(#arrow)"/>`;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { createEdge } from '../core/document';
+import { nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramNode, Point, Viewport } from '../core/types';
 import { nodeToSpatialNode, SpatialWorkerClient, viewportBounds } from '../spatial';
@@ -267,7 +268,7 @@ export function CanvasViewport() {
   } : null;
 
   const renderedNodes = page?.nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id)) ?? [];
-  const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => [node.id, node])), [page?.nodes]);
+  const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => [node.id, dragPreview[node.id] ? { ...node, position: dragPreview[node.id] } : node])), [dragPreview, page?.nodes]);
   const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
 
   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
@@ -290,14 +291,16 @@ export function CanvasViewport() {
   </div>;
 }
 
-function EdgeView({ edge, source, target }: { edge: any; source?: DiagramNode; target?: DiagramNode }) {
+function EdgeView({ edge, source, target }: { edge: import('../core/types').DiagramEdge; source?: DiagramNode; target?: DiagramNode }) {
   if (!source || !target) return null;
-  const sourcePos = source.position;
-  const targetPos = target.position;
-  const sx = sourcePos.x + source.size.width / 2;
-  const sy = sourcePos.y + source.size.height / 2;
-  const tx = targetPos.x + target.size.width / 2;
-  const ty = targetPos.y + target.size.height / 2;
+  const sourceCenter = nodeCenter(source);
+  const targetCenter = nodeCenter(target);
+  const sourcePoint = nodeConnectionPoint(source, targetCenter, edge.source.port);
+  const targetPoint = nodeConnectionPoint(target, sourceCenter, edge.target.port);
+  const sx = sourcePoint.x;
+  const sy = sourcePoint.y;
+  const tx = targetPoint.x;
+  const ty = targetPoint.y;
   const curve = Math.max(70, Math.abs(tx - sx) * 0.42);
   const path = `M ${sx} ${sy} C ${sx + (tx > sx ? curve : -curve)} ${sy}, ${tx - (tx > sx ? curve : -curve)} ${ty}, ${tx} ${ty}`;
   const label = typeof edge.data?.label === 'string' ? edge.data.label : null;

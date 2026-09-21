@@ -13,6 +13,14 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.5.1] - 2026-09-21
+
+### Fixed
+
+- Routed connectors to node boundaries instead of node centers.
+- Added explicit top, right, bottom, left, center, and compass port support.
+- Applied the same connector geometry to live previews and SVG export.
+
 ## [0.5.0] - 2026-09-21
 
 ### Added
