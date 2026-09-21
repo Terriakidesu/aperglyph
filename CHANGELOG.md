@@ -13,6 +13,15 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.8.0] - 2026-09-21
+
+### Added
+
+- Added a framework-independent `DiagramPlugin` contract.
+- Added a plugin manager with built-in General, Flowchart, ERD, DFD, and UML use-case modules.
+- Moved shape definitions and connector definitions out of the React shape-library component.
+- Added plugin registry tests and fallback behavior for future diagram standards.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added
