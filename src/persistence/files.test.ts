@@ -11,6 +11,17 @@ describe('native file helpers', () => {
     expect(svg).toContain('>rectangle</text>');
   });
 
+  it('exports an ink-saving outline-only SVG suitable for printing', () => {
+    const node = createNode('rectangle', { x: 30, y: 40 }, { style: { fill: '#2c2752', stroke: '#907bff', textColor: '#f4f5fa' } });
+    const svg = documentToSvg([node], [], '#10131c', 800, 600, { outlineOnly: true });
+    expect(svg).toContain('fill="#ffffff"');
+    expect(svg).toContain('stroke="#000000"');
+    expect(svg).toContain('fill="#000000"');
+    expect(svg).not.toContain('rgb(');
+    expect(svg).not.toContain('#907bff');
+    expect(svg).not.toContain('#f4f5fa');
+  });
+
   it('serializes a native project for import/export', () => {
     const document = createDocument('Project');
     expect(serializeProject(document)).toContain('"format": "aperglyph"');

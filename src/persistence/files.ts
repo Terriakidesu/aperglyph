@@ -11,6 +11,7 @@ export interface ExportOptions {
   allPages?: boolean;
   contentBounds?: boolean;
   transparent?: boolean;
+  outlineOnly?: boolean;
   scale?: 1 | 2 | 4;
 }
 
@@ -41,7 +42,7 @@ export async function downloadPng(document: DiagramDocument, options: ExportOpti
   for (const [index, page] of pages.entries()) {
     const scene = exportScene(page, options.selectionIds);
     const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
-    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
+    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
     const suffix = pages.length > 1 ? `-${index + 1}-${safeFilename(page.name)}` : '';
     downloadBlob(png, `${safeFilename(document.name)}${suffix}.png`);
@@ -55,7 +56,7 @@ export async function downloadPdf(document: DiagramDocument, options: ExportOpti
   for (const page of pages) {
     const scene = exportScene(page, options.selectionIds);
     const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
-    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
+    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * (options.scale ?? 2)), Math.round(bounds.height * (options.scale ?? 2)));
     const image = await pdf.embedPng(await png.arrayBuffer());
     const pdfPage = pdf.addPage([bounds.width, bounds.height]);
@@ -68,11 +69,31 @@ export async function downloadPdf(document: DiagramDocument, options: ExportOpti
   downloadBlob(new Blob([buffer], { type: 'application/pdf' }), `${safeFilename(document.name)}.pdf`);
 }
 
+export function printDocument(document: DiagramDocument, options: ExportOptions = {}): void {
+  const page = document.pages.find((candidate) => candidate.id === (options.pageId ?? document.pages[0]?.id)) ?? document.pages[0];
+  if (!page) return;
+  const scene = exportScene(page, options.selectionIds);
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: false, outlineOnly: options.outlineOnly ?? true, viewBox: bounds });
+  const printWindow = globalThis.window?.open('', '_blank');
+  if (!printWindow) {
+    void downloadPdf(document, { ...options, pageId: page.id, outlineOnly: options.outlineOnly ?? true });
+    return;
+  }
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeXml(document.name)} — ${escapeXml(page.name)}</title><style>@page{margin:.5in}html,body{margin:0;background:#fff}body{display:flex;align-items:flex-start;justify-content:center}svg{display:block;width:100%;height:auto;max-height:100vh}</style></head><body>${svg}</body></html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.addEventListener('afterprint', () => printWindow.close(), { once: true });
+  printWindow.print();
+}
+
 export function readProjectFile(file: File): Promise<DiagramDocument> {
   return file.text().then(parseProject);
 }
 
-export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], background: string, width: number, height: number, options: { transparent?: boolean; viewBox?: { x: number; y: number; width: number; height: number } } = {}): string {
+export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], background: string, width: number, height: number, options: { transparent?: boolean; outlineOnly?: boolean; viewBox?: { x: number; y: number; width: number; height: number } } = {}): string {
+  const outlineOnly = options.outlineOnly === true;
+  const exportBackground = outlineOnly ? '#ffffff' : background;
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const routeEntries = edges
     .filter((edge) => edge.type === 'orthogonal')
@@ -99,15 +120,16 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const jumps = routeJumps.get(edge.id) ?? [];
     const path = edge.type === 'curved' ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, jumps);
     const masks = edge.type === 'orthogonal'
-      ? jumpMaskPaths(route, jumps).map((mask) => `<path d="${mask}" fill="none" stroke="${escapeXml(background)}" stroke-width="${edge.style.strokeWidth + 4}" stroke-linecap="round"/>`).join('')
+      ? jumpMaskPaths(route, jumps).map((mask) => `<path d="${mask}" fill="none" stroke="${escapeXml(exportBackground)}" stroke-width="${edge.style.strokeWidth + 4}" stroke-linecap="round"/>`).join('')
       : '';
-    const line = `<path d="${path}" fill="none" stroke="${escapeXml(edge.style.stroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
-    return `${masks}${line}${svgEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edge.style.stroke, background, 'start')}${svgEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edge.style.stroke, background, 'end')}`;
+    const edgeStroke = outlineOnly ? '#000000' : edge.style.stroke;
+    const line = `<path d="${path}" fill="none" stroke="${escapeXml(edgeStroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
+    return `${masks}${line}${svgEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edgeStroke, exportBackground, 'start')}${svgEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edgeStroke, exportBackground, 'end')}`;
   }).join('');
-  const nodeMarkup = nodes.map(renderNode).join('');
+  const nodeMarkup = nodes.map((node) => renderNode(node, outlineOnly)).join('');
   const viewBox = options.viewBox ?? { x: 0, y: 0, width, height };
-  const backgroundMarkup = options.transparent ? '' : `<rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" height="${viewBox.height}" fill="${escapeXml(background)}"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#8a92ab"/></marker></defs>${backgroundMarkup}${edgeMarkup}${nodeMarkup}</svg>`;
+  const backgroundMarkup = options.transparent ? '' : `<rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" height="${viewBox.height}" fill="${escapeXml(exportBackground)}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${outlineOnly ? '#000000' : '#8a92ab'}"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="${outlineOnly ? '#000000' : '#8a92ab'}"/></marker></defs>${backgroundMarkup}${edgeMarkup}${nodeMarkup}</svg>`;
 }
 
 function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, endpoint: 'start' | 'end'): string {
@@ -164,31 +186,31 @@ function shapeRenderer(node: DiagramNode): string {
     ?? (node.library === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
 }
 
-function renderNode(node: DiagramNode): string {
+function renderNode(node: DiagramNode, outlineOnly = false): string {
   const { x, y } = node.position;
   const { width, height } = node.size;
-  const fill = escapeXml(node.style.fill);
-  const stroke = escapeXml(node.style.stroke);
+  const fill = escapeXml(outlineOnly ? outlineFill(node.style.fill) : node.style.fill);
+  const stroke = escapeXml(outlineOnly ? '#000000' : node.style.stroke);
   const label = escapeXml(typeof node.data.label === 'string' ? node.data.label : node.type);
+  const textColor = escapeXml(outlineOnly ? '#000000' : node.style.textColor);
   const radius = node.style.radius;
   const renderer = shapeRenderer(node);
   const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})`;
-  if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
-  if (renderer === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (renderer === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
   if (renderer === 'entity') {
      const fields = normalizeEntityFields(node.data.fields);
      const columns = entityColumns(node.data.entityVariant, width);
      const showColumnHeaders = node.data.columnHeaders === true;
      const striped = node.data.striped !== false;
-     const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-     const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
-     const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
+         const rowFill = outlineOnly ? outlineFill(typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill) : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
+         const stripeFill = outlineOnly ? '#ffffff' : typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+         const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
      const headerHeight = ERD_HEADER_HEIGHT;
      const rowHeight = ERD_ROW_HEIGHT;
      const fieldTop = headerHeight + (showColumnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
-     const textColor = escapeXml(node.style.textColor);
      const columnHeaders = showColumnHeaders
        ? `<g><rect y="${headerHeight}" width="${width}" height="${ERD_COLUMN_HEADER_HEIGHT}" fill="${escapeXml(headerFill)}" opacity="0.42"/><line x1="0" y1="${fieldTop}" x2="${width}" y2="${fieldTop}" stroke="${stroke}" stroke-opacity="0.55"/>${columns.map((column) => `<text x="${column.id === 'key' ? column.x + column.width / 2 : column.x + 7}" y="${headerHeight + 15}" fill="${textColor}" font-family="monospace" font-size="9" font-weight="600"${column.id === 'key' ? ' text-anchor="middle"' : ''}>${escapeXml(column.label)}</text>`).join('')}</g>`
        : '';
@@ -205,28 +227,28 @@ function renderNode(node: DiagramNode): string {
        const dividers = columns.slice(0, -1).map((column) => `<line x1="${column.x + column.width}" y1="${rowY}" x2="${column.x + column.width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>`).join('');
        return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/>${dividers}${values}</g>`;
      }).join('');
-      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''} opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="13" font-weight="600" text-anchor="middle">${label}</text></g>`;
+       return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''} opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="13" font-weight="600" text-anchor="middle">${label}</text></g>`;
    }
-   if (renderer === 'ellipse') {
-      return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+    if (renderer === 'ellipse') {
+       return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
    }
    if (renderer === 'dfd-store' || renderer === 'store') {
-      return `<g transform="${transform}"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+       return `<g transform="${transform}"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
    }
    if (renderer === 'use-case') {
-      return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+       return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
    }
    if (renderer === 'actor') {
     const center = width / 2;
-     return `<g transform="${transform}"><circle cx="${center}" cy="22" r="14" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><path d="M${center} 36 L${center} 84 M${center - 22} 52 L${center + 22} 52 M${center} 84 L${center - 18} 116 M${center} 84 L${center + 18} 116" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round"/><text x="${center}" y="${height - 8}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+      return `<g transform="${transform}"><circle cx="${center}" cy="22" r="14" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><path d="M${center} 36 L${center} 84 M${center - 22} 52 L${center + 22} 52 M${center} 84 L${center - 18} 116 M${center} 84 L${center + 18} 116" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round"/><text x="${center}" y="${height - 8}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
   }
    if (renderer === 'boundary') {
-     return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5"/><text x="18" y="27" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="11" font-weight="600">${label}</text></g>`;
+      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5"/><text x="18" y="27" fill="${textColor}" font-family="monospace" font-size="11" font-weight="600">${label}</text></g>`;
   }
    if (renderer === 'diamond' || renderer === 'decision') {
-      return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+       return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
    }
-   return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+    return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="12">${label}</text></g>`;
 }
 
 function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selectionIds?: string[]): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
@@ -294,6 +316,10 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 function safeFilename(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-').toLowerCase() || 'untitled-diagram';
+}
+
+function outlineFill(value: string): string {
+  return value === 'none' || value === 'transparent' ? 'none' : '#ffffff';
 }
 
 function escapeXml(value: string): string {
