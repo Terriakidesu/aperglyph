@@ -141,9 +141,9 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
         <section className="section-block recent-section">
           <div className="section-heading"><div><h2>Recent diagrams</h2><p>Continue where you left off.</p></div><div className="recent-tools"><div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search diagrams" /></div><button className="icon-button subtle"><MoreHorizontal size={17} /></button></div></div>
           <div className="recent-grid">
-            {visibleItems.map((item) => {
+            {visibleItems.map((item, index) => {
               const Icon = item.icon;
-              return <button key={item.name} className="recent-card" onClick={() => ('document' in item && item.document) ? onOpen(item.document) : openTemplate(item.type === 'ERD' ? 'erd' : item.type === 'Use case' ? 'use-case' : 'flowchart', item.name)}>
+              return <button key={item.document?.id ?? `${item.name}-${index}`} className="recent-card" onClick={() => ('document' in item && item.document) ? onOpen(item.document) : openTemplate(item.type === 'ERD' ? 'erd' : item.type === 'Use case' ? 'use-case' : 'flowchart', item.name)}>
                 <div className={`recent-preview ${item.color}`}><div className="mini-grid" /><div className="mini-line line-a" /><div className="mini-line line-b" /><div className="mini-node node-a" /><div className="mini-node node-b" /><div className="mini-node node-c" /></div>
                 <div className="recent-card-footer"><div className={`recent-type ${item.color}`}><Icon size={13} /></div><div className="recent-copy"><strong>{item.name}</strong><span>{item.type} · {item.time}</span></div><MoreHorizontal size={16} className="recent-more" /></div>
               </button>;
@@ -155,7 +155,7 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
 
       {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
       <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
-      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.4.2</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
+      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.5.0</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
     </main>
   );
 }

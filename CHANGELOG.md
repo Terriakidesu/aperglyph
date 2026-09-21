@@ -13,6 +13,16 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.5.0] - 2026-09-21
+
+### Added
+
+- Added an R-tree spatial index running in a dedicated Web Worker.
+- Added viewport and nearby-object query protocols with batched node bounds.
+- Added overscanned SVG viewport culling for large documents.
+- Added a resilient main-thread spatial fallback when workers are unavailable.
+- Added packed Rust/WASM viewport rectangle query primitives.
+
 ## [0.4.2] - 2026-09-21
 
 ### Added

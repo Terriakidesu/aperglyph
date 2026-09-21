@@ -68,6 +68,23 @@ pub fn distance(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Return the indexes of rectangles that overlap a viewport.
+///
+/// `rects` is a packed array of `[x, y, width, height]` values. The flat
+/// representation keeps the WASM boundary suitable for batched worker calls.
+#[wasm_bindgen]
+pub fn query_viewport(rects: &[f64], min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<u32> {
+    rects
+        .chunks_exact(4)
+        .enumerate()
+        .filter_map(|(index, rect)| {
+            let [x, y, width, height] = [rect[0], rect[1], rect[2], rect[3]];
+            let overlaps = x <= max_x && x + width >= min_x && y <= max_y && y + height >= min_y;
+            overlaps.then_some(index as u32)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +101,11 @@ mod tests {
     fn snaps_to_grid() {
         assert_eq!(snap_coordinate(27.0, 16.0), 32.0);
         assert_eq!(snap_coordinate(27.0, 0.0), 27.0);
+    }
+
+    #[test]
+    fn queries_packed_viewport_rectangles() {
+        let rectangles = [0.0, 0.0, 10.0, 10.0, 40.0, 40.0, 10.0, 10.0];
+        assert_eq!(query_viewport(&rectangles, 5.0, 5.0, 20.0, 20.0), vec![0]);
     }
 }

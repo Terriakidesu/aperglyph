@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent }
 import { createEdge } from '../core/document';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramNode, Point, Viewport } from '../core/types';
+import { nodeToSpatialNode, SpatialWorkerClient, viewportBounds } from '../spatial';
+import type { SpatialNode } from '../spatial';
 
 interface CanvasSize { width: number; height: number }
 interface Marquee { start: Point; current: Point }
@@ -28,6 +30,12 @@ export function CanvasViewport() {
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [connectorStart, setConnectorStart] = useState<string | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(null);
+  const spatialClient = useMemo(() => new SpatialWorkerClient(), []);
+  const indexedPageRef = useRef<string | null>(null);
+  const indexedNodesRef = useRef(new Map<string, SpatialNode>());
+  const spatialReadyRef = useRef(false);
+  const spatialQueryRef = useRef(0);
 
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -53,6 +61,8 @@ export function CanvasViewport() {
   useEffect(() => {
     if (activeTool !== 'connector') setConnectorStart(null);
   }, [activeTool]);
+
+  useEffect(() => () => spatialClient.terminate(), [spatialClient]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -91,6 +101,55 @@ export function CanvasViewport() {
     if (!page?.settings.snapToGrid) return point;
     return { x: Math.round(point.x / grid) * grid, y: Math.round(point.y / grid) * grid };
   }, [page?.settings.gridSize, page?.settings.snapToGrid]);
+
+  const queryVisibleNodes = useCallback(async () => {
+    if (!page || !spatialReadyRef.current) return;
+    const queryId = ++spatialQueryRef.current;
+    try {
+      const ids = await spatialClient.queryViewport(viewportBounds(viewport, { width: size.width, height: size.height }));
+      if (queryId === spatialQueryRef.current) setVisibleNodeIds(new Set(ids));
+    } catch {
+      if (queryId === spatialQueryRef.current) setVisibleNodeIds(new Set(page.nodes.map((node) => node.id)));
+    }
+  }, [page, size.height, size.width, spatialClient, viewport]);
+
+  useEffect(() => {
+    if (!page) return;
+    let cancelled = false;
+    const nextNodes = page.nodes.map((node) => nodeToSpatialNode(node.id, node.position, node.size));
+    const nextMap = new Map(nextNodes.map((node) => [node.id, node]));
+    const syncIndex = async () => {
+      spatialReadyRef.current = false;
+      setVisibleNodeIds(null);
+      try {
+        if (indexedPageRef.current !== page.id) {
+          await spatialClient.initialize(nextNodes);
+          indexedPageRef.current = page.id;
+        } else {
+          const changed = nextNodes.filter((node) => {
+            const previous = indexedNodesRef.current.get(node.id);
+            return !previous || previous.minX !== node.minX || previous.minY !== node.minY || previous.maxX !== node.maxX || previous.maxY !== node.maxY;
+          });
+          const removed = [...indexedNodesRef.current.keys()].filter((id) => !nextMap.has(id));
+          await spatialClient.upsert(changed);
+          await spatialClient.remove(removed);
+        }
+        indexedNodesRef.current = nextMap;
+        spatialReadyRef.current = true;
+        if (!cancelled) await queryVisibleNodes();
+      } catch {
+        spatialReadyRef.current = true;
+        indexedNodesRef.current = nextMap;
+        if (!cancelled) setVisibleNodeIds(new Set(nextNodes.map((node) => node.id)));
+      }
+    };
+    void syncIndex();
+    return () => { cancelled = true; };
+  }, [page?.id, page?.nodes, spatialClient]);
+
+  useEffect(() => {
+    void queryVisibleNodes();
+  }, [queryVisibleNodes]);
 
   const beginNodeInteraction = (event: ReactPointerEvent<SVGGElement>, node: DiagramNode) => {
     event.stopPropagation();
@@ -207,8 +266,9 @@ export function CanvasViewport() {
     width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y),
   } : null;
 
-  const renderedNodes = page?.nodes ?? [];
-  const nodeMap = useMemo(() => new Map(renderedNodes.map((node) => [node.id, node])), [renderedNodes]);
+  const renderedNodes = page?.nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id)) ?? [];
+  const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => [node.id, node])), [page?.nodes]);
+  const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
 
   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
     <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>
@@ -221,7 +281,7 @@ export function CanvasViewport() {
       <rect className="canvas-background" width={size.width} height={size.height} fill="#0f121a" />
       <g transform={transform}>
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
-        <g className="edge-layer">{(page?.edges ?? []).map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
+        <g className="edge-layer">{renderedEdges.map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
         <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart === node.id} onPointerDown={beginNodeInteraction} />)}</g>
         {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
       </g>
