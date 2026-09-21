@@ -13,6 +13,17 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.7.0] - 2026-09-21
+
+### Added
+
+- Added a connector routing module shared by the editor and SVG exporter.
+- Added true straight, curved, and orthogonal connector paths.
+- Added waypoint-aware orthogonal routing.
+- Added visible top, right, bottom, and left connection ports in Connector mode.
+- Added explicit connector endpoint port persistence.
+- Added start and end arrow markers to canvas and SVG export.
+
 ## [0.6.0] - 2026-09-21
 
 ### Added

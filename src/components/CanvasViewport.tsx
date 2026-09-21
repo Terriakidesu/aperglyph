@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { createEdge } from '../core/document';
-import { nodeCenter, nodeConnectionPoint } from '../core/geometry';
+import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import type { DiagramNode, Point, Viewport } from '../core/types';
+import type { DiagramEdge, DiagramNode, Point, Viewport } from '../core/types';
+import type { ConnectionPort } from '../core/geometry';
 import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
 import type { AlignmentGuide, SpatialNode } from '../spatial';
 
 interface CanvasSize { width: number; height: number }
 interface Marquee { start: Point; current: Point }
+interface ConnectorAnchor { nodeId: string; port?: ConnectionPort }
+
 interface DragSession {
   mode: 'drag' | 'pan' | 'marquee';
   pointerId: number;
@@ -32,7 +35,7 @@ export function CanvasViewport() {
   const [size, setSize] = useState<CanvasSize>({ width: 900, height: 700 });
   const [dragPreview, setDragPreview] = useState<Record<string, Point>>({});
   const [marquee, setMarquee] = useState<Marquee | null>(null);
-  const [connectorStart, setConnectorStart] = useState<string | null>(null);
+  const [connectorStart, setConnectorStart] = useState<ConnectorAnchor | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
   const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(null);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
@@ -151,7 +154,7 @@ export function CanvasViewport() {
     void queryVisibleNodes();
   }, [queryVisibleNodes]);
 
-  const beginNodeInteraction = (event: ReactPointerEvent<SVGGElement>, node: DiagramNode) => {
+  const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => {
     event.stopPropagation();
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       const point = worldPoint(event);
@@ -165,10 +168,11 @@ export function CanvasViewport() {
       return;
     }
     if (activeTool === 'connector') {
+      const anchor = { nodeId: node.id, port } satisfies ConnectorAnchor;
       if (!connectorStart) {
-        setConnectorStart(node.id);
-      } else if (connectorStart !== node.id) {
-        createConnector(createEdge({ nodeId: connectorStart }, { nodeId: node.id }));
+        setConnectorStart(anchor);
+      } else if (connectorStart.nodeId !== node.id) {
+        createConnector(createEdge(connectorStart, anchor));
         setConnectorStart(null);
       }
       return;
@@ -333,13 +337,14 @@ export function CanvasViewport() {
       <defs>
         <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="#2c3346" strokeWidth="0.7" opacity="0.62" /></pattern>
         <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
+        <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8,0 L0,4 L8,8 z" fill="#8a92ab" /></marker>
         <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
       </defs>
       <rect className="canvas-background" width={size.width} height={size.height} fill="#0f121a" />
       <g transform={transform}>
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
         <g className="edge-layer">{renderedEdges.map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
-        <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart === node.id} onPointerDown={beginNodeInteraction} />)}</g>
+        <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} showPorts={activeTool === 'connector'} onPointerDown={beginNodeInteraction} />)}</g>
         <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
           ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
           : <line key={`horizontal-${index}`} className="alignment-guide" x1={guide.start} y1={guide.position} x2={guide.end} y2={guide.position} />)}</g>
@@ -350,23 +355,18 @@ export function CanvasViewport() {
   </div>;
 }
 
-function EdgeView({ edge, source, target }: { edge: import('../core/types').DiagramEdge; source?: DiagramNode; target?: DiagramNode }) {
+function EdgeView({ edge, source, target }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode }) {
   if (!source || !target) return null;
-  const sourceCenter = nodeCenter(source);
-  const targetCenter = nodeCenter(target);
-  const sourcePoint = nodeConnectionPoint(source, targetCenter, edge.source.port);
-  const targetPoint = nodeConnectionPoint(target, sourceCenter, edge.target.port);
-  const sx = sourcePoint.x;
-  const sy = sourcePoint.y;
-  const tx = targetPoint.x;
-  const ty = targetPoint.y;
-  const curve = Math.max(70, Math.abs(tx - sx) * 0.42);
-  const path = `M ${sx} ${sy} C ${sx + (tx > sx ? curve : -curve)} ${sy}, ${tx - (tx > sx ? curve : -curve)} ${ty}, ${tx} ${ty}`;
+  const route = edgeRoute(edge, source, target);
+  const start = route[0];
+  const end = route[route.length - 1];
+  const path = edge.type === 'curved' ? curvedPath(route) : pointsToPath(route);
   const label = typeof edge.data?.label === 'string' ? edge.data.label : null;
-  return <g className="canvas-edge" data-edge-id={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} markerEnd={edge.style.endMarker === 'arrow' ? 'url(#arrow-end)' : undefined} /><circle cx={sx} cy={sy} r="3" fill="#8a92ab" />{label && <g transform={`translate(${(sx + tx) / 2} ${(sy + ty) / 2})`}><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke="#3a4258" /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}</g>;
+  const labelPoint = route.length === 2 ? { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 } : route[Math.floor(route.length / 2)] ?? start;
+  return <g className="canvas-edge" data-edge-id={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} markerStart={edge.style.startMarker === 'arrow' ? 'url(#arrow-start)' : undefined} markerEnd={edge.style.endMarker === 'arrow' ? 'url(#arrow-end)' : undefined} /><circle cx={start.x} cy={start.y} r="3" fill="#8a92ab" />{label && <g transform={`translate(${labelPoint.x} ${labelPoint.y})`}><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke="#3a4258" /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}</g>;
 }
 
-function NodeView({ node, position, selected, connectorStart, onPointerDown }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; onPointerDown: (event: ReactPointerEvent<SVGGElement>, node: DiagramNode) => void }) {
+function NodeView({ node, position, selected, connectorStart, showPorts, onPointerDown }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => void }) {
   const width = node.size.width;
   const height = node.size.height;
   const label = typeof node.data.label === 'string' ? node.data.label : node.type;
@@ -389,9 +389,11 @@ function NodeView({ node, position, selected, connectorStart, onPointerDown }: {
     return <rect width={width} height={height} rx={radius} {...commonProps} />;
   })();
   const labelNode = !['entity', 'actor', 'store', 'boundary', 'line'].includes(node.type) ? <text className={`node-label ${node.type === 'start' || node.type === 'use-case' ? 'node-label-strong' : ''}`} x={width / 2} y={height / 2 + 5}>{label}</text> : node.type === 'actor' ? <text className="node-label" x={width / 2} y={height - 10}>{label}</text> : null;
+  const ports: Array<{ id: ConnectionPort; x: number; y: number }> = [{ id: 'top', x: width / 2, y: 0 }, { id: 'right', x: width, y: height / 2 }, { id: 'bottom', x: width / 2, y: height }, { id: 'left', x: 0, y: height / 2 }];
   return <g className={`canvas-node ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)}>
     {shape}
     {labelNode}
+    {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className="connection-port" data-port={port.id} cx={port.x} cy={port.y} r="5" onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.id); }} />)}</g>}
     {selected && <g className="node-handles"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" /><rect className="handle" x={-4} y={-4} width="8" height="8" /><rect className="handle" x={width - 4} y={-4} width="8" height="8" /><rect className="handle" x={width - 4} y={height - 4} width="8" height="8" /><rect className="handle" x={-4} y={height - 4} width="8" height="8" /></g>}
   </g>;
 }

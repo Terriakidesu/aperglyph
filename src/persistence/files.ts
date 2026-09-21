@@ -1,5 +1,5 @@
 import { parseProject, serializeProject } from '../core/document';
-import { nodeCenter, nodeConnectionPoint } from '../core/geometry';
+import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import type { DiagramDocument, DiagramEdge, DiagramNode } from '../core/types';
 
 export function downloadProject(document: DiagramDocument): void {
@@ -23,18 +23,12 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const source = nodeMap.get(edge.source.nodeId);
     const target = nodeMap.get(edge.target.nodeId);
     if (!source || !target) return '';
-    const sourcePoint = nodeConnectionPoint(source, nodeCenter(target), edge.source.port);
-    const targetPoint = nodeConnectionPoint(target, nodeCenter(source), edge.target.port);
-    const sx = sourcePoint.x;
-    const sy = sourcePoint.y;
-    const tx = targetPoint.x;
-    const ty = targetPoint.y;
-    const curve = Math.max(70, Math.abs(tx - sx) * .42);
-    const path = `M ${sx} ${sy} C ${sx + (tx > sx ? curve : -curve)} ${sy}, ${tx - (tx > sx ? curve : -curve)} ${ty}, ${tx} ${ty}`;
-    return `<path d="${path}" fill="none" stroke="${escapeXml(edge.style.stroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : ''} marker-end="url(#arrow)"/>`;
+    const route = edgeRoute(edge, source, target);
+    const path = edge.type === 'curved' ? curvedPath(route) : pointsToPath(route);
+    return `<path d="${path}" fill="none" stroke="${escapeXml(edge.style.stroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : ''}${edge.style.startMarker === 'arrow' ? ' marker-start="url(#arrow-start)"' : ''}${edge.style.endMarker === 'arrow' ? ' marker-end="url(#arrow)"' : ''}/>`;
   }).join('');
   const nodeMarkup = nodes.map(renderNode).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab"/></marker></defs><rect width="100%" height="100%" fill="${escapeXml(background)}"/>${edgeMarkup}${nodeMarkup}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#8a92ab"/></marker></defs><rect width="100%" height="100%" fill="${escapeXml(background)}"/>${edgeMarkup}${nodeMarkup}</svg>`;
 }
 
 function renderNode(node: DiagramNode): string {
