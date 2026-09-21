@@ -148,7 +148,7 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
       ...page,
       settings: { ...createPage().settings, ...(page.settings ?? {}) },
       nodes: Array.isArray(page.nodes) ? page.nodes : [],
-       edges: Array.isArray(page.edges) ? page.edges.map((edge) => anchorOrthogonalEdge(edge, Array.isArray(page.nodes) ? page.nodes : [])) : [],
+       edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, Array.isArray(page.nodes) ? page.nodes : [], input.diagramType ?? base.diagramType)) : [],
     }))
     : base.pages;
 
@@ -174,6 +174,15 @@ function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramE
     ...edge,
     source: { ...edge.source, port: edge.source.port ?? nearestConnectionPort(source, nodeCenter(target)) },
     target: { ...edge.target, port: edge.target.port ?? nearestConnectionPort(target, nodeCenter(source)) },
+  };
+}
+
+function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: DiagramType): DiagramEdge {
+  const anchored = anchorOrthogonalEdge(edge, nodes);
+  if (diagramType !== 'erd' || anchored.style.startMarker !== 'none' || anchored.style.endMarker !== 'arrow') return anchored;
+  return {
+    ...anchored,
+    style: { ...anchored.style, startMarker: 'bar', endMarker: 'crowfoot' },
   };
 }
 

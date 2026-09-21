@@ -1,5 +1,5 @@
 import { parseProject, serializeProject } from '../core/document';
-import { entityFieldLabel, normalizeEntityFields } from '../core/erd';
+import { normalizeEntityFields } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
 import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
@@ -44,15 +44,15 @@ function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, s
   const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
   const circle = `<circle cx="0" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
   const bar = `<path d="M 0 -7 L 0 7" ${line}/>`;
-  const crowfoot = (offset = 0) => `<path d="M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7" ${line}/>`;
+  const crowfoot = (offset = 0) => `<path d="M ${offset} 0 L ${offset - 11} -7 M ${offset} 0 L ${offset - 11} 0 M ${offset} 0 L ${offset - 11} 7" ${line}/>`;
   const glyph = marker === 'arrow'
     ? `<path d="${endpoint === 'start' ? 'M 0 0 L -10 -6 L -10 6 Z' : 'M 0 0 L 10 -6 L 10 6 Z'}" fill="${escapeXml(stroke)}"/>`
     : marker === 'bar' ? bar
       : marker === 'circle' ? circle
         : marker === 'crowfoot' ? crowfoot()
           : marker === 'circle-bar' ? `${circle}<path d="M 10 -7 L 10 7" ${line}/>`
-            : marker === 'bar-crowfoot' ? `${bar}${crowfoot(5)}`
-              : `${circle}${crowfoot(8)}`;
+            : marker === 'bar-crowfoot' ? `${bar}${crowfoot(-5)}`
+              : `${circle}${crowfoot(-8)}`;
   return `<g transform="translate(${point.x} ${point.y}) rotate(${angle})">${glyph}</g>`;
 }
 
@@ -77,10 +77,33 @@ function renderNode(node: DiagramNode): string {
     const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
     const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
     const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
-    const headerHeight = 42;
+    const headerHeight = 34;
     const rowHeight = 27;
-    const fieldMarkup = fields.map((field, index) => `<g><rect y="${headerHeight + index * rowHeight}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><text x="16" y="${headerHeight + 18 + index * rowHeight}" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="10">${escapeXml(entityFieldLabel(field))}</text></g>`).join('');
-    return `<g transform="translate(${x} ${y})"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/><g>${fieldMarkup}</g><text x="16" y="27" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="13" font-weight="600">${label}</text></g>`;
+    const keyColumnWidth = 38;
+    const typeColumnWidth = Math.min(82, Math.max(58, width * 0.3));
+    const typeColumnX = width - typeColumnWidth;
+    const fieldMarkup = fields.map((field, index) => {
+      const rowY = headerHeight + index * rowHeight;
+      const key = field.primaryKey && field.foreignKey ? 'PK/FK' : field.primaryKey ? 'PK' : field.foreignKey ? 'FK' : field.unique ? 'UQ' : '';
+      return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/><line x1="${keyColumnWidth}" y1="${rowY}" x2="${keyColumnWidth}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/><line x1="${typeColumnX}" y1="${rowY}" x2="${typeColumnX}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>${key ? `<text x="${keyColumnWidth / 2}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="9" font-weight="600" text-anchor="middle">${key}</text>` : ''}<text x="${keyColumnWidth + 8}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="10"${field.primaryKey ? ' text-decoration="underline"' : ''}${field.foreignKey ? ' font-style="italic"' : ''}>${escapeXml(field.name)}</text><text x="${typeColumnX + 7}" y="${rowY + 18}" fill="${escapeXml(node.style.textColor)}" fill-opacity="0.68" font-family="monospace" font-size="9">${escapeXml(field.type)}</text></g>`;
+    }).join('');
+    return `<g transform="translate(${x} ${y})"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''} opacity="${node.style.opacity}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}" opacity="${node.style.opacity}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/><g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="13" font-weight="600" text-anchor="middle">${label}</text></g>`;
+  }
+  if (node.library === 'dfd' && node.type === 'process') {
+    return `<g transform="translate(${x} ${y})"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  }
+  if (node.library === 'dfd' && node.type === 'store') {
+    return `<g transform="translate(${x} ${y})"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  }
+  if (node.type === 'use-case') {
+    return `<g transform="translate(${x} ${y})"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  }
+  if (node.type === 'actor') {
+    const center = width / 2;
+    return `<g transform="translate(${x} ${y})"><circle cx="${center}" cy="22" r="14" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><path d="M${center} 36 L${center} 84 M${center - 22} 52 L${center + 22} 52 M${center} 84 L${center - 18} 116 M${center} 84 L${center + 18} 116" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round"/><text x="${center}" y="${height - 8}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  }
+  if (node.type === 'boundary') {
+    return `<g transform="translate(${x} ${y})"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5"/><text x="18" y="27" fill="${escapeXml(node.style.textColor)}" font-family="monospace" font-size="11" font-weight="600">${label}</text></g>`;
   }
   if (node.type === 'diamond' || node.type === 'decision') {
     return `<g transform="translate(${x} ${y})"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;

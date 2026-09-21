@@ -22,6 +22,22 @@ describe('native file helpers', () => {
     const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } });
     const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
     expect(svg).toContain('M 0 -7 L 0 7');
-    expect(svg).toContain('M 0 0 L 11 -7');
+    expect(svg).toContain('M 0 0 L -11 -7');
+  });
+
+  it('exports standard ERD key columns and standard DFD/UML silhouettes', () => {
+    const entity = createNode('entity', { x: 0, y: 0 }, {
+      library: 'erd',
+      data: { label: 'Users', fields: [{ id: 'id', name: 'UserID', type: 'uuid', primaryKey: true, foreignKey: false, unique: false, nullable: false }] },
+    });
+    const process = createNode('process', { x: 300, y: 0 }, { library: 'dfd', size: { width: 120, height: 120 }, data: { label: 'Process' } });
+    const store = createNode('store', { x: 500, y: 0 }, { library: 'dfd', size: { width: 160, height: 64 }, data: { label: 'Store' } });
+    const useCase = createNode('use-case', { x: 0, y: 180 }, { library: 'use-case', size: { width: 180, height: 72 }, data: { label: 'Use case' } });
+    const svg = documentToSvg([entity, process, store, useCase], [], '#10131c', 800, 600);
+    expect(svg).toContain('>PK</text>');
+    expect(svg).toContain('text-decoration="underline"');
+    expect(svg).toContain('<ellipse cx="60" cy="60" rx="60" ry="60"');
+    expect(svg).toContain('<line x1="0" y1="10" x2="160" y2="10"');
+    expect(svg).toContain('<ellipse cx="90" cy="36" rx="90" ry="36"');
   });
 });

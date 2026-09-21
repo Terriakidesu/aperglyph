@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode } from './document';
-import { entityFieldLabel, normalizeEntityFields, validateErd } from './erd';
+import { entityAutoHeight, entityFieldLabel, normalizeEntityFields, validateErd } from './erd';
 
 describe('ERD semantic model', () => {
   it('normalizes legacy compact attributes', () => {
@@ -15,5 +15,11 @@ describe('ERD semantic model', () => {
     const entity = createNode('entity', { x: 0, y: 0 }, { data: { label: 'users', fields: ['id · uuid', 'id · uuid'] } });
     document.pages[0].nodes.push(entity);
     expect(validateErd(document).some((diagnostic) => diagnostic.message.includes('duplicate'))).toBe(true);
+  });
+
+  it('fits an entity to its current row count', () => {
+    expect(entityAutoHeight(['id · uuid', 'name · varchar'])).toBe(88);
+    expect(entityAutoHeight(['id · uuid', 'name · varchar', 'created · date'])).toBe(115);
+    expect(entityAutoHeight([])).toBe(61);
   });
 });

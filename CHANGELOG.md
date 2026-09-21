@@ -13,6 +13,25 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.10.0] - 2026-09-21
+
+### Added
+
+- Added a semantic DFD validation module for process, external-entity, and data-store roles.
+- Added warnings for direct External Entity ↔ Data Store flows, unlabeled flows, isolated elements, and self-connections.
+- Added DFD semantic guidance and diagnostics to the Inspector.
+- Updated the DFD template to use anchored orthogonal data-flow connectors.
+- Updated ERD entities to standard table notation with PK/FK key columns, typed attributes, associative-table borders, and Crow’s Foot cardinality.
+- Updated DFD symbols to standard process bubbles, external-entity rectangles, and data-store parallel lines.
+- Updated UML use cases to render as standard ellipses while retaining stick-figure actors and system boundaries.
+- Added corner resizing, double-click text editing, selected-node connection ports, canvas context menus, and stable orthogonal waypoint editing.
+- ERD entities now auto-fit vertically when attributes are added or removed.
+
+### Fixed
+
+- Corrected Crow’s Foot orientation so relationship prongs face the entity, and migrated legacy ERD arrow defaults to relationship markers.
+- Prevented orthogonal fallback routes from degrading into diagonal segments when obstacles block the preferred dogleg.
+
 ## [0.9.0] - 2026-09-21
 
 ### Added

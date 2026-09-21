@@ -35,7 +35,7 @@ export function nodeConnectionPoint(node: DiagramNode, toward: Point, port?: str
     const dx = localTarget.x - center.x;
     const dy = localTarget.y - center.y;
     if (Math.abs(dx) < Number.EPSILON && Math.abs(dy) < Number.EPSILON) return center;
-    if (node.type === 'circle' || node.type === 'use-case') {
+    if (node.type === 'circle' || node.type === 'use-case' || (node.library === 'dfd' && node.type === 'process')) {
       const radiusX = halfWidth || 1;
       const radiusY = halfHeight || 1;
       const scale = 1 / Math.sqrt((dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY));

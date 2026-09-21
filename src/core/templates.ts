@@ -36,43 +36,61 @@ export function createTemplateDocument(
       createEdge({ nodeId: build.id }, { nodeId: intake.id }, { data: { label: 'Iterate' } }),
     );
   } else if (type === 'erd') {
-    const users = createNode('entity', { x: -330, y: -80 }, {
-      library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
-      data: { label: 'users', striped: true, fields: ['id · uuid · PK', 'email · varchar', 'created_at · timestamp'] },
+    const users = createNode('entity', { x: -430, y: -180 }, {
+      library: 'erd', size: { width: 230, height: 142 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'Users', striped: true, headerFill: '#272147', fields: ['UserID · uuid · PK', 'CoachID · uuid · FK', 'Name · varchar', 'HabitNum · integer'] },
     });
-    const projects = createNode('entity', { x: 80, y: -80 }, {
-      library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
-      data: { label: 'projects', striped: true, fields: ['id · uuid · PK', 'owner_id · uuid · FK', 'name · varchar'] },
+    const coach = createNode('entity', { x: -430, y: 70 }, {
+      library: 'erd', size: { width: 230, height: 88 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'Coach', striped: true, headerFill: '#272147', fields: ['CoachID · uuid · PK', 'Name · varchar'] },
     });
-    const diagrams = createNode('entity', { x: 490, y: -80 }, {
-      library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
-      data: { label: 'diagrams', striped: true, fields: ['id · uuid · PK', 'project_id · uuid · FK', 'content · jsonb'] },
+    const userHabits = createNode('entity', { x: -110, y: -45 }, {
+      library: 'erd', size: { width: 230, height: 115 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'UserHabits', striped: true, headerFill: '#272147', associative: true, fields: ['UserHabitID · uuid · PK', 'UserID · uuid · FK', 'HabitID · uuid · FK'] },
     });
-    page.nodes.push(users, projects, diagrams);
+    const habits = createNode('entity', { x: 190, y: -180 }, {
+      library: 'erd', size: { width: 220, height: 88 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'Habits', striped: true, headerFill: '#272147', fields: ['HabitID · uuid · PK', 'HabitName · varchar'] },
+    });
+    const checkins = createNode('entity', { x: 520, y: -180 }, {
+      library: 'erd', size: { width: 230, height: 142 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'Checkins', striped: true, headerFill: '#272147', fields: ['HabitCheckinID · uuid · PK', 'HabitID · uuid · FK', 'UserID · uuid · FK', 'CheckinDate · date'] },
+    });
+    const comments = createNode('entity', { x: 520, y: 70 }, {
+      library: 'erd', size: { width: 230, height: 196 },
+      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
+      data: { label: 'Comments', striped: true, headerFill: '#272147', fields: ['CommentID · uuid · PK', 'HabitCheckinID · uuid · FK', 'UserID · uuid · FK', 'CoachID · uuid · FK', 'CommentDate · date', 'CommentText · text'] },
+    });
+    page.nodes.push(users, coach, userHabits, habits, checkins, comments);
     page.edges.push(
-      createEdge({ nodeId: users.id, port: 'right' }, { nodeId: projects.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-      createEdge({ nodeId: projects.id, port: 'right' }, { nodeId: diagrams.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'crowfoot', endMarker: 'bar' }, data: { label: 'N : 1' } }),
+      createEdge({ nodeId: users.id, port: 'right' }, { nodeId: userHabits.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: habits.id, port: 'left' }, { nodeId: userHabits.id, port: 'right' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: habits.id, port: 'right' }, { nodeId: checkins.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
     );
   } else if (type === 'dfd') {
     const source = createNode('external', { x: -370, y: -40 }, {
-      library: 'dfd', size: { width: 180, height: 92 },
-      style: { fill: '#1b3035', stroke: '#42c8d4' }, data: { label: 'Customer' },
+      library: 'dfd', size: { width: 170, height: 72 },
+      style: { fill: '#1b3035', stroke: '#42c8d4', radius: 2 }, data: { label: 'Customer' },
     });
-    const process = createNode('process', { x: -55, y: -40 }, {
-      library: 'dfd', size: { width: 210, height: 92 },
-      style: { fill: '#302a4c', stroke: '#9c86ff' }, data: { label: 'Manage order' },
+    const process = createNode('process', { x: -50, y: -64 }, {
+      library: 'dfd', size: { width: 120, height: 120 },
+      style: { fill: '#2c2752', stroke: '#9c86ff', radius: 60 }, data: { label: 'Manage order' },
     });
-    const store = createNode('store', { x: 305, y: -40 }, {
-      library: 'dfd', size: { width: 210, height: 92 },
-      style: { fill: '#302b24', stroke: '#e0a95b' }, data: { label: 'Orders' },
+    const store = createNode('store', { x: 255, y: -35 }, {
+      library: 'dfd', size: { width: 190, height: 64 },
+      style: { fill: 'none', stroke: '#e0a95b', radius: 0 }, data: { label: 'Orders' },
     });
     page.nodes.push(source, process, store);
     page.edges.push(
-      createEdge({ nodeId: source.id }, { nodeId: process.id }, { data: { label: 'Order details' } }),
-      createEdge({ nodeId: process.id }, { nodeId: store.id }, { data: { label: 'Persist order' } }),
+      createEdge({ nodeId: source.id, port: 'right' }, { nodeId: process.id, port: 'left' }, { type: 'orthogonal', data: { label: 'Order details' } }),
+      createEdge({ nodeId: process.id, port: 'right' }, { nodeId: store.id, port: 'left' }, { type: 'orthogonal', data: { label: 'Persist order' } }),
     );
   } else if (type === 'use-case') {
     const actor = createNode('actor', { x: -360, y: -65 }, {

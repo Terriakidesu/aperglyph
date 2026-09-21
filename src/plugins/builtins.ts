@@ -1,3 +1,5 @@
+import { validateDfd } from '../core/dfd';
+import type { DiagramDocument } from '../core/types';
 import type { DiagramPlugin } from './types';
 
 const straight = { id: 'straight', label: 'Straight connector', routing: 'straight' as const };
@@ -32,7 +34,7 @@ export const flowchartPlugin: DiagramPlugin = {
 export const erdPlugin: DiagramPlugin = {
   id: 'erd', name: 'Entity relationship', description: 'Model tables, attributes, and relationships.',
   shapes: [
-    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 220, height: 180 }, defaultStyle: { fill: '#f2f3f7', stroke: '#68707f', radius: 4, textColor: '#202532' }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], striped: true } },
+    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 230, height: 88 }, defaultStyle: { fill: '#171b28', stroke: '#8f7dff', radius: 2, textColor: '#f4f5fa' }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], striped: true, headerFill: '#272147' } },
     { id: 'attribute', type: 'attribute', label: 'Attribute', icon: 'database', defaultSize: { width: 180, height: 64 }, defaultData: { label: 'attribute' } },
   ],
   connectors: [
@@ -45,12 +47,12 @@ export const erdPlugin: DiagramPlugin = {
 export const dfdPlugin: DiagramPlugin = {
   id: 'dfd', name: 'Data flow diagram', description: 'Trace information between systems and processes.',
   shapes: [
-    { id: 'process', type: 'process', label: 'Process', icon: 'workflow', defaultStyle: { fill: '#302a4c', stroke: '#9c86ff' } },
-    { id: 'external', type: 'external', label: 'External entity', icon: 'square', defaultStyle: { fill: '#1b3035', stroke: '#42c8d4' } },
-    { id: 'store', type: 'store', label: 'Data store', icon: 'database', defaultStyle: { fill: '#302b24', stroke: '#e0a95b' } },
+    { id: 'process', type: 'process', label: 'Process', icon: 'circle', defaultSize: { width: 120, height: 120 }, defaultStyle: { fill: '#2c2752', stroke: '#9c86ff', radius: 60 }, defaultData: { label: 'Process' } },
+    { id: 'external', type: 'external', label: 'External entity', icon: 'square', defaultSize: { width: 170, height: 72 }, defaultStyle: { fill: '#1b3035', stroke: '#42c8d4', radius: 2 }, defaultData: { label: 'External entity' } },
+    { id: 'store', type: 'store', label: 'Data store', icon: 'database', defaultSize: { width: 190, height: 64 }, defaultStyle: { fill: 'none', stroke: '#e0a95b', radius: 0 }, defaultData: { label: 'Data store' } },
   ],
   connectors: [{ id: 'data-flow', label: 'Data flow', routing: 'orthogonal' }],
-  validators: [],
+  validators: [{ id: 'dfd-rules', label: 'DFD flow rules', validate: (document) => validateDfd(document as DiagramDocument).map((diagnostic) => diagnostic.message) }],
 };
 
 export const useCasePlugin: DiagramPlugin = {

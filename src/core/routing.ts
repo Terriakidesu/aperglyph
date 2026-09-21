@@ -124,14 +124,20 @@ function reconstructRoute(key: string, states: Map<string, SearchState>, parents
 }
 
 function fallbackOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Point[] {
-  const candidates = [
-    [{ x: to.x, y: from.y }],
-    [{ x: from.x, y: to.y }],
-  ];
-  for (const [bend] of candidates) {
-    if (clearSegment(from, bend, obstacles) && clearSegment(bend, to, obstacles)) return [from, bend, to];
+  const levels = uniqueSorted([from.y, to.y, ...obstacles.flatMap((rect) => [rect.top - 1, rect.bottom + 1])]);
+  for (const y of levels) {
+    const bends = [{ x: from.x, y }, { x: to.x, y }];
+    if (clearSegment(from, bends[0], obstacles) && clearSegment(bends[0], bends[1], obstacles) && clearSegment(bends[1], to, obstacles)) return [from, ...bends, to];
   }
-  return [from, to];
+  const columns = uniqueSorted([from.x, to.x, ...obstacles.flatMap((rect) => [rect.left - 1, rect.right + 1])]);
+  for (const x of columns) {
+    const bends = [{ x, y: from.y }, { x, y: to.y }];
+    if (clearSegment(from, bends[0], obstacles) && clearSegment(bends[0], bends[1], obstacles) && clearSegment(bends[1], to, obstacles)) return [from, ...bends, to];
+  }
+  // A route must remain orthogonal even when every detour is blocked. The
+  // caller can still edit this dogleg, but it must never silently become a
+  // diagonal connector.
+  return [from, { x: to.x, y: from.y }, to];
 }
 
 function inflate(node: DiagramNode, padding: number): Rect {

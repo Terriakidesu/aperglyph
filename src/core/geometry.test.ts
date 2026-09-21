@@ -29,4 +29,11 @@ describe('node connector geometry', () => {
     expect(nearestConnectionPort(node, { x: 300, y: 10 })).toBe('right');
     expect(nearestConnectionPort(node, { x: 20, y: 200 })).toBe('bottom');
   });
+
+  it('uses ellipse geometry for DFD process bubbles', () => {
+    const node = createNode('process', { x: 0, y: 0 }, { library: 'dfd', size: { width: 100, height: 60 } });
+    const point = nodeConnectionPoint(node, { x: 200, y: 200 });
+    expect(point.x).toBeCloseTo(73.39, 1);
+    expect(point.y).toBeCloseTo(56.51, 1);
+  });
 });

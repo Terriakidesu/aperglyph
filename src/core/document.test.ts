@@ -34,4 +34,18 @@ describe('AperGlyph document model', () => {
     expect(migrated.pages[0].edges[0].source.port).toBe('right');
     expect(migrated.pages[0].edges[0].target.port).toBe('left');
   });
+
+  it('converts legacy ERD arrow defaults to standard relationship markers', () => {
+    const document = createDocument('Legacy ERD', 'erd');
+    const source = createNode('entity', { x: 0, y: 0 });
+    const target = createNode('entity', { x: 300, y: 0 });
+    document.pages[0].nodes.push(source, target);
+    document.pages[0].edges.push({
+      id: 'edge_erd_legacy', type: 'orthogonal', source: { nodeId: source.id }, target: { nodeId: target.id }, waypoints: [],
+      style: { stroke: '#888', strokeWidth: 1, dash: 'solid', startMarker: 'none', endMarker: 'arrow', labelColor: '#888' }, data: {},
+    });
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].edges[0].style.startMarker).toBe('bar');
+    expect(migrated.pages[0].edges[0].style.endMarker).toBe('crowfoot');
+  });
 });

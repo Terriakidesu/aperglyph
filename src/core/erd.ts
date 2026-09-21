@@ -17,6 +17,13 @@ export interface ErdDiagnostic {
   nodeId?: string;
 }
 
+export const ERD_HEADER_HEIGHT = 34;
+export const ERD_ROW_HEIGHT = 27;
+
+export function entityAutoHeight(fields: unknown): number {
+  return ERD_HEADER_HEIGHT + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
+}
+
 export function createEntityField(overrides: Partial<EntityField> = {}): EntityField {
   return {
     id: overrides.id ?? createId('field'),
