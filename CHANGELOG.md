@@ -1,0 +1,69 @@
+# Changelog
+
+All notable changes to AperGlyph are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and releases use [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Planned
+
+- Rust/WASM geometry worker integration
+- Spatial indexing and viewport virtualization
+- Additional diagram plugins and export formats
+
+## [0.4.2] - 2026-09-21
+
+### Added
+
+- Added this changelog.
+
+## [0.4.1] - 2026-09-21
+
+### Fixed
+
+- Excluded Cargo `target/**` artifacts from the Vite watcher to prevent Windows `EBUSY` errors when Rust test binaries are locked.
+
+## [0.4.0] - 2026-09-21
+
+### Added
+
+- Added IndexedDB-backed local document storage.
+- Added debounced autosave and recovery snapshots.
+- Added recent local diagrams to the workspace home screen.
+- Added `.wdiag` import and export.
+- Added client-side SVG export helpers.
+- Added storage estimation and recovery controls.
+
+## [0.3.0] - 2026-09-21
+
+### Added
+
+- Added the AperGlyph home workspace and editor shell.
+- Added the SVG canvas with world-coordinate camera transforms.
+- Added node selection, marquee selection, drag previews, and batch move commands.
+- Added Space-to-pan, Hand tool, middle-mouse panning, wheel zoom, and grid snapping.
+- Added generic, Flowchart, ERD, DFD, and UML use-case shape libraries.
+- Added connector creation, properties inspection, pages, shortcuts, and responsive styling.
+- Removed runtime dependence on external fonts and CDNs.
+
+## [0.2.0] - 2026-09-21
+
+### Added
+
+- Added the versioned diagram document model.
+- Added pages, nodes, edges, styles, endpoints, and viewport types.
+- Added immutable document commands with undo and redo history.
+- Added the typed editor event bus and Zustand editor store.
+- Added document migrations and native project serialization.
+- Added the initial Rust geometry crate with WASM-bindgen exports.
+
+## [0.1.0] - 2026-09-21
+
+### Added
+
+- Added the TypeScript/Vite/React application foundation.
+- Added PWA manifest and Workbox asset precaching.
+- Added the Rust workspace and `aperglyph-diagram-engine` crate.
+- Added local PWA icons and static-hosting-ready configuration.
