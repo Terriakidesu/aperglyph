@@ -1,5 +1,6 @@
 import { Keyboard, PanelLeftClose, PanelRightClose } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { editorEvents } from '../core/events';
 import { useEditorStore } from '../store/editorStore';
 import { CanvasViewport } from './CanvasViewport';
@@ -22,6 +23,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const copySelection = useEditorStore((state) => state.copySelection);
   const cutSelection = useEditorStore((state) => state.cutSelection);
   const pasteClipboard = useEditorStore((state) => state.pasteClipboard);
+  const pastePayload = useEditorStore((state) => state.pastePayload);
   const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
   const rotateSelection = useEditorStore((state) => state.rotateSelection);
   const groupSelection = useEditorStore((state) => state.groupSelection);
@@ -29,6 +31,52 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const writeSystemClipboard = async () => {
+    const payload = copySelection();
+    if (!payload) return;
+    const serialized = serializeClipboardPayload(payload);
+    try {
+      if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        await navigator.clipboard.write([new ClipboardItem({
+          [CLIPBOARD_MIME]: new Blob([serialized], { type: CLIPBOARD_MIME }),
+          'text/plain': new Blob([serialized], { type: 'text/plain' }),
+        })]);
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(serialized);
+      }
+    } catch {
+      // The command-level clipboard remains available when browser permissions
+      // or an insecure context deny system clipboard access.
+    }
+  };
+
+  const readSystemClipboard = async () => {
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          if (!item.types.includes(CLIPBOARD_MIME)) continue;
+          const blob = await item.getType(CLIPBOARD_MIME);
+          const payload = parseClipboardPayload(await blob.text());
+          if (payload) {
+            pastePayload(payload);
+            return;
+          }
+        }
+      }
+      if (navigator.clipboard?.readText) {
+        const payload = parseClipboardPayload(await navigator.clipboard.readText());
+        if (payload) {
+          pastePayload(payload);
+          return;
+        }
+      }
+    } catch {
+      // Fall back to the last in-app copy below.
+    }
+    pasteClipboard();
+  };
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -38,9 +86,9 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
       if (modifier && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); return; }
-      if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); return; }
-      if (modifier && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); return; }
-      if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); return; }
+       if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); void writeSystemClipboard(); return; }
+       if (modifier && event.key.toLowerCase() === 'x') { event.preventDefault(); void writeSystemClipboard().finally(cutSelection); return; }
+       if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); void readSystemClipboard(); return; }
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
@@ -52,7 +100,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, pasteClipboard, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
+   }, [copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, pasteClipboard, pastePayload, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
 
   useEffect(() => editorEvents.on('ui:shortcuts', () => setShowShortcuts(true)), []);
 

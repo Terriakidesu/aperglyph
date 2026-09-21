@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
+import { createTemplateDocument } from './templates';
 
 describe('AperGlyph document model', () => {
   it('creates a versioned document with a page', () => {
@@ -7,6 +8,12 @@ describe('AperGlyph document model', () => {
     expect(document.schemaVersion).toBe(1);
     expect(document.pages).toHaveLength(1);
     expect(document.diagramType).toBe('flowchart');
+  });
+
+  it('keeps a blank general template empty', () => {
+    const document = createTemplateDocument('Blank', 'general');
+    expect(document.pages[0].nodes).toHaveLength(0);
+    expect(document.pages[0].edges).toHaveLength(0);
   });
 
   it('round trips a project through the native file format', () => {

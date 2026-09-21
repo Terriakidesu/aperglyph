@@ -25,6 +25,14 @@ describe('native file helpers', () => {
     expect(svg).toContain('M 0 0 L -11 -7');
   });
 
+  it('orients end arrowheads into the target node', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id }, { nodeId: target.id }, { style: { endMarker: 'arrow' } });
+    const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
+    expect(svg).toContain('<g transform="translate(300 44) rotate(180)"><path d="M 0 0 L 10 -6 L 10 6 Z"');
+  });
+
   it('exports standard ERD key columns and standard DFD/UML silhouettes', () => {
     const entity = createNode('entity', { x: 0, y: 0 }, {
       library: 'erd',

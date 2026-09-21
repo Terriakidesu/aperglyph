@@ -114,19 +114,9 @@ export function createTemplateDocument(
       createEdge({ nodeId: actor.id }, { nodeId: open.id }, { type: 'dashed', data: { label: 'uses' }, style: { dash: 'dashed', endMarker: 'none' } }),
       createEdge({ nodeId: actor.id }, { nodeId: exportNode.id }, { type: 'dashed', style: { dash: 'dashed', endMarker: 'none' } }),
     );
-  } else {
-    const idea = createNode('rounded-rectangle', { x: -300, y: -60 }, {
-      data: { label: 'A clear idea' }, style: { fill: '#2c2752', stroke: '#927cff' },
-    });
-    const shape = createNode('diamond', { x: 50, y: -60 }, {
-      size: { width: 180, height: 120 }, data: { label: 'Shape it' },
-      style: { fill: '#202c44', stroke: '#76b8ff' },
-    });
-    const result = createNode('rounded-rectangle', { x: 370, y: -60 }, {
-      data: { label: 'Share the story' }, style: { fill: '#17362e', stroke: '#43d6a6' },
-    });
-    page.nodes.push(idea, shape, result);
-    page.edges.push(createEdge({ nodeId: idea.id }, { nodeId: shape.id }), createEdge({ nodeId: shape.id }, { nodeId: result.id }));
+  } else if (type === 'general') {
+    // A general diagram is intentionally empty: "Blank canvas" and "New
+    // diagram" should not hide starter content that the user did not create.
   }
 
   document.updatedAt = Date.now();

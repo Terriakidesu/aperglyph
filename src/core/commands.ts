@@ -1,6 +1,11 @@
 import { cloneDocument, clonePageWithNewIds, createId, getPage } from './document';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramNode, DiagramPage, EdgePatch, NodePatch, PageSettingsPatch, Point } from './types';
 
+export const CLIPBOARD_MIME = 'application/x-aperglyph';
+const CLIPBOARD_FORMAT = 'aperglyph-clipboard';
+const CLIPBOARD_VERSION = 1;
+const MAX_CLIPBOARD_ITEMS = 10000;
+
 export interface DocumentCommand {
   label: string;
   execute(document: DiagramDocument): DiagramDocument;
@@ -105,6 +110,21 @@ export class MoveNodesCommand implements DocumentCommand {
         ? node.locked ? node : { ...node, position: { ...this.positions[node.id] } }
         : node);
     }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class LayoutNodesCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly positions: Record<string, Point>, mode: string) {
+    this.label = `Auto layout · ${mode}`;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    if (page) page.nodes = page.nodes.map((node) => this.positions[node.id] && !node.locked ? { ...node, position: { ...this.positions[node.id] } } : node);
     next.updatedAt = Date.now();
     return next;
   }
@@ -386,6 +406,24 @@ export function selectionClipboard(document: DiagramDocument, pageId: string, se
   return { nodes: structuredClone(nodes), edges: structuredClone(edges) };
 }
 
+export function serializeClipboardPayload(payload: ClipboardPayload): string {
+  return JSON.stringify({ format: CLIPBOARD_FORMAT, version: CLIPBOARD_VERSION, payload });
+}
+
+/** Parse untrusted system clipboard text without allowing malformed objects into commands. */
+export function parseClipboardPayload(raw: string): ClipboardPayload | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed) || parsed.format !== CLIPBOARD_FORMAT || parsed.version !== CLIPBOARD_VERSION || !isRecord(parsed.payload)) return null;
+    const payload = parsed.payload;
+    if (!Array.isArray(payload.nodes) || !Array.isArray(payload.edges) || payload.nodes.length > MAX_CLIPBOARD_ITEMS || payload.edges.length > MAX_CLIPBOARD_ITEMS) return null;
+    if (!payload.nodes.every(isClipboardNode) || !payload.edges.every(isClipboardEdge)) return null;
+    return structuredClone(payload as unknown as ClipboardPayload);
+  } catch {
+    return null;
+  }
+}
+
 export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 24, y: 24 }): ClipboardPayload {
   const nodeIds = new Map<string, string>();
   const groupIds = new Map<string, string>();
@@ -411,6 +449,48 @@ export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 
 
 function normalizeRotation(rotation: number): number {
   return ((rotation % 360) + 360) % 360;
+}
+
+function isClipboardNode(value: unknown): value is DiagramNode {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.library !== 'string' || typeof value.type !== 'string') return false;
+  if (!isPoint(value.position) || !isSize(value.size) || !Number.isFinite(value.rotation) || !isRecord(value.style) || !isRecord(value.data)) return false;
+  return typeof value.style.fill === 'string'
+    && typeof value.style.stroke === 'string'
+    && Number.isFinite(value.style.strokeWidth)
+    && Number.isFinite(value.style.radius)
+    && Number.isFinite(value.style.opacity)
+    && typeof value.style.textColor === 'string'
+    && (value.locked === undefined || typeof value.locked === 'boolean')
+    && (value.groupId === undefined || typeof value.groupId === 'string')
+    && (value.zIndex === undefined || Number.isFinite(value.zIndex));
+}
+
+function isClipboardEdge(value: unknown): value is DiagramEdge {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.type !== 'string' || !isEndpoint(value.source) || !isEndpoint(value.target) || !Array.isArray(value.waypoints) || !isRecord(value.style) || !isRecord(value.data)) return false;
+  return value.waypoints.length <= MAX_CLIPBOARD_ITEMS
+    && value.waypoints.every(isPoint)
+    && typeof value.style.stroke === 'string'
+    && Number.isFinite(value.style.strokeWidth)
+    && typeof value.style.dash === 'string'
+    && typeof value.style.startMarker === 'string'
+    && typeof value.style.endMarker === 'string'
+    && typeof value.style.labelColor === 'string';
+}
+
+function isEndpoint(value: unknown): value is DiagramEdge['source'] {
+  return isRecord(value) && typeof value.nodeId === 'string' && (value.port === undefined || typeof value.port === 'string');
+}
+
+function isPoint(value: unknown): value is Point {
+  return isRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
+}
+
+function isSize(value: unknown): value is { width: number; height: number } {
+  return isRecord(value) && typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 && typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export class UpdateEdgeCommand implements DocumentCommand {
@@ -439,6 +519,34 @@ export class UpdateEdgeCommand implements DocumentCommand {
           waypoints: this.changes.waypoints ? this.changes.waypoints.map((point) => ({ ...point })) : edge.waypoints,
         }
         : edge);
+    }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class ResetEdgeCommand implements DocumentCommand {
+  readonly label = 'Reset connector';
+  constructor(private readonly pageId: string, private readonly edgeId: string, private readonly diagramType: DiagramDocument['diagramType']) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    if (page) {
+      const relationship = this.diagramType === 'erd';
+      page.edges = page.edges.map((edge) => edge.id !== this.edgeId ? edge : {
+        ...edge,
+        type: relationship || this.diagramType === 'dfd' ? 'orthogonal' : 'straight',
+        source: { ...edge.source, port: undefined },
+        target: { ...edge.target, port: undefined },
+        waypoints: [],
+        style: {
+          ...edge.style,
+          dash: 'solid',
+          startMarker: relationship ? 'bar' : 'none',
+          endMarker: relationship ? 'crowfoot' : 'arrow',
+        },
+      });
     }
     next.updatedAt = Date.now();
     return next;

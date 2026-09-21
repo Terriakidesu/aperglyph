@@ -18,7 +18,7 @@ export type SpatialRequestPayload =
   | { kind: 'upsert'; nodes: SpatialNode[] }
   | { kind: 'remove'; ids: string[] }
   | { kind: 'queryViewport'; bounds: SpatialBounds }
-  | { kind: 'queryNearby'; x: number; y: number; radius: number };
+  | { kind: 'queryNearby'; x: number; y: number; radius: number; limit?: number };
 
 export type SpatialRequest = SpatialRequestPayload & { requestId: number };
 

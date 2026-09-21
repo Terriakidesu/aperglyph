@@ -12,12 +12,15 @@ interface TreeItem {
 const tree = new RBush<TreeItem>();
 const items = new Map<string, TreeItem>();
 type WasmQueryViewport = (rects: Float64Array, minX: number, minY: number, maxX: number, maxY: number) => Uint32Array;
+type WasmRankNearby = (rects: Float64Array, x: number, y: number, radius: number, maxResults: number) => Uint32Array;
 interface WasmModule {
   default: () => Promise<unknown>;
   query_viewport: WasmQueryViewport;
+  rank_nearby: WasmRankNearby;
 }
 
 let wasmQueryViewport: WasmQueryViewport | null = null;
+let wasmRankNearby: WasmRankNearby | null = null;
 const wasmReady = loadWasm();
 const workerScope = self as unknown as {
   onmessage: ((event: MessageEvent<SpatialRequest>) => void) | null;
@@ -55,7 +58,7 @@ async function handleRequest(request: SpatialRequest): Promise<void> {
       case 'queryNearby': {
         await wasmReady;
         const bounds = { minX: request.x - request.radius, minY: request.y - request.radius, maxX: request.x + request.radius, maxY: request.y + request.radius };
-        respond({ kind: 'result', requestId: request.requestId, ids: queryBounds(bounds) });
+        respond({ kind: 'result', requestId: request.requestId, ids: queryNearby(bounds, request.x, request.y, request.radius, request.limit ?? 256) });
         break;
       }
     }
@@ -70,10 +73,12 @@ async function loadWasm(): Promise<void> {
     const module = await import(/* @vite-ignore */ moduleUrl) as unknown as WasmModule;
     await module.default();
     wasmQueryViewport = module.query_viewport;
+    wasmRankNearby = module.rank_nearby;
   } catch {
     // The TypeScript/RBush implementation remains the compatibility path when
     // the optional WASM asset cannot be loaded.
     wasmQueryViewport = null;
+    wasmRankNearby = null;
   }
 }
 
@@ -94,6 +99,32 @@ function queryBounds(bounds: SpatialBounds): string[] {
     rects[offset + 3] = item.maxY - item.minY;
   });
   const indexes = wasmQueryViewport(rects, bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
+  return Array.from(indexes, (index) => candidates[index]?.id).filter((id): id is string => Boolean(id));
+}
+
+function queryNearby(bounds: SpatialBounds, x: number, y: number, radius: number, limit: number): string[] {
+  const candidates = tree.search(bounds);
+  if (!wasmRankNearby || candidates.length === 0) return candidates
+    .map((item) => {
+      const nearestX = Math.max(item.minX, Math.min(x, item.maxX));
+      const nearestY = Math.max(item.minY, Math.min(y, item.maxY));
+      const dx = x - nearestX;
+      const dy = y - nearestY;
+      return { item, distanceSquared: dx * dx + dy * dy };
+    })
+    .filter(({ distanceSquared }) => distanceSquared <= radius * radius)
+    .sort((left, right) => left.distanceSquared - right.distanceSquared)
+    .slice(0, Math.max(1, limit))
+    .map(({ item }) => item.id);
+  const rects = new Float64Array(candidates.length * 4);
+  candidates.forEach((item, index) => {
+    const offset = index * 4;
+    rects[offset] = item.minX;
+    rects[offset + 1] = item.minY;
+    rects[offset + 2] = item.maxX - item.minX;
+    rects[offset + 3] = item.maxY - item.minY;
+  });
+  const indexes = wasmRankNearby(rects, x, y, radius, Math.max(1, limit));
   return Array.from(indexes, (index) => candidates[index]?.id).filter((id): id is string => Boolean(id));
 }
 

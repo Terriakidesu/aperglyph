@@ -65,12 +65,11 @@ export class SpatialWorkerClient {
     return this.send({ kind: 'queryViewport', bounds });
   }
 
-  queryNearby(x: number, y: number, radius: number): Promise<string[]> {
+  queryNearby(x: number, y: number, radius: number, limit = 256): Promise<string[]> {
     if (!this.worker || !this.workerReady) {
-      const bounds = { minX: x - radius, minY: y - radius, maxX: x + radius, maxY: y + radius };
-      return Promise.resolve(this.fallbackQuery(bounds));
+      return Promise.resolve(this.fallbackNearby(x, y, radius, limit));
     }
-    return this.send({ kind: 'queryNearby', x, y, radius });
+    return this.send({ kind: 'queryNearby', x, y, radius, limit });
   }
 
   terminate(): void {
@@ -105,6 +104,24 @@ export class SpatialWorkerClient {
     return [...this.fallback.values()]
       .filter((node) => node.minX <= bounds.maxX && node.maxX >= bounds.minX && node.minY <= bounds.maxY && node.maxY >= bounds.minY)
       .map((node) => node.id);
+  }
+
+  private fallbackNearby(x: number, y: number, radius: number, limit: number): string[] {
+    const bounds = { minX: x - radius, minY: y - radius, maxX: x + radius, maxY: y + radius };
+    const radiusSquared = Math.max(0, radius) ** 2;
+    return [...this.fallback.values()]
+      .filter((node) => node.minX <= bounds.maxX && node.maxX >= bounds.minX && node.minY <= bounds.maxY && node.maxY >= bounds.minY)
+      .map((node) => {
+        const nearestX = Math.max(node.minX, Math.min(x, node.maxX));
+        const nearestY = Math.max(node.minY, Math.min(y, node.maxY));
+        const dx = x - nearestX;
+        const dy = y - nearestY;
+        return { node, distanceSquared: dx * dx + dy * dy };
+      })
+      .filter(({ distanceSquared }) => distanceSquared <= radiusSquared)
+      .sort((left, right) => left.distanceSquared - right.distanceSquared)
+      .slice(0, Math.max(1, limit))
+      .map(({ node }) => node.id);
   }
 
   private rejectAll(error: Error): void {

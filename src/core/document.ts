@@ -17,6 +17,7 @@ const MAX_NODES_PER_PAGE = 50000;
 const MAX_EDGES_PER_PAGE = 100000;
 const MAX_WAYPOINTS_PER_EDGE = 10000;
 const MAX_STRING_LENGTH = 10000;
+const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
 const diagramTypes = new Set<DiagramType>(['general', 'flowchart', 'erd', 'dfd', 'use-case']);
 const edgeMarkers = new Set(['none', 'arrow', 'bar', 'circle', 'crowfoot', 'circle-bar', 'bar-crowfoot', 'circle-crowfoot']);
 const edgeDashes = new Set(['solid', 'dashed', 'dotted']);
@@ -166,6 +167,7 @@ export function serializeProject(document: DiagramDocument): string {
 }
 
 export function parseProject(raw: string): DiagramDocument {
+  if (raw.length > MAX_PROJECT_BYTES) throw new Error('This AperGlyph project is too large to import safely.');
   const parsed: unknown = JSON.parse(raw);
   if (!isRecord(parsed) || parsed.format !== 'aperglyph' || !isRecord(parsed.document)) {
     throw new Error('This file is not a valid AperGlyph project.');
@@ -183,6 +185,8 @@ export function validateProjectDocument(value: unknown): string[] {
   isBoundedString(value.name, 'document.name', 1, 256, errors);
   if (value.schemaVersion !== undefined && (!isInteger(value.schemaVersion) || value.schemaVersion < 1 || value.schemaVersion > CURRENT_SCHEMA_VERSION)) errors.push('document.schemaVersion is unsupported');
   if (value.diagramType !== undefined && (typeof value.diagramType !== 'string' || !diagramTypes.has(value.diagramType as DiagramType))) errors.push('document.diagramType is invalid');
+  finiteInRange(value.createdAt, 'document.createdAt', 0, 100000000000000, errors);
+  finiteInRange(value.updatedAt, 'document.updatedAt', 0, 100000000000000, errors);
   if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > MAX_PAGES) {
     errors.push(`document.pages must contain between 1 and ${MAX_PAGES} pages`);
     return errors;

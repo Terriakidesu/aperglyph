@@ -5,8 +5,8 @@ import { ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, normalizeEntityFields } from '../cor
 import { editorEvents } from '../core/events';
 import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import type { DiagramEdge, DiagramNode, EdgeMarker, Point, Size, Viewport } from '../core/types';
-import { nearestConnectionPort, nodeCenter } from '../core/geometry';
+import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, Point, Size, Viewport } from '../core/types';
+import { nearestConnectionPort, nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import type { ConnectionPort } from '../core/geometry';
 import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
 import type { AlignmentGuide, SpatialNode } from '../spatial';
@@ -19,7 +19,7 @@ interface ContextMenuState { x: number; y: number; target: { kind: 'canvas' | 'n
 interface TextEditState { kind: 'node' | 'edge'; id: string; value: string }
 
 interface DragSession {
-  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'resize';
+  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'resize' | 'endpoint';
   pointerId: number;
   startWorld: Point;
   startClient: Point;
@@ -30,6 +30,7 @@ interface DragSession {
   nodeId?: string;
   resizeHandle?: ResizeHandle;
   initialNode?: { position: Point; size: Size };
+  endpoint?: 'source' | 'target';
 }
 
 const MIN_ZOOM = 0.2;
@@ -52,6 +53,7 @@ export function CanvasViewport() {
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
   const [waypointPreview, setWaypointPreview] = useState<{ edgeId: string; index: number; point: Point } | null>(null);
+  const [endpointPreview, setEndpointPreview] = useState<{ edgeId: string; endpoint: 'source' | 'target'; anchor: Endpoint; point: Point } | null>(null);
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
@@ -93,13 +95,12 @@ export function CanvasViewport() {
   const fitViewport = useCallback((scope: 'page' | 'selection') => {
     if (!page || size.width <= 0 || size.height <= 0) return;
     const selectedNodes = page.nodes.filter((node) => selectedIds.includes(node.id));
-    const nodes = scope === 'selection' && selectedNodes.length > 0 ? selectedNodes : page.nodes;
-    const bounds = nodes.length > 0
+    const bounds = scope === 'selection' && selectedNodes.length > 0
       ? {
-        x: Math.min(...nodes.map((node) => node.position.x)),
-        y: Math.min(...nodes.map((node) => node.position.y)),
-        width: Math.max(...nodes.map((node) => node.position.x + node.size.width)) - Math.min(...nodes.map((node) => node.position.x)),
-        height: Math.max(...nodes.map((node) => node.position.y + node.size.height)) - Math.min(...nodes.map((node) => node.position.y)),
+        x: Math.min(...selectedNodes.map((node) => node.position.x)),
+        y: Math.min(...selectedNodes.map((node) => node.position.y)),
+        width: Math.max(...selectedNodes.map((node) => node.position.x + node.size.width)) - Math.min(...selectedNodes.map((node) => node.position.x)),
+        height: Math.max(...selectedNodes.map((node) => node.position.y + node.size.height)) - Math.min(...selectedNodes.map((node) => node.position.y)),
       }
       : { x: -page.settings.width / 2, y: -page.settings.height / 2, width: page.settings.width, height: page.settings.height };
     const padding = 72;
@@ -348,13 +349,15 @@ export function CanvasViewport() {
     }
     if (event.button === 0 && !event.shiftKey) lastClickRef.current = { kind: 'node', id: node.id, time: now };
 
+    const groupSelection = node.groupId ? page?.nodes.filter((candidate) => candidate.groupId === node.groupId).map((candidate) => candidate.id) ?? [node.id] : [node.id];
     let nextSelection = selectedIds;
     if (event.shiftKey) {
-      nextSelection = selectedIds.includes(node.id)
-        ? selectedIds.filter((id) => id !== node.id)
-        : [...selectedIds, node.id];
-    } else if (!selectedIds.includes(node.id)) {
-      nextSelection = [node.id];
+      const groupIsSelected = groupSelection.every((id) => selectedIds.includes(id));
+      nextSelection = groupIsSelected
+        ? selectedIds.filter((id) => !groupSelection.includes(id))
+        : [...new Set([...selectedIds, ...groupSelection])];
+    } else if (!selectedIds.includes(node.id) || groupSelection.some((id) => !selectedIds.includes(id))) {
+      nextSelection = groupSelection;
     }
     setSelection(nextSelection, node.id);
     const positions = Object.fromEntries((nextSelection.length ? nextSelection : [node.id]).map((id) => {
@@ -425,6 +428,41 @@ export function CanvasViewport() {
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
+  const beginEndpointInteraction = (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => {
+    if (activeTool !== 'select' || spacePressed || event.button === 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu(null);
+    setSelection([edge.id], edge.id);
+    dragRef.current = {
+      mode: 'endpoint',
+      pointerId: event.pointerId,
+      startWorld: worldPoint(event),
+      startClient: screenPoint(event),
+      edgeId: edge.id,
+      endpoint,
+    };
+    setEndpointPreview({ edgeId: edge.id, endpoint, anchor: { ...edge[endpoint] }, point: { ...point } });
+    svgRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const updateEndpointPreview = (session: DragSession, point: Point) => {
+    if (!session.edgeId || !session.endpoint || !page) return;
+    const edge = page.edges.find((candidate) => candidate.id === session.edgeId);
+    if (!edge) return;
+    const oppositeNodeId = session.endpoint === 'source' ? edge.target.nodeId : edge.source.nodeId;
+    const currentAnchor = edge[session.endpoint];
+    const candidate = page.nodes
+      .filter((node) => node.id !== oppositeNodeId)
+      .filter((node) => point.x >= node.position.x && point.x <= node.position.x + node.size.width && point.y >= node.position.y && point.y <= node.position.y + node.size.height)
+      .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0]
+      ?? page.nodes.find((node) => node.id === currentAnchor.nodeId);
+    if (!candidate) return;
+    const port = nearestConnectionPort(candidate, point);
+    const anchor = { nodeId: candidate.id, port };
+    setEndpointPreview({ edgeId: edge.id, endpoint: session.endpoint, anchor, point: nodeConnectionPoint(candidate, point, port) });
+  };
+
   const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
     setContextMenu(null);
     const target = event.target as Element;
@@ -436,6 +474,9 @@ export function CanvasViewport() {
       isPanningRef.current = true;
     } else if (activeTool === 'shape') {
       addNode(buildNode('rectangle', { x: point.x - 90, y: point.y - 44 }, { data: { label: 'Rectangle' } }));
+      setTool('select');
+    } else if (activeTool === 'text') {
+      addNode(buildNode('text', { x: point.x - 95, y: point.y - 28 }, { size: { width: 190, height: 56 }, data: { label: 'Text label' }, style: { fill: 'transparent', stroke: 'transparent', radius: 0 } }));
       setTool('select');
     } else if (activeTool === 'select') {
       if (!event.shiftKey) setSelection([]);
@@ -466,7 +507,9 @@ export function CanvasViewport() {
       return;
     }
     const point = worldPoint(event);
-    if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
+    if (session.mode === 'endpoint') {
+      updateEndpointPreview(session, point);
+    } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
       const { position, size: initialSize } = session.initialNode;
       const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
       const minWidth = 48;
@@ -525,6 +568,15 @@ export function CanvasViewport() {
         updateNode(nodeId, { position: preview.position, size: preview.size }, 'Resize node');
         setResizePreview(null);
       }
+    } else if (session.mode === 'endpoint' && session.edgeId && session.endpoint && endpointPreview?.edgeId === session.edgeId && endpointPreview.endpoint === session.endpoint) {
+      const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
+      if (edge && !sameEndpoint(edge[session.endpoint], endpointPreview.anchor)) {
+        const changes = session.endpoint === 'source'
+          ? { source: endpointPreview.anchor }
+          : { target: endpointPreview.anchor };
+        updateEdge(edge.id, { ...changes, ...(edge[session.endpoint].nodeId !== endpointPreview.anchor.nodeId ? { waypoints: [] } : {}) }, `Move ${session.endpoint} endpoint`);
+      }
+      setEndpointPreview(null);
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined && waypointPreview?.edgeId === session.edgeId && waypointPreview.index === session.waypointIndex) {
       const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
       if (edge) {
@@ -616,13 +668,18 @@ export function CanvasViewport() {
       <g transform={transform}>
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
         <g className="edge-layer">{renderedEdges.map((edge) => {
+          const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
-            ? (() => { const next = edge.waypoints.slice(); if (waypointPreview.index < next.length) next[waypointPreview.index] = waypointPreview.point; else next.splice(Math.min(waypointPreview.index, next.length), 0, waypointPreview.point); return next; })()
-            : edge.waypoints;
-          const preview = waypointPreview?.edgeId === edge.id ? { ...edge, waypoints: previewWaypoints } : edge;
-          return <EdgeView key={edge.id} edge={preview} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onDoubleClick={(event, selectedEdge) => beginTextEdit('edge', selectedEdge.id)} onWaypointPointerDown={beginWaypointInteraction} markerFill={page?.settings.background ?? '#10131c'} />;
+            ? (() => { const next = previewEdge.waypoints.slice(); if (waypointPreview.index < next.length) next[waypointPreview.index] = waypointPreview.point; else next.splice(Math.min(waypointPreview.index, next.length), 0, waypointPreview.point); return next; })()
+            : previewEdge.waypoints;
+          const preview = waypointPreview?.edgeId === edge.id ? { ...previewEdge, waypoints: previewWaypoints } : previewEdge;
+          return <EdgeView key={edge.id} edge={preview} source={nodeMap.get(preview.source.nodeId)} target={nodeMap.get(preview.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onDoubleClick={(event, selectedEdge) => beginTextEdit('edge', selectedEdge.id)} onWaypointPointerDown={beginWaypointInteraction} markerFill={page?.settings.background ?? '#10131c'} />;
         })}</g>
          <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} showPorts={activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+         <g className="edge-endpoint-layer">{renderedEdges.map((edge) => {
+           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
+           return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={nodeMap.get(previewEdge.source.nodeId)} target={nodeMap.get(previewEdge.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEndpointInteraction} />;
+         })}</g>
         <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
           ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
           : <line key={`horizontal-${index}`} className="alignment-guide" x1={guide.start} y1={guide.position} x2={guide.end} y2={guide.position} />)}</g>
@@ -667,6 +724,17 @@ function EdgeView({ edge, source, target, obstacles, selected, onPointerDown, on
   </g>;
 }
 
+function EdgeEndpointHandles({ edge, source, target, obstacles, selected, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
+  if (!selected || !source || !target) return null;
+  const route = edgeRoute(edge, source, target, obstacles);
+  const start = route[0];
+  const end = route.at(-1) ?? start;
+  return <>
+    <circle className="edge-endpoint-handle source" data-edge-endpoint="source" cx={start.x} cy={start.y} r="7" onPointerDown={(event) => onPointerDown(event, edge, 'source', start)} />
+    <circle className="edge-endpoint-handle target" data-edge-endpoint="target" cx={end.x} cy={end.y} r="7" onPointerDown={(event) => onPointerDown(event, edge, 'target', end)} />
+  </>;
+}
+
 function outwardDirection(point: Point, neighbor: Point): Point {
   const dx = point.x - neighbor.x;
   const dy = point.y - neighbor.y;
@@ -696,6 +764,10 @@ function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker
   return <g key={key} className="edge-marker" transform={`translate(${point.x} ${point.y}) rotate(${angle})`} pointerEvents="none">{glyph}</g>;
 }
 
+function sameEndpoint(left: Endpoint, right: Endpoint): boolean {
+  return left.nodeId === right.nodeId && left.port === right.port;
+}
+
 function NodeView({ node, position, selected, connectorStart, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
   const width = node.size.width;
   const height = node.size.height;
@@ -709,6 +781,16 @@ function NodeView({ node, position, selected, connectorStart, showPorts, diagram
     if (node.type === 'circle' || node.type === 'use-case' || (diagramType === 'dfd' && node.type === 'process')) return <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...commonProps} />;
     if (node.type === 'line') return <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} markerEnd="url(#arrow-end)" />;
     if (node.type === 'actor') return <g><circle cx={width / 2} cy={28} r={16} {...commonProps} /><path d={`M${width / 2} 44 L${width / 2} 91 M${width / 2 - 25} 60 L${width / 2 + 25} 60 M${width / 2} 91 L${width / 2 - 21} 124 M${width / 2} 91 L${width / 2 + 21} 124`} fill="none" stroke={node.style.stroke} strokeWidth="3" strokeLinecap="round" /></g>;
+    if (node.type === 'database') return <path d={`M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}`} {...commonProps} />;
+    if (node.type === 'stored-data') return <path d={`M 12 0 H ${width - 12} Q ${width} 0 ${width} 12 V ${height - 12} Q ${width} ${height} ${width - 12} ${height} H 12 Q 0 ${height} 0 ${height - 12} V 12 Q 0 0 12 0 Z`} {...commonProps} />;
+    if (node.type === 'document' || node.type === 'multiple-document') return <path d={`M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z`} {...commonProps} />;
+    if (node.type === 'manual-input') return <polygon points={`18,0 ${width},0 ${width - 18},${height} 0,${height}`} {...commonProps} />;
+    if (node.type === 'preparation') return <polygon points={`24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}`} {...commonProps} />;
+    if (node.type === 'predefined-process') return <g><rect width={width} height={height} {...commonProps} /><line x1="16" y1="0" x2="16" y2={height} stroke={node.style.stroke} /><line x1={width - 16} y1="0" x2={width - 16} y2={height} stroke={node.style.stroke} /></g>;
+    if (node.type === 'delay') return <path d={`M 0 0 H ${width - 28} A 28 ${height / 2} 0 0 1 ${width - 28} ${height} H 0 Z`} {...commonProps} />;
+    if (node.type === 'display') return <path d={`M 0 0 H ${width - 28} Q ${width} ${height / 2} ${width - 28} ${height} H 0 Q 28 ${height / 2} 0 0 Z`} {...commonProps} />;
+    if (node.type === 'connector') return <circle cx={width / 2} cy={height / 2} r={Math.min(width, height) / 2 - 2} {...commonProps} />;
+    if (node.type === 'off-page-connector') return <polygon points={`0,0 ${width},0 ${width},${height * .68} ${width / 2},${height} 0,${height * .68}`} {...commonProps} />;
     if (node.type === 'entity') {
       const fields = normalizeEntityFields(node.data.fields);
       const striped = node.data.striped !== false;

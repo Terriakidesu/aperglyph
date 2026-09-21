@@ -1,5 +1,7 @@
-import { Grid3X3, Hand, MousePointer2, Plus, Spline, Type, ZoomIn } from 'lucide-react';
+import { Grid3X3, Hand, LayoutGrid, MousePointer2, Plus, Spline, Type, ZoomIn } from 'lucide-react';
+import { useState } from 'react';
 import { editorEvents } from '../core/events';
+import type { LayoutMode } from '../core/layout';
 import type { ToolId } from '../core/types';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 
@@ -16,6 +18,8 @@ export function EditorToolbar() {
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
+  const autoLayout = useEditorStore((state) => state.autoLayout);
+  const [arrangeOpen, setArrangeOpen] = useState(false);
   const page = getActivePage(document, activePageId);
   return <aside className="tool-rail">
     <div className="tool-group main-tools">
@@ -23,6 +27,7 @@ export function EditorToolbar() {
     </div>
     <div className="rail-separator" />
     <button className={`rail-button rail-add ${activeTool === 'shape' ? 'active' : ''}`} title="Add shape" onClick={() => setTool('shape')}><Plus size={18} /><span>Shape</span></button>
+    <div className="rail-arrange"><button className={`rail-button ${arrangeOpen ? 'active' : ''}`} title="Arrange layout" onClick={() => setArrangeOpen((open) => !open)}><LayoutGrid size={17} /><span>Arrange</span></button>{arrangeOpen && <div className="rail-popover"><strong>Arrange</strong>{(['hierarchical', 'horizontal', 'vertical', 'tree', 'grid', 'compact'] as LayoutMode[]).map((mode) => <button key={mode} onClick={() => { void autoLayout(mode); setArrangeOpen(false); }}>{mode.replace('-', ' ')}</button>)}</div>}</div>
     <div className="rail-spacer" />
     <button className={`rail-button ${page?.settings.gridVisible ? 'active' : ''}`} title="Toggle grid" onClick={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, page?.id, 'Toggle grid')}><Grid3X3 size={17} /><span>Grid</span></button>
     <button className="rail-button" title="Fit page" onClick={() => editorEvents.emit('viewport:fit', { scope: 'page' })}><ZoomIn size={18} /><span>Fit</span></button>

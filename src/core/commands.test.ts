@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, MoveNodesCommand, RenamePageCommand, RotateNodesCommand, SetZOrderCommand, UpdateEdgeCommand, selectionClipboard, offsetClipboard } from './commands';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 
 describe('command history', () => {
@@ -84,5 +84,36 @@ describe('command history', () => {
     const payload = offsetClipboard(selectionClipboard(reordered, pageId, [first.id]), { x: 24, y: 24 });
     const duplicated = manager.execute(new DuplicateSelectionCommand(pageId, payload), reordered);
     expect(duplicated.pages[0].nodes).toHaveLength(4);
+  });
+
+  it('keeps grouping and layout undoable and validates clipboard payloads', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const second = createNode('rectangle', { x: 240, y: 120 });
+    document.pages[0].nodes.push(first, second);
+    const manager = new CommandManager();
+    const grouped = manager.execute(new GroupNodesCommand(pageId, [first.id, second.id]), document);
+    expect(grouped.pages[0].nodes.map((node) => node.groupId)).toEqual([expect.any(String), expect.any(String)]);
+    const ungrouped = manager.execute(new UngroupNodesCommand(pageId, [first.id]), grouped);
+    expect(ungrouped.pages[0].nodes.every((node) => node.groupId === undefined)).toBe(true);
+    const laidOut = manager.execute(new LayoutNodesCommand(pageId, { [first.id]: { x: 12, y: 24 }, [second.id]: { x: 300, y: 24 } }, 'horizontal'), ungrouped);
+    expect(laidOut.pages[0].nodes.map((node) => node.position.x)).toEqual([12, 300]);
+    const payload = selectionClipboard(laidOut, pageId, [first.id, second.id]);
+    expect(parseClipboardPayload(serializeClipboardPayload(payload))).toEqual(payload);
+    expect(parseClipboardPayload('{"format":"aperglyph-clipboard","version":1,"payload":{"nodes":[{}],"edges":[]}}')).toBeNull();
+  });
+
+  it('resets a connector to the diagram defaults', () => {
+    const document = createDocument('Reset', 'general');
+    const pageId = document.pages[0].id;
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id, port: 'bottom' }, { nodeId: target.id, port: 'top' }, { type: 'orthogonal', style: { dash: 'dotted', startMarker: 'bar', endMarker: 'circle' } });
+    edge.waypoints = [{ x: 100, y: 200 }];
+    document.pages[0].nodes.push(source, target);
+    document.pages[0].edges.push(edge);
+    const reset = new CommandManager().execute(new ResetEdgeCommand(pageId, edge.id, 'general'), document);
+    expect(reset.pages[0].edges[0]).toMatchObject({ type: 'straight', source: { port: undefined }, target: { port: undefined }, waypoints: [], style: { dash: 'solid', startMarker: 'none', endMarker: 'arrow' } });
   });
 });

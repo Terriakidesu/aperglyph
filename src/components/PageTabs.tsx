@@ -28,10 +28,12 @@ export function PageTabs() {
     const width = Number(window.prompt('Canvas width', String(activePage.settings.width)));
     const height = Number(window.prompt('Canvas height', String(activePage.settings.height)));
     const gridSize = Number(window.prompt('Grid size', String(activePage.settings.gridSize)));
+    const background = window.prompt('Canvas background color', activePage.settings.background);
     const changes = {
       ...(Number.isFinite(width) && width >= 320 ? { width } : {}),
       ...(Number.isFinite(height) && height >= 240 ? { height } : {}),
       ...(Number.isFinite(gridSize) && gridSize >= 1 ? { gridSize } : {}),
+      ...(background?.trim() ? { background: background.trim() } : {}),
     };
     if (Object.keys(changes).length > 0) updatePageSettings(changes, activePage.id, 'Update page settings');
     setMenuOpen(false);

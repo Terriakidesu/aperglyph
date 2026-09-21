@@ -6,6 +6,8 @@ import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } fro
 
 export interface ExportOptions {
   pageId?: string;
+  selectionIds?: string[];
+  allPages?: boolean;
   contentBounds?: boolean;
   transparent?: boolean;
   scale?: 1 | 2 | 4;
@@ -16,21 +18,33 @@ export function downloadProject(document: DiagramDocument): void {
 }
 
 export function downloadSvg(document: DiagramDocument, pageId = document.pages[0]?.id, options: Omit<ExportOptions, 'pageId' | 'scale'> = {}): void {
+  if (options.allPages) {
+    document.pages.forEach((page, index) => downloadSvgPage(document, page, options, document.pages.length > 1 ? `-${index + 1}-${safeFilename(page.name)}` : ''));
+    return;
+  }
   const page = document.pages.find((candidate) => candidate.id === pageId) ?? document.pages[0];
   if (!page) return;
-  const bounds = options.contentBounds ? contentBounds(page.nodes, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
-  const svg = documentToSvg(page.nodes, page.edges, page.settings.background, bounds.width, bounds.height, { ...options, viewBox: bounds });
-  downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safeFilename(document.name)}.svg`);
+  downloadSvgPage(document, page, options);
+}
+
+function downloadSvgPage(document: DiagramDocument, page: DiagramDocument['pages'][number], options: Omit<ExportOptions, 'pageId' | 'scale'>, suffix = ''): void {
+  const scene = exportScene(page, options.selectionIds);
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { ...options, viewBox: bounds });
+  downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safeFilename(document.name)}${suffix}.svg`);
 }
 
 export async function downloadPng(document: DiagramDocument, options: ExportOptions = {}): Promise<void> {
-  const page = document.pages.find((candidate) => candidate.id === (options.pageId ?? document.pages[0]?.id)) ?? document.pages[0];
-  if (!page) return;
-  const bounds = options.contentBounds ? contentBounds(page.nodes, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const pages = options.allPages ? document.pages : [document.pages.find((candidate) => candidate.id === (options.pageId ?? document.pages[0]?.id)) ?? document.pages[0]].filter(Boolean);
   const scale = options.scale ?? 2;
-  const svg = documentToSvg(page.nodes, page.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
-  const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
-  downloadBlob(png, `${safeFilename(document.name)}.png`);
+  for (const [index, page] of pages.entries()) {
+    const scene = exportScene(page, options.selectionIds);
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
+    const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
+    const suffix = pages.length > 1 ? `-${index + 1}-${safeFilename(page.name)}` : '';
+    downloadBlob(png, `${safeFilename(document.name)}${suffix}.png`);
+  }
 }
 
 export async function downloadPdf(document: DiagramDocument, options: ExportOptions = {}): Promise<void> {
@@ -38,8 +52,9 @@ export async function downloadPdf(document: DiagramDocument, options: ExportOpti
   const pdf = await PDFDocument.create();
   const pages = options.pageId ? document.pages.filter((page) => page.id === options.pageId) : document.pages;
   for (const page of pages) {
-    const bounds = options.contentBounds ? contentBounds(page.nodes, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
-    const svg = documentToSvg(page.nodes, page.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
+    const scene = exportScene(page, options.selectionIds);
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * (options.scale ?? 2)), Math.round(bounds.height * (options.scale ?? 2)));
     const image = await pdf.embedPng(await png.arrayBuffer());
     const pdfPage = pdf.addPage([bounds.width, bounds.height]);
@@ -111,6 +126,10 @@ function renderNode(node: DiagramNode): string {
   const label = escapeXml(typeof node.data.label === 'string' ? node.data.label : node.type);
   const radius = node.style.radius;
   const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})`;
+  if (node.type === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (node.type === 'document' || node.type === 'multiple-document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (node.type === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
+  if (node.type === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
   if (node.type === 'entity') {
     const fields = normalizeEntityFields(node.data.fields);
     const striped = node.data.striped !== false;
@@ -151,13 +170,29 @@ function renderNode(node: DiagramNode): string {
    return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}"/><text x="${width / 2}" y="${height / 2 + 5}" text-anchor="middle" fill="${escapeXml(node.style.textColor)}" font-family="sans-serif" font-size="12">${label}</text></g>`;
 }
 
-function contentBounds(nodes: DiagramNode[], pageWidth: number, pageHeight: number): { x: number; y: number; width: number; height: number } {
+function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selectionIds?: string[]): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  if (!selectionIds || selectionIds.length === 0) return { nodes: page.nodes, edges: page.edges };
+  const selected = new Set(selectionIds);
+  const selectedEdges = page.edges.filter((edge) => selected.has(edge.id));
+  const selectedNodeIds = new Set(page.nodes.filter((node) => selected.has(node.id)).map((node) => node.id));
+  selectedEdges.forEach((edge) => { selectedNodeIds.add(edge.source.nodeId); selectedNodeIds.add(edge.target.nodeId); });
+  const nodes = page.nodes.filter((node) => selectedNodeIds.has(node.id));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = page.edges.filter((edge) => selected.has(edge.id) || (selectedNodeIds.has(edge.source.nodeId) && selectedNodeIds.has(edge.target.nodeId) && selected.has(edge.source.nodeId) && selected.has(edge.target.nodeId)));
+  return { nodes, edges };
+}
+
+function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number): { x: number; y: number; width: number; height: number } {
   if (nodes.length === 0) return { x: 0, y: 0, width: pageWidth, height: pageHeight };
   const padding = 32;
-  const minX = Math.min(...nodes.map((node) => node.position.x)) - padding;
-  const minY = Math.min(...nodes.map((node) => node.position.y)) - padding;
-  const maxX = Math.max(...nodes.map((node) => node.position.x + node.size.width)) + padding;
-  const maxY = Math.max(...nodes.map((node) => node.position.y + node.size.height)) + padding;
+  const points = [
+    ...nodes.flatMap((node) => [node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height }]),
+    ...edges.flatMap((edge) => edge.waypoints),
+  ];
+  const minX = Math.min(...points.map((point) => point.x)) - padding;
+  const minY = Math.min(...points.map((point) => point.y)) - padding;
+  const maxX = Math.max(...points.map((point) => point.x)) + padding;
+  const maxY = Math.max(...points.map((point) => point.y)) + padding;
   return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
 }
 

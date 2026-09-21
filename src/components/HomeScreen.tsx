@@ -11,6 +11,7 @@ import { LogoMark } from './LogoMark';
 
 interface HomeScreenProps {
   onOpen: (document: DiagramDocument) => void;
+  onInstall?: () => void;
 }
 
 const templates: Array<{ type: DiagramType; name: string; description: string; icon: typeof Workflow; color: string; nodes: string }> = [
@@ -36,12 +37,13 @@ const fallbackRecent: RecentItem[] = [
   { name: 'Onboarding experience', type: 'Use case', time: 'Sep 18', color: 'pink', icon: Boxes },
 ];
 
-export function HomeScreen({ onOpen }: HomeScreenProps) {
+export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
   const [query, setQuery] = useState('');
   const [savedDocuments, setSavedDocuments] = useState<StoredDocument[]>([]);
   const [recovery, setRecovery] = useState<RecoverySnapshot | null>(null);
   const [storage, setStorage] = useState<StorageEstimate | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -93,12 +95,13 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
         <LogoMark />
         <nav className="home-nav">
           <button className="nav-link active">Workspace</button>
-          <button className="nav-link">Templates</button>
-          <button className="nav-link">Shortcuts</button>
+          <button className="nav-link" onClick={() => document.getElementById('templates')?.scrollIntoView({ behavior: 'smooth' })}>Templates</button>
+          <button className="nav-link" onClick={() => setShowShortcuts(true)}>Shortcuts</button>
         </nav>
-        <div className="home-header-actions">
-          <span className="local-pill"><span className="status-dot" /> Local only</span>
-          <button className="avatar">AG</button>
+          <div className="home-header-actions">
+           <span className="local-pill"><span className="status-dot" /> Local only</span>
+           {onInstall && <button className="secondary-button install-button" onClick={onInstall}>Install app</button>}
+           <span className="avatar" aria-label="Local workspace">AG</span>
         </div>
       </header>
 
@@ -124,8 +127,8 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
           <div className="workspace-stat stat-note"><div className="stat-note-icon"><ShieldCheck size={16} /></div><span><strong>Offline by design.</strong> Your work never needs a server.</span></div>
         </section>
 
-        <section className="section-block">
-          <div className="section-heading"><div><h2>Start with a canvas</h2><p>Pick a language for your thinking, or make your own.</p></div><button className="text-button">View all <ArrowRight size={14} /></button></div>
+          <section className="section-block" id="templates">
+          <div className="section-heading"><div><h2>Start with a canvas</h2><p>Pick a language for your thinking, or make your own.</p></div><button className="text-button" onClick={() => document.getElementById('templates')?.scrollIntoView({ behavior: 'smooth' })}>View all <ArrowRight size={14} /></button></div>
           <div className="template-grid">
             {templates.map((template) => {
               const Icon = template.icon;
@@ -139,13 +142,13 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
         </section>
 
         <section className="section-block recent-section">
-          <div className="section-heading"><div><h2>Recent diagrams</h2><p>Continue where you left off.</p></div><div className="recent-tools"><div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search diagrams" /></div><button className="icon-button subtle"><MoreHorizontal size={17} /></button></div></div>
+           <div className="section-heading"><div><h2>Recent diagrams</h2><p>Continue where you left off.</p></div><div className="recent-tools"><div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search diagrams" /></div><button className="icon-button subtle" title="Clear search" onClick={() => setQuery('')}><MoreHorizontal size={17} /></button></div></div>
           <div className="recent-grid">
             {visibleItems.map((item, index) => {
               const Icon = item.icon;
               return <button key={item.document?.id ?? `${item.name}-${index}`} className="recent-card" onClick={() => ('document' in item && item.document) ? onOpen(item.document) : openTemplate(item.type === 'ERD' ? 'erd' : item.type === 'Use case' ? 'use-case' : 'flowchart', item.name)}>
                 <div className={`recent-preview ${item.color}`}><div className="mini-grid" /><div className="mini-line line-a" /><div className="mini-line line-b" /><div className="mini-node node-a" /><div className="mini-node node-b" /><div className="mini-node node-c" /></div>
-                <div className="recent-card-footer"><div className={`recent-type ${item.color}`}><Icon size={13} /></div><div className="recent-copy"><strong>{item.name}</strong><span>{item.type} · {item.time}</span></div><MoreHorizontal size={16} className="recent-more" /></div>
+                 <div className="recent-card-footer"><div className={`recent-type ${item.color}`}><Icon size={13} /></div><div className="recent-copy"><strong>{item.name}</strong><span>{item.type} · {item.time}</span></div></div>
               </button>;
             })}
             {visibleItems.length === 0 && <div className="empty-recent"><Search size={17} /><span>No diagrams match “{query}”.</span></div>}
@@ -153,7 +156,8 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
         </section>
       </div>
 
-      {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
+       {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
+       {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="Close shortcuts">×</button></div><div className="shortcut-list"><div className="shortcut-row"><span>Select tool</span><kbd>V</kbd></div><div className="shortcut-row"><span>Pan canvas</span><kbd>H</kbd></div><div className="shortcut-row"><span>Undo / redo</span><kbd>Ctrl Z / Ctrl Shift Z</kbd></div><div className="shortcut-row"><span>Copy / paste</span><kbd>Ctrl C / Ctrl V</kbd></div><div className="shortcut-row"><span>Duplicate</span><kbd>Ctrl D</kbd></div></div></div></div>}
       <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
       <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.10.0</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
     </main>

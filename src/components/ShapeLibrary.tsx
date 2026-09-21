@@ -37,7 +37,7 @@ export function ShapeLibrary() {
   };
 
   return <aside className="shape-library">
-    <div className="panel-title-row"><div><span className="panel-kicker">Library</span><h2>Shapes</h2></div><button className="icon-button"><Plus size={17} /></button></div>
+    <div className="panel-title-row"><div><span className="panel-kicker">Library</span><h2>Shapes</h2></div><button className="icon-button" title="Add rectangle" onClick={() => addShape(basicShapes[0])}><Plus size={17} /></button></div>
     <div className="library-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search shapes" /></div>
     <div className="library-scroll">
       <ShapeGroup title="Basic shapes" shapes={basicShapes.filter(matches)} open={openGroups.basics} onToggle={() => setOpenGroups((state) => ({ ...state, basics: !state.basics }))} onAdd={addShape} />

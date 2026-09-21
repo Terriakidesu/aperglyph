@@ -7,18 +7,24 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Planned
-
-- Additional diagram plugins and export formats
-
 ### Added
 
 - Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.
 - Added a reproducible `npm run build:wasm` pipeline and automatic WASM generation before development and production builds.
+- Added undoable page creation, deletion, renaming, duplication, reordering, and settings updates.
+- Added copy, cut, paste, duplicate, grouping, rotation, alignment, distribution, z-order, select-all, and lock enforcement.
+- Added PNG and PDF export alongside SVG and `.wdiag`, including content-bounds and selection-aware image export.
+- Added Rust/WASM graph layout in a dedicated worker with a TypeScript fallback, plus grid, tree, and hierarchy layout commands.
+- Added standard flowchart symbols, Playwright workflows, Vitest performance benchmarks, CI, GitHub Pages deployment, and project documentation.
+- Added install/offline/update PWA lifecycle UX and bounded `.wdiag` import validation.
+- Added validated system clipboard integration for copy, cut, and paste with an in-memory fallback.
+- Added correctly oriented straight/curved arrowheads, draggable/reconnectable connector endpoints, connector reset defaults, and editor-session restoration after reload.
 
 ### Changed
 
-- Kept RBush as the broad-phase spatial index while using Rust for batched rectangle filtering, with a TypeScript fallback when WASM cannot load.
+- Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.
+- Added configurable Vite base-path handling for root and GitHub Pages project deployments.
+- Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
 
 ## [0.10.0] - 2026-09-21
 

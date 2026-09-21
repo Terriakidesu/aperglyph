@@ -11,9 +11,11 @@ import {
   DuplicatePageCommand,
   DuplicateSelectionCommand,
   GroupNodesCommand,
+  LayoutNodesCommand,
   MoveNodesCommand,
   RenamePageCommand,
   ReorderPageCommand,
+  ResetEdgeCommand,
   RotateNodesCommand,
   SetZOrderCommand,
   UngroupNodesCommand,
@@ -26,6 +28,9 @@ import {
 import { createDocument, createEdge, createNode, createPage as buildPage } from '../core/document';
 import { editorEvents } from '../core/events';
 import type { Alignment, DistributionAxis, ZOrderAction } from '../core/commands';
+import { layoutNodes } from '../core/layout';
+import type { LayoutMode } from '../core/layout';
+import { LayoutWorkerClient } from '../spatial/layoutClient';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramNode, EdgePatch, NodePatch, PageSettingsPatch, Point, ToolId, Viewport } from '../core/types';
 
 interface EditorStore {
@@ -50,13 +55,15 @@ interface EditorStore {
   createNode: (node: DiagramNode) => void;
   createEdge: (edge: DiagramEdge) => void;
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
+  resetEdge: (edgeId?: string) => void;
   moveNodes: (positions: Record<string, Point>) => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   deleteSelection: () => void;
   selectAll: () => void;
-  copySelection: () => void;
+  copySelection: () => ClipboardPayload | null;
   cutSelection: () => void;
   pasteClipboard: () => void;
+  pastePayload: (payload: ClipboardPayload) => void;
   duplicateSelection: () => void;
   rotateSelection: (degrees?: number) => void;
   alignSelection: (alignment: Alignment) => void;
@@ -64,6 +71,7 @@ interface EditorStore {
   setZOrder: (action: ZOrderAction) => void;
   groupSelection: () => void;
   ungroupSelection: () => void;
+  autoLayout: (mode?: LayoutMode) => Promise<void>;
   createPage: (name?: string) => void;
   deletePage: (pageId?: string) => void;
   renamePage: (pageId: string, name: string) => void;
@@ -76,6 +84,7 @@ interface EditorStore {
 }
 
 const initialDocument = createDocument();
+const layoutClient = new LayoutWorkerClient();
 
 function historySnapshot(manager: CommandManager) {
   return {
@@ -146,6 +155,15 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, label ?? 'Update connector');
       editorEvents.emit('edge:changed', { edgeId });
     },
+    resetEdge: (edgeId) => {
+      const { activePageId, document, primarySelectedId } = get();
+      const page = getActivePage(document, activePageId);
+      const targetId = edgeId ?? primarySelectedId;
+      if (!page || !targetId || !page.edges.some((edge) => edge.id === targetId)) return;
+      const next = manager.execute(new ResetEdgeCommand(activePageId, targetId, document.diagramType), document);
+      updateDocument(next, 'Reset connector');
+      editorEvents.emit('edge:changed', { edgeId: targetId });
+    },
     moveNodes: (positions) => {
       const { activePageId, document } = get();
       const ids = Object.keys(positions);
@@ -168,15 +186,21 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { document, activePageId, selectedIds } = get();
       const payload = selectionClipboard(document, activePageId, selectedIds);
       if (payload.nodes.length > 0 || payload.edges.length > 0) set({ clipboard: payload });
+      return payload.nodes.length > 0 || payload.edges.length > 0 ? payload : null;
     },
     cutSelection: () => {
       get().copySelection();
       get().deleteSelection();
     },
     pasteClipboard: () => {
-      const { document, activePageId, clipboard } = get();
+      const { clipboard } = get();
       if (!clipboard || (clipboard.nodes.length === 0 && clipboard.edges.length === 0)) return;
-      const payload = offsetClipboard(clipboard);
+      get().pastePayload(clipboard);
+    },
+    pastePayload: (source) => {
+      const { document, activePageId } = get();
+      if (source.nodes.length === 0 && source.edges.length === 0) return;
+      const payload = offsetClipboard(source);
       const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
       updateDocument(next, 'Paste selection');
       get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
@@ -223,6 +247,24 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { activePageId, document, selectedIds } = get();
       const next = manager.execute(new UngroupNodesCommand(activePageId, selectedIds), document);
       updateDocument(next, 'Ungroup selection');
+    },
+    autoLayout: async (mode = 'hierarchical') => {
+      const { activePageId, document, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      if (!page) return;
+      const selected = page.nodes.filter((node) => selectedIds.includes(node.id));
+      const targets = selected.length > 1 ? selected : page.nodes;
+      let positions: Record<string, Point>;
+      try {
+        positions = await layoutClient.layout(targets, page.edges, mode);
+      } catch {
+        positions = layoutNodes(targets, page.edges, mode);
+      }
+      if (Object.keys(positions).length === 0) return;
+      const current = get();
+      if (current.document !== document || current.activePageId !== activePageId) return;
+      const next = manager.execute(new LayoutNodesCommand(activePageId, positions, mode), document);
+      updateDocument(next, `Auto layout · ${mode}`);
     },
     createPage: (name) => {
       const { document } = get();
