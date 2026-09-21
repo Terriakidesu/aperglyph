@@ -65,6 +65,28 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.node-label')).toHaveText('Rectangle');
   });
 
+  test('supports keyboard nudging and the command palette', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Add shape').click();
+    const canvas = page.locator('svg.diagram-canvas');
+    await canvas.click({ position: { x: 360, y: 260 } });
+    const node = page.locator('[data-node-id]').first();
+    const before = await node.getAttribute('transform');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => node.getAttribute('transform')).not.toBe(before);
+    const afterNudge = await node.getAttribute('transform');
+    await page.keyboard.press('Shift+ArrowDown');
+    await expect.poll(() => node.getAttribute('transform')).not.toBe(afterNudge);
+
+    await page.keyboard.press('Control+k');
+    await expect(page.getByLabel('Search commands')).toBeVisible();
+    await page.getByLabel('Search commands').fill('100%');
+    await page.keyboard.press('Enter');
+    await expect(page.getByLabel('Search commands')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
+  });
+
   test('edits and adds fields on an ERD shape in any diagram', async ({ page }) => {
     await page.locator('.template-card').first().click();
     await page.getByTitle('Drag Entity onto the canvas').click();

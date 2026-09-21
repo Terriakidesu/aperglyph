@@ -6,6 +6,7 @@ export interface EditorEventMap {
   'selection:changed': { ids: string[] };
   'viewport:changed': Viewport;
   'viewport:fit': { scope: 'page' | 'selection' };
+  'interaction:cancel': undefined;
   'ui:shortcuts': undefined;
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };

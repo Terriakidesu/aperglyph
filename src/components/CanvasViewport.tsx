@@ -51,6 +51,7 @@ interface ConnectorDragPreview {
   source: ConnectorAnchor;
   start: Point;
   current: Point;
+  target?: ResolvedConnectionAnchor;
 }
 
 interface ShapeDragPreview {
@@ -142,6 +143,13 @@ export function CanvasViewport() {
   const [connectorDragPreview, setConnectorDragPreview] = useState<ConnectorDragPreview | null>(null);
   const [shapeDragPreview, setShapeDragPreview] = useState<ShapeDragPreview | null>(null);
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
+  const [showCanvasHint, setShowCanvasHint] = useState(() => {
+    try {
+      return globalThis.localStorage?.getItem('aperglyph.canvas-hint-dismissed') !== 'true';
+    } catch {
+      return true;
+    }
+  });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -167,6 +175,7 @@ export function CanvasViewport() {
   const addNode = useEditorStore((state) => state.createNode);
   const setTool = useEditorStore((state) => state.setTool);
   const addEdge = useEditorStore((state) => state.createEdge);
+  const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
   const updateEdge = useEditorStore((state) => state.updateEdge);
   const updateNode = useEditorStore((state) => state.updateNode);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
@@ -212,6 +221,31 @@ export function CanvasViewport() {
     if (activeTool !== 'connector') setConnectorStart(null);
   }, [activeTool]);
 
+  useEffect(() => editorEvents.on('interaction:cancel', () => {
+    const session = dragRef.current;
+    if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+    frameRef.current = null;
+    panFrameRef.current = null;
+    pendingPanRef.current = null;
+    isPanningRef.current = false;
+    dragRef.current = null;
+    endpointPreviewRef.current = null;
+    setDragPreview({});
+    setMarquee(null);
+    setAlignmentGuides([]);
+    setSnapCandidateIds([]);
+    setConnectorStart(null);
+    setConnectorDragPreview(null);
+    setEndpointPreview(null);
+    setWaypointPreview(null);
+    setResizePreview(null);
+    setShapeDragPreview(null);
+    setTextEdit(null);
+    setContextMenu(null);
+  }), []);
+
   useEffect(() => () => spatialClient.terminate(), [spatialClient]);
 
   useEffect(() => {
@@ -245,6 +279,17 @@ export function CanvasViewport() {
       y: (screen.y - size.height / 2) / camera.zoom - camera.y,
     };
   }, [screenPoint, size.height, size.width, viewport]);
+
+  const dismissCanvasHint = () => {
+    if (!showCanvasHint) return;
+    setShowCanvasHint(false);
+    try {
+      globalThis.localStorage?.setItem('aperglyph.canvas-hint-dismissed', 'true');
+    } catch {
+      // Some embedded contexts deny local storage; the in-memory dismissal is
+      // still useful for the current editor session.
+    }
+  };
 
   const beginTextEdit = (kind: 'node' | 'edge', id: string) => {
     if (kind === 'node') {
@@ -432,6 +477,7 @@ export function CanvasViewport() {
     if (activeTool !== 'select' || spacePressed || event.button === 1 || node.locked) return;
     event.preventDefault();
     event.stopPropagation();
+    dismissCanvasHint();
     setContextMenu(null);
     setSelection([node.id], node.id);
     dragRef.current = {
@@ -449,6 +495,7 @@ export function CanvasViewport() {
   const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => {
     event.preventDefault();
     event.stopPropagation();
+    dismissCanvasHint();
     setContextMenu(null);
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       const point = worldPoint(event);
@@ -505,13 +552,13 @@ export function CanvasViewport() {
     }
 
     const now = Date.now();
-    if (event.button === 0 && !event.shiftKey && lastClickRef.current?.kind === 'node' && lastClickRef.current.id === node.id && now - lastClickRef.current.time < 350) {
+    if (event.button === 0 && !event.shiftKey && !event.altKey && lastClickRef.current?.kind === 'node' && lastClickRef.current.id === node.id && now - lastClickRef.current.time < 350) {
       lastClickRef.current = null;
       dragRef.current = null;
       beginTextEdit('node', node.id);
       return;
     }
-    if (event.button === 0 && !event.shiftKey) lastClickRef.current = { kind: 'node', id: node.id, time: now };
+    if (event.button === 0 && !event.shiftKey && !event.altKey) lastClickRef.current = { kind: 'node', id: node.id, time: now };
 
     const groupSelection = node.groupId ? page?.nodes.filter((candidate) => candidate.groupId === node.groupId).map((candidate) => candidate.id) ?? [node.id] : [node.id];
     let nextSelection = selectedIds;
@@ -524,8 +571,16 @@ export function CanvasViewport() {
       nextSelection = groupSelection;
     }
     setSelection(nextSelection, node.id);
-    const positions = Object.fromEntries((nextSelection.length ? nextSelection : [node.id]).map((id) => {
-      const current = page?.nodes.find((candidate) => candidate.id === id);
+    let dragSelection = nextSelection.length ? nextSelection : [node.id];
+    let dragPage = page;
+    if (event.button === 0 && event.altKey) {
+      duplicateSelection({ x: 0, y: 0 });
+      const state = useEditorStore.getState();
+      dragSelection = state.selectedIds;
+      dragPage = getActivePage(state.document, state.activePageId);
+    }
+    const positions = Object.fromEntries(dragSelection.map((id) => {
+      const current = dragPage?.nodes.find((candidate) => candidate.id === id);
       return [id, current ? { ...current.position } : { x: 0, y: 0 }];
     }));
     const point = worldPoint(event);
@@ -533,7 +588,7 @@ export function CanvasViewport() {
     dragRef.current = session;
     setAlignmentGuides([]);
     setSnapCandidateIds([]);
-    const selectedNodes = page?.nodes.filter((candidate) => nextSelection.includes(candidate.id)) ?? [];
+    const selectedNodes = dragPage?.nodes.filter((candidate) => dragSelection.includes(candidate.id)) ?? [];
     if (selectedNodes.length > 0) {
       const minX = Math.min(...selectedNodes.map((candidate) => candidate.position.x));
       const minY = Math.min(...selectedNodes.map((candidate) => candidate.position.y));
@@ -542,16 +597,17 @@ export function CanvasViewport() {
       const radius = Math.max(500, Math.max(maxX - minX, maxY - minY) + 320);
       void spatialClient.queryNearby((minX + maxX) / 2, (minY + maxY) / 2, radius).then((ids) => {
         if (dragRef.current !== session) return;
-        const fallbackIds = page?.nodes.filter((candidate) => !nextSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? [];
+         const fallbackIds = dragPage?.nodes.filter((candidate) => !dragSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? [];
         setSnapCandidateIds(ids.length > 0 ? ids : fallbackIds);
       }).catch(() => {
-        if (dragRef.current === session) setSnapCandidateIds(page?.nodes.filter((candidate) => !nextSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? []);
+        if (dragRef.current === session) setSnapCandidateIds(dragPage?.nodes.filter((candidate) => !dragSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? []);
       });
     }
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
   const beginEdgeInteraction = (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => {
+    dismissCanvasHint();
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       event.preventDefault();
       event.stopPropagation();
@@ -584,6 +640,7 @@ export function CanvasViewport() {
     if (activeTool !== 'select' || spacePressed || event.button === 1) return;
     event.preventDefault();
     event.stopPropagation();
+    dismissCanvasHint();
     setContextMenu(null);
     setSelection([edge.id], edge.id);
     const session: DragSession = { mode: 'waypoint', pointerId: event.pointerId, startWorld: worldPoint(event), startClient: screenPoint(event), edgeId: edge.id, waypointIndex: index };
@@ -596,6 +653,7 @@ export function CanvasViewport() {
     if (activeTool !== 'select' || spacePressed || event.button === 1) return;
     event.preventDefault();
     event.stopPropagation();
+    dismissCanvasHint();
     setContextMenu(null);
     setSelection([edge.id], edge.id);
     dragRef.current = {
@@ -644,6 +702,7 @@ export function CanvasViewport() {
 
   const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
     setContextMenu(null);
+    dismissCanvasHint();
     const target = event.target as Element;
     if (target.closest?.('[data-node-id]') || target.closest?.('[data-edge-id]')) return;
     const point = worldPoint(event);
@@ -688,7 +747,7 @@ export function CanvasViewport() {
     const point = worldPoint(event);
     if (session.mode === 'connector' && connectorDragPreview) {
       const snapped = page ? nearestConnectionAnchor(page.nodes, point, session.connectorSource?.nodeId) : null;
-      setConnectorDragPreview({ ...connectorDragPreview, current: snapped?.point ?? point });
+      setConnectorDragPreview({ ...connectorDragPreview, current: snapped?.point ?? point, target: snapped ?? undefined });
     } else if (session.mode === 'endpoint') {
       updateEndpointPreview(session, point);
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
@@ -706,13 +765,32 @@ export function CanvasViewport() {
       if (session.resizeHandle.includes('e')) right = Math.max(position.x + minWidth, initialRight + delta.x);
       if (session.resizeHandle.includes('n')) top = Math.min(initialBottom - minHeight, position.y + delta.y);
       if (session.resizeHandle.includes('s')) bottom = Math.max(position.y + minHeight, initialBottom + delta.y);
+      if (event.shiftKey) {
+        const ratio = initialSize.width / Math.max(1, initialSize.height);
+        let width = right - left;
+        let height = bottom - top;
+        if (width / Math.max(1, initialSize.width) >= height / Math.max(1, initialSize.height)) {
+          width = Math.max(minWidth, width);
+          height = Math.max(minHeight, width / ratio);
+        } else {
+          height = Math.max(minHeight, height);
+          width = Math.max(minWidth, height * ratio);
+        }
+        if (session.resizeHandle.includes('w')) left = initialRight - width;
+        else right = position.x + width;
+        if (session.resizeHandle.includes('n')) top = initialBottom - height;
+        else bottom = position.y + height;
+      }
       setResizePreview({ nodeId: session.nodeId, position: { x: left, y: top }, size: { width: right - left, height: bottom - top } });
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
       const gridSize = page?.settings.gridSize ?? 16;
       const nextPoint = page?.settings.snapToGrid ? { x: Math.round(point.x / gridSize) * gridSize, y: Math.round(point.y / gridSize) * gridSize } : point;
       setWaypointPreview({ edgeId: session.edgeId, index: session.waypointIndex, point: nextPoint });
     } else if (session.mode === 'drag' && session.initialPositions) {
-      const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
+      const rawDelta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
+      const delta = event.shiftKey
+        ? Math.abs(rawDelta.x) >= Math.abs(rawDelta.y) ? { x: rawDelta.x, y: 0 } : { x: 0, y: rawDelta.y }
+        : rawDelta;
       const desiredPositions = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]));
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
       const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
@@ -827,6 +905,11 @@ export function CanvasViewport() {
     return [node.id, resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved] as const;
   })), [dragPreview, page?.nodes, resizePreview]);
   const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
+  const connectionTarget = connectorDragPreview?.target
+    ? { nodeId: connectorDragPreview.target.anchor.nodeId, point: connectorDragPreview.target.point }
+    : endpointPreview?.anchor.nodeId
+      ? { nodeId: endpointPreview.anchor.nodeId, point: endpointPreview.point }
+      : null;
   const routeEntries = useMemo(() => renderedEdges.map((edge) => {
     const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
     const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
@@ -878,7 +961,7 @@ export function CanvasViewport() {
     : null;
 
   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
-    <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>
+     {showCanvasHint && <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>}
     <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
         <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="#2c3346" strokeWidth="0.7" opacity="0.62" /></pattern>
@@ -900,7 +983,8 @@ export function CanvasViewport() {
           const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
           return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={page?.settings.background ?? '#10131c'} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onDoubleClick={(event, selectedEdge) => beginTextEdit('edge', selectedEdge.id)} onWaypointPointerDown={beginWaypointInteraction} />;
         })}</g>
-         <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} showPorts={activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+         <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+         {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
          <g className="edge-marker-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
            return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} markerFill={page?.settings.background ?? '#10131c'} />;
@@ -1047,7 +1131,7 @@ function shapeRenderer(node: DiagramNode, diagramType?: string): string {
     ?? (diagramType === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
 }
 
-function NodeView({ node, position, selected, connectorStart, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
+function NodeView({ node, position, selected, connectorStart, connectorTarget, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; connectorTarget: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
   const width = node.size.width;
   const height = node.size.height;
   const label = typeof node.data.label === 'string' ? node.data.label : node.type;
@@ -1110,7 +1194,7 @@ function NodeView({ node, position, selected, connectorStart, showPorts, diagram
     { id: 'se', x: width - 4, y: height - 4, cursor: 'nwse-resize' },
     { id: 'sw', x: -4, y: height - 4, cursor: 'nesw-resize' },
   ];
-  return <g className={`canvas-node ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
+  return <g className={`canvas-node ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''} ${connectorTarget ? 'connector-target' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
     {shape}
     {labelNode}
      {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset); }} />)}</g>}

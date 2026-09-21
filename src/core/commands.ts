@@ -146,11 +146,25 @@ export class UpdateNodeCommand implements DocumentCommand {
     const page = getPage(next, this.pageId);
     if (page) {
       page.nodes = page.nodes.map((node) => node.id === this.nodeId
-        ? node.locked && this.changes.locked !== false
-          ? node
-          : { ...node, ...this.changes, style: this.changes.style ? { ...node.style, ...this.changes.style } : node.style, data: this.changes.data ? { ...node.data, ...this.changes.data } : node.data }
+        ? applyNodePatch(node, this.changes)
         : node);
     }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class UpdateNodesCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly nodeIds: string[], private readonly changes: NodePatch, label = 'Update selection') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const ids = new Set(this.nodeIds);
+    const page = getPage(next, this.pageId);
+    if (page) page.nodes = page.nodes.map((node) => ids.has(node.id) ? applyNodePatch(node, this.changes) : node);
     next.updatedAt = Date.now();
     return next;
   }
@@ -325,11 +339,18 @@ export class DistributeNodesCommand implements DocumentCommand {
     const page = getPage(next, this.pageId);
     const nodes = page?.nodes.filter((node) => ids.has(node.id) && !node.locked).sort((a, b) => this.axis === 'horizontal' ? a.position.x - b.position.x : a.position.y - b.position.y) ?? [];
     if (page && nodes.length > 2) {
-      const first = this.axis === 'horizontal' ? nodes[0].position.x : nodes[0].position.y;
-      const lastNode = nodes.at(-1)!;
-      const last = this.axis === 'horizontal' ? lastNode.position.x : lastNode.position.y;
-      const step = (last - first) / (nodes.length - 1);
-      const positions = new Map(nodes.map((node, index) => [node.id, this.axis === 'horizontal' ? { x: first + step * index, y: node.position.y } : { x: node.position.x, y: first + step * index }]));
+      const first = nodes[0];
+      const last = nodes.at(-1)!;
+      const start = this.axis === 'horizontal' ? first.position.x : first.position.y;
+      const end = this.axis === 'horizontal' ? last.position.x + last.size.width : last.position.y + last.size.height;
+      const occupied = nodes.reduce((total, node) => total + (this.axis === 'horizontal' ? node.size.width : node.size.height), 0);
+      const gap = (end - start - occupied) / (nodes.length - 1);
+      let cursor = start;
+      const positions = new Map(nodes.map((node) => {
+        const position = this.axis === 'horizontal' ? { x: cursor, y: node.position.y } : { x: node.position.x, y: cursor };
+        cursor += (this.axis === 'horizontal' ? node.size.width : node.size.height) + gap;
+        return [node.id, position] as const;
+      }));
       page.nodes = page.nodes.map((node) => positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node);
     }
     next.updatedAt = Date.now();
@@ -449,6 +470,16 @@ export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 
 
 function normalizeRotation(rotation: number): number {
   return ((rotation % 360) + 360) % 360;
+}
+
+function applyNodePatch(node: DiagramNode, changes: NodePatch): DiagramNode {
+  if (node.locked && changes.locked !== false) return node;
+  return {
+    ...node,
+    ...changes,
+    style: changes.style ? { ...node.style, ...changes.style } : node.style,
+    data: changes.data ? { ...node.data, ...changes.data } : node.data,
+  };
 }
 
 function isClipboardNode(value: unknown): value is DiagramNode {

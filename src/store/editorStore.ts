@@ -21,6 +21,7 @@ import {
   UngroupNodesCommand,
   UpdateEdgeCommand,
   UpdateNodeCommand,
+  UpdateNodesCommand,
   UpdatePageSettingsCommand,
   offsetClipboard,
   selectionClipboard,
@@ -57,14 +58,16 @@ interface EditorStore {
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   resetEdge: (edgeId?: string) => void;
   moveNodes: (positions: Record<string, Point>) => void;
+  nudgeSelection: (delta: Point) => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
+  updateNodes: (nodeIds: string[], changes: NodePatch, label?: string) => void;
   deleteSelection: () => void;
   selectAll: () => void;
   copySelection: () => ClipboardPayload | null;
   cutSelection: () => void;
   pasteClipboard: () => void;
   pastePayload: (payload: ClipboardPayload) => void;
-  duplicateSelection: () => void;
+  duplicateSelection: (offset?: Point) => string[];
   rotateSelection: (degrees?: number) => void;
   alignSelection: (alignment: Alignment) => void;
   distributeSelection: (axis: DistributionAxis) => void;
@@ -171,10 +174,30 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, 'Move selection');
       editorEvents.emit('node:moved', { nodeIds: ids, positions });
     },
+    nudgeSelection: (delta) => {
+      const { activePageId, document, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      if (!page) return;
+      const nodeIds = selectedIds.filter((id) => page.nodes.some((node) => node.id === id));
+      const positions = Object.fromEntries(nodeIds.map((id) => {
+        const node = page.nodes.find((candidate) => candidate.id === id)!;
+        return [id, { x: node.position.x + delta.x, y: node.position.y + delta.y }];
+      }));
+      if (Object.keys(positions).length === 0) return;
+      const next = manager.execute(new MoveNodesCommand(activePageId, positions), document);
+      updateDocument(next, 'Nudge selection');
+      editorEvents.emit('node:moved', { nodeIds, positions });
+    },
     updateNode: (nodeId, changes, label) => {
       const { activePageId, document } = get();
       const next = manager.execute(new UpdateNodeCommand(activePageId, nodeId, changes, label), document);
       updateDocument(next, label ?? 'Update node');
+    },
+    updateNodes: (nodeIds, changes, label = 'Update selection') => {
+      const { activePageId, document } = get();
+      if (nodeIds.length === 0) return;
+      const next = manager.execute(new UpdateNodesCommand(activePageId, nodeIds, changes, label), document);
+      updateDocument(next, label);
     },
     selectAll: () => {
       const { document, activePageId } = get();
@@ -205,14 +228,16 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, 'Paste selection');
       get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
     },
-    duplicateSelection: () => {
+    duplicateSelection: (offset = { x: 24, y: 24 }) => {
       const { document, activePageId, selectedIds } = get();
       const source = selectionClipboard(document, activePageId, selectedIds);
-      if (source.nodes.length === 0 && source.edges.length === 0) return;
-      const payload = offsetClipboard(source);
+      if (source.nodes.length === 0 && source.edges.length === 0) return [];
+      const payload = offsetClipboard(source, offset);
       const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
       updateDocument(next, 'Duplicate selection');
-      get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
+      const ids = [...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)];
+      get().setSelection(ids);
+      return ids;
     },
     rotateSelection: (degrees = 90) => {
       const { activePageId, document, selectedIds } = get();

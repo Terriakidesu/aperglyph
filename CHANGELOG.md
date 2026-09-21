@@ -8,7 +8,6 @@ and releases use [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-
 - Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.
 - Added a reproducible `npm run build:wasm` pipeline and automatic WASM generation before development and production builds.
 - Added undoable page creation, deletion, renaming, duplication, reordering, and settings updates.
@@ -25,6 +24,20 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.
 - Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
+
+## [0.11.0] - 2026-09-21
+
+### Added
+
+- Added one-pixel and grid-step keyboard nudging, axis-constrained movement, aspect-ratio-preserving resize, and Alt-drag duplication.
+- Added clean Escape cancellation for active canvas interactions and persistent canvas-hint dismissal.
+- Added equal-gap distribution for differently sized selections and common multi-selection property editing.
+- Added Fit Selection, Fit Page, 100% zoom, grid controls, connector target previews, distinct ports and resize handles, and persistent Inspector sections.
+- Added the Ctrl/Cmd+K command palette for common viewport, selection, page, layout, and help actions.
+
+### Changed
+
+- Added tooltips and accessible labels to icon-only interaction controls.
 
 ## [0.10.1] - 2026-09-21
 

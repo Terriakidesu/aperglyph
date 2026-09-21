@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 
 describe('command history', () => {
@@ -97,6 +97,33 @@ describe('command history', () => {
     const payload = offsetClipboard(selectionClipboard(reordered, pageId, [first.id]), { x: 24, y: 24 });
     const duplicated = manager.execute(new DuplicateSelectionCommand(pageId, payload), reordered);
     expect(duplicated.pages[0].nodes).toHaveLength(4);
+  });
+
+  it('distributes different-sized nodes with equal gaps', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 40, height: 30 } });
+    const second = createNode('rectangle', { x: 100, y: 0 }, { size: { width: 80, height: 30 } });
+    const third = createNode('rectangle', { x: 300, y: 0 }, { size: { width: 60, height: 30 } });
+    document.pages[0].nodes.push(first, second, third);
+    const distributed = new CommandManager().execute(new DistributeNodesCommand(pageId, [first.id, second.id, third.id], 'horizontal'), document);
+    const nodes = distributed.pages[0].nodes;
+    expect(nodes[1].position.x - (nodes[0].position.x + nodes[0].size.width)).toBe(90);
+    expect(nodes[2].position.x - (nodes[1].position.x + nodes[1].size.width)).toBe(90);
+  });
+
+  it('updates shared selection properties as one command', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const second = createNode('rectangle', { x: 100, y: 0 });
+    document.pages[0].nodes.push(first, second);
+    const manager = new CommandManager();
+    const updated = manager.execute(new UpdateNodesCommand(pageId, [first.id, second.id], { style: { opacity: 0.6 }, locked: true }, 'Update selection'), document);
+    expect(updated.pages[0].nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: first.id, locked: true, style: expect.objectContaining({ opacity: 0.6 }) }),
+      expect.objectContaining({ id: second.id, locked: true, style: expect.objectContaining({ opacity: 0.6 }) }),
+    ]));
   });
 
   it('keeps grouping and layout undoable and validates clipboard payloads', () => {
