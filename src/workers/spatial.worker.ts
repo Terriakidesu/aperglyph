@@ -1,5 +1,5 @@
 import RBush from 'rbush';
-import type { SpatialNode, SpatialRequest, SpatialResponse } from '../spatial/types';
+import type { SpatialBounds, SpatialEngine, SpatialNode, SpatialRequest, SpatialResponse } from '../spatial/types';
 
 interface TreeItem {
   minX: number;
@@ -11,21 +11,34 @@ interface TreeItem {
 
 const tree = new RBush<TreeItem>();
 const items = new Map<string, TreeItem>();
+type WasmQueryViewport = (rects: Float64Array, minX: number, minY: number, maxX: number, maxY: number) => Uint32Array;
+interface WasmModule {
+  default: () => Promise<unknown>;
+  query_viewport: WasmQueryViewport;
+}
+
+let wasmQueryViewport: WasmQueryViewport | null = null;
+const wasmReady = loadWasm();
 const workerScope = self as unknown as {
   onmessage: ((event: MessageEvent<SpatialRequest>) => void) | null;
   postMessage: (message: SpatialResponse) => void;
 };
 
+let requestChain = Promise.resolve();
 workerScope.onmessage = (event) => {
-  const request = event.data;
+  requestChain = requestChain.then(() => handleRequest(event.data));
+};
+
+async function handleRequest(request: SpatialRequest): Promise<void> {
   try {
     switch (request.kind) {
       case 'initialize':
+        await wasmReady;
         tree.clear();
         items.clear();
         tree.load(request.nodes.map(toTreeItem));
         request.nodes.forEach((node) => items.set(node.id, toTreeItem(node)));
-        respond({ kind: 'ready', requestId: request.requestId });
+        respond({ kind: 'ready', requestId: request.requestId, engine: activeEngine() });
         break;
       case 'upsert':
         request.nodes.forEach(upsert);
@@ -36,18 +49,53 @@ workerScope.onmessage = (event) => {
         respond({ kind: 'ready', requestId: request.requestId });
         break;
       case 'queryViewport':
-        respond({ kind: 'result', requestId: request.requestId, ids: tree.search(request.bounds).map((item) => item.id) });
+        await wasmReady;
+        respond({ kind: 'result', requestId: request.requestId, ids: queryBounds(request.bounds) });
         break;
       case 'queryNearby': {
+        await wasmReady;
         const bounds = { minX: request.x - request.radius, minY: request.y - request.radius, maxX: request.x + request.radius, maxY: request.y + request.radius };
-        respond({ kind: 'result', requestId: request.requestId, ids: tree.search(bounds).map((item) => item.id) });
+        respond({ kind: 'result', requestId: request.requestId, ids: queryBounds(bounds) });
         break;
       }
     }
   } catch (error) {
     respond({ kind: 'error', requestId: request.requestId, message: error instanceof Error ? error.message : 'Spatial query failed.' });
   }
-};
+}
+
+async function loadWasm(): Promise<void> {
+  try {
+    const moduleUrl = new URL('/wasm/aperglyph_diagram_engine.js', self.location.origin).href;
+    const module = await import(/* @vite-ignore */ moduleUrl) as unknown as WasmModule;
+    await module.default();
+    wasmQueryViewport = module.query_viewport;
+  } catch {
+    // The TypeScript/RBush implementation remains the compatibility path when
+    // the optional WASM asset cannot be loaded.
+    wasmQueryViewport = null;
+  }
+}
+
+function activeEngine(): SpatialEngine {
+  return wasmQueryViewport ? 'wasm' : 'typescript';
+}
+
+function queryBounds(bounds: SpatialBounds): string[] {
+  const candidates = tree.search(bounds);
+  if (!wasmQueryViewport || candidates.length === 0) return candidates.map((item) => item.id);
+
+  const rects = new Float64Array(candidates.length * 4);
+  candidates.forEach((item, index) => {
+    const offset = index * 4;
+    rects[offset] = item.minX;
+    rects[offset + 1] = item.minY;
+    rects[offset + 2] = item.maxX - item.minX;
+    rects[offset + 3] = item.maxY - item.minY;
+  });
+  const indexes = wasmQueryViewport(rects, bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
+  return Array.from(indexes, (index) => candidates[index]?.id).filter((id): id is string => Boolean(id));
+}
 
 function upsert(node: SpatialNode): void {
   remove(node.id);

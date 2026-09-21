@@ -9,9 +9,16 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ### Planned
 
-- Rust/WASM geometry worker integration
-- Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
+
+### Added
+
+- Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.
+- Added a reproducible `npm run build:wasm` pipeline and automatic WASM generation before development and production builds.
+
+### Changed
+
+- Kept RBush as the broad-phase spatial index while using Rust for batched rectangle filtering, with a TypeScript fallback when WASM cannot load.
 
 ## [0.10.0] - 2026-09-21
 

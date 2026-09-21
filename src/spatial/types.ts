@@ -22,7 +22,9 @@ export type SpatialRequestPayload =
 
 export type SpatialRequest = SpatialRequestPayload & { requestId: number };
 
+export type SpatialEngine = 'wasm' | 'typescript';
+
 export type SpatialResponse =
-  | { kind: 'ready'; requestId: number }
+  | { kind: 'ready'; requestId: number; engine?: SpatialEngine }
   | { kind: 'result'; requestId: number; ids: string[] }
   | { kind: 'error'; requestId: number; message: string };

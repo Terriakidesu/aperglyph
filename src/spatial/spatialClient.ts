@@ -1,4 +1,4 @@
-import type { SpatialBounds, SpatialNode, SpatialRequestPayload, SpatialResponse } from './types';
+import type { SpatialBounds, SpatialEngine, SpatialNode, SpatialRequestPayload, SpatialResponse } from './types';
 
 interface PendingRequest {
   resolve: (value: string[]) => void;
@@ -15,6 +15,7 @@ export class SpatialWorkerClient {
   private readonly fallback = new Map<string, SpatialNode>();
   private readonly pending = new Map<number, PendingRequest>();
   private requestId = 0;
+  private engineKind: SpatialEngine = 'typescript';
 
   constructor() {
     if (typeof Worker === 'undefined') {
@@ -33,6 +34,10 @@ export class SpatialWorkerClient {
     } catch {
       this.worker = null;
     }
+  }
+
+  get engine(): SpatialEngine {
+    return this.engineKind;
   }
 
   async initialize(nodes: SpatialNode[]): Promise<void> {
@@ -86,6 +91,7 @@ export class SpatialWorkerClient {
   private handleResponse(response: SpatialResponse): void {
     if (response.kind === 'ready') {
       this.workerReady = true;
+      if (response.engine) this.engineKind = response.engine;
       this.pending.get(response.requestId)?.resolve([]);
     } else if (response.kind === 'result') {
       this.pending.get(response.requestId)?.resolve(response.ids);
