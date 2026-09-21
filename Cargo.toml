@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/diagram-engine"]
+resolver = "2"

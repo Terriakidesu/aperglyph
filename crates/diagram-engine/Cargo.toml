@@ -1,0 +1,12 @@
+[package]
+name = "aperglyph-diagram-engine"
+version = "0.1.0"
+edition = "2024"
+description = "Geometry and spatial primitives for the AperGlyph diagram editor"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
