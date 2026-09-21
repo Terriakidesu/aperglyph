@@ -155,7 +155,7 @@ export function HomeScreen({ onOpen }: HomeScreenProps) {
 
       {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
       <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
-      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.5.1</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
+      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.5.2</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
     </main>
   );
 }

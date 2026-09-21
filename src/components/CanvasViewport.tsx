@@ -26,6 +26,9 @@ export function CanvasViewport() {
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const frameRef = useRef<number | null>(null);
+  const panFrameRef = useRef<number | null>(null);
+  const pendingPanRef = useRef<{ session: DragSession; screen: Point } | null>(null);
+  const isPanningRef = useRef(false);
   const [size, setSize] = useState<CanvasSize>({ width: 900, height: 700 });
   const [dragPreview, setDragPreview] = useState<Record<string, Point>>({});
   const [marquee, setMarquee] = useState<Marquee | null>(null);
@@ -104,7 +107,7 @@ export function CanvasViewport() {
   }, [page?.settings.gridSize, page?.settings.snapToGrid]);
 
   const queryVisibleNodes = useCallback(async () => {
-    if (!page || !spatialReadyRef.current) return;
+    if (!page || !spatialReadyRef.current || isPanningRef.current) return;
     const queryId = ++spatialQueryRef.current;
     try {
       const ids = await spatialClient.queryViewport(viewportBounds(viewport, { width: size.width, height: size.height }));
@@ -157,6 +160,7 @@ export function CanvasViewport() {
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       const point = worldPoint(event);
       dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: viewport };
+      isPanningRef.current = true;
       svgRef.current?.setPointerCapture(event.pointerId);
       return;
     }
@@ -203,6 +207,7 @@ export function CanvasViewport() {
     const screen = screenPoint(event);
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screen, initialViewport: viewport };
+      isPanningRef.current = true;
     } else if (activeTool === 'select') {
       if (!event.shiftKey) setSelection([]);
       dragRef.current = { mode: 'marquee', pointerId: event.pointerId, startWorld: point, startClient: screen };
@@ -214,15 +219,27 @@ export function CanvasViewport() {
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
+    if (session.mode === 'pan' && session.initialViewport) {
+      pendingPanRef.current = { session, screen: screenPoint(event) };
+      if (!panFrameRef.current) {
+        panFrameRef.current = requestAnimationFrame(() => {
+          const pending = pendingPanRef.current;
+          panFrameRef.current = null;
+          if (!pending?.session.initialViewport) return;
+          updateViewport({
+            x: pending.session.initialViewport.x - (pending.screen.x - pending.session.startClient.x) / pending.session.initialViewport.zoom,
+            y: pending.session.initialViewport.y - (pending.screen.y - pending.session.startClient.y) / pending.session.initialViewport.zoom,
+          });
+        });
+      }
+      return;
+    }
     const point = worldPoint(event);
     if (session.mode === 'drag' && session.initialPositions) {
       const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
       const preview = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, snapPoint({ x: position.x + delta.x, y: position.y + delta.y })]));
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => setDragPreview(preview));
-    } else if (session.mode === 'pan' && session.initialViewport) {
-      const screen = screenPoint(event);
-      updateViewport({ x: session.initialViewport.x - (screen.x - session.startClient.x) / session.initialViewport.zoom, y: session.initialViewport.y - (screen.y - session.startClient.y) / session.initialViewport.zoom });
     } else if (session.mode === 'marquee') {
       setMarquee({ start: session.startWorld, current: point });
     }
@@ -231,7 +248,19 @@ export function CanvasViewport() {
   const finishPointerInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
-    if (session.mode === 'drag' && Object.keys(dragPreview).length > 0) {
+    if (session.mode === 'pan') {
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+      panFrameRef.current = null;
+      const pending = pendingPanRef.current;
+      if (pending?.session === session && session.initialViewport) {
+        updateViewport({
+          x: session.initialViewport.x - (pending.screen.x - session.startClient.x) / session.initialViewport.zoom,
+          y: session.initialViewport.y - (pending.screen.y - session.startClient.y) / session.initialViewport.zoom,
+        });
+      }
+      pendingPanRef.current = null;
+      isPanningRef.current = false;
+    } else if (session.mode === 'drag' && Object.keys(dragPreview).length > 0) {
       moveNodes(dragPreview);
       setDragPreview({});
     } else if (session.mode === 'marquee' && marquee && page) {

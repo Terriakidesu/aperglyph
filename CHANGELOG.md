@@ -13,6 +13,14 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.5.2] - 2026-09-21
+
+### Fixed
+
+- Made canvas panning track the pointer on a requestAnimationFrame boundary.
+- Paused spatial culling queries during pan gestures to remove camera lag.
+- Flushed the final camera position when a pan gesture ends.
+
 ## [0.5.1] - 2026-09-21
 
 ### Fixed
