@@ -16,12 +16,14 @@ import {
   RenamePageCommand,
   ReorderPageCommand,
   ResetEdgeCommand,
+  ReorderNodesCommand,
   RotateNodesCommand,
   SetZOrderCommand,
   UngroupNodesCommand,
   UpdateEdgeCommand,
   UpdateNodeCommand,
   UpdateNodesCommand,
+  UpdatePageGuidesCommand,
   UpdatePageSettingsCommand,
   offsetClipboard,
   selectionClipboard,
@@ -32,7 +34,7 @@ import type { Alignment, DistributionAxis, ZOrderAction } from '../core/commands
 import { layoutNodes } from '../core/layout';
 import type { LayoutMode } from '../core/layout';
 import { LayoutWorkerClient } from '../spatial/layoutClient';
-import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramNode, EdgePatch, NodePatch, PageSettingsPatch, Point, ToolId, Viewport } from '../core/types';
+import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, EdgePatch, NodePatch, PageSettingsPatch, Point, ToolId, Viewport } from '../core/types';
 
 interface EditorStore {
   document: DiagramDocument;
@@ -58,6 +60,7 @@ interface EditorStore {
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   resetEdge: (edgeId?: string) => void;
   moveNodes: (positions: Record<string, Point>) => void;
+  reorderNodes: (nodeIds: string[], targetId: string) => void;
   nudgeSelection: (delta: Point) => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   updateNodes: (nodeIds: string[], changes: NodePatch, label?: string) => void;
@@ -81,6 +84,7 @@ interface EditorStore {
   duplicatePage: (pageId?: string) => void;
   reorderPage: (pageId: string, toIndex: number) => void;
   updatePageSettings: (changes: PageSettingsPatch, pageId?: string, label?: string) => void;
+  updateGuides: (guides: DiagramGuide[], pageId?: string, label?: string) => void;
   undo: () => void;
   redo: () => void;
   reset: (name?: string, type?: DiagramDocument['diagramType']) => void;
@@ -174,11 +178,17 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, 'Move selection');
       editorEvents.emit('node:moved', { nodeIds: ids, positions });
     },
+    reorderNodes: (nodeIds, targetId) => {
+      const { activePageId, document } = get();
+      if (nodeIds.length === 0 || nodeIds.includes(targetId)) return;
+      const next = manager.execute(new ReorderNodesCommand(activePageId, nodeIds, targetId), document);
+      updateDocument(next, 'Reorder objects');
+    },
     nudgeSelection: (delta) => {
       const { activePageId, document, selectedIds } = get();
       const page = getActivePage(document, activePageId);
       if (!page) return;
-      const nodeIds = selectedIds.filter((id) => page.nodes.some((node) => node.id === id));
+      const nodeIds = selectedIds.filter((id) => page.nodes.some((node) => node.id === id && !node.hidden));
       const positions = Object.fromEntries(nodeIds.map((id) => {
         const node = page.nodes.find((candidate) => candidate.id === id)!;
         return [id, { x: node.position.x + delta.x, y: node.position.y + delta.y }];
@@ -203,7 +213,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { document, activePageId } = get();
       const page = getActivePage(document, activePageId);
       if (!page) return;
-      get().setSelection([...page.nodes.map((node) => node.id), ...page.edges.map((edge) => edge.id)]);
+      get().setSelection([...page.nodes.filter((node) => !node.hidden).map((node) => node.id), ...page.edges.map((edge) => edge.id)]);
     },
     copySelection: () => {
       const { document, activePageId, selectedIds } = get();
@@ -331,6 +341,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     updatePageSettings: (changes, pageId = get().activePageId, label = 'Update page settings') => {
       const { document } = get();
       const next = manager.execute(new UpdatePageSettingsCommand(pageId, changes, label), document);
+      updateDocument(next, label);
+    },
+    updateGuides: (guides, pageId = get().activePageId, label = 'Update guides') => {
+      const { document } = get();
+      const next = manager.execute(new UpdatePageGuidesCommand(pageId, guides, label), document);
       updateDocument(next, label);
     },
     deleteSelection: () => {

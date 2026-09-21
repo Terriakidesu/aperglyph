@@ -62,6 +62,7 @@ export function createPage(name = 'Page 1'): DiagramPage {
       gridVisible: true,
       snapToGrid: true,
     },
+    guides: [],
   };
 }
 
@@ -208,6 +209,10 @@ function validatePage(value: unknown, pageIndex: number, pageIds: Set<string>, e
   if (!Array.isArray(value.nodes) || value.nodes.length > MAX_NODES_PER_PAGE) errors.push(`${path}.nodes exceeds the maximum size`);
   if (!Array.isArray(value.edges) || value.edges.length > MAX_EDGES_PER_PAGE) errors.push(`${path}.edges exceeds the maximum size`);
   validatePageSettings(value.settings, `${path}.settings`, errors);
+  if (value.guides !== undefined) {
+    if (!Array.isArray(value.guides) || value.guides.length > 1000) errors.push(`${path}.guides exceeds the maximum size`);
+    else value.guides.forEach((guide, index) => validateGuide(guide, `${path}.guides[${index}]`, errors));
+  }
   const nodes = Array.isArray(value.nodes) ? value.nodes : [];
   const edges = Array.isArray(value.edges) ? value.edges : [];
   const nodeIds = new Set<string>();
@@ -226,6 +231,14 @@ function validatePageSettings(value: unknown, path: string, errors: string[]): v
   if (typeof value.snapToGrid !== 'boolean') errors.push(`${path}.snapToGrid must be boolean`);
 }
 
+function validateGuide(value: unknown, path: string, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  isBoundedString(value.id, `${path}.id`, 1, 256, errors);
+  if (value.orientation !== 'horizontal' && value.orientation !== 'vertical') errors.push(`${path}.orientation is invalid`);
+  finiteInRange(value.position, `${path}.position`, -100000000, 100000000, errors);
+  if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
+}
+
 function validateNode(value: unknown, path: string, ids: Set<string>, errors: string[]): void {
   if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
   if (!isBoundedString(value.id, `${path}.id`, 1, 256, errors)) return;
@@ -239,6 +252,7 @@ function validateNode(value: unknown, path: string, ids: Set<string>, errors: st
   finiteInRange(value.rotation, `${path}.rotation`, -360000, 360000, errors);
   if (value.boundary !== undefined && value.boundary !== 'rectangle' && value.boundary !== 'ellipse' && value.boundary !== 'diamond') errors.push(`${path}.boundary is invalid`);
   if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
+  if (value.hidden !== undefined && typeof value.hidden !== 'boolean') errors.push(`${path}.hidden must be boolean`);
   if (value.groupId !== undefined) isBoundedString(value.groupId, `${path}.groupId`, 1, 256, errors);
   if (value.zIndex !== undefined) finiteInRange(value.zIndex, `${path}.zIndex`, -100000000, 100000000, errors);
   validateNodeStyle(value.style, `${path}.style`, errors);

@@ -59,6 +59,7 @@ export interface DiagramNode {
   style: NodeStyle;
   data: Record<string, unknown>;
   locked?: boolean;
+  hidden?: boolean;
   groupId?: string;
   zIndex?: number;
 }
@@ -76,6 +77,15 @@ export interface DiagramEdge {
   waypoints: Point[];
   style: EdgeStyle;
   data: Record<string, unknown>;
+}
+
+export type GuideOrientation = 'horizontal' | 'vertical';
+
+export interface DiagramGuide {
+  id: string;
+  orientation: GuideOrientation;
+  position: number;
+  locked?: boolean;
 }
 
 export type EdgePatch = Partial<Pick<DiagramEdge, 'type' | 'source' | 'target' | 'waypoints'>> & {
@@ -98,6 +108,7 @@ export interface DiagramPage {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   settings: PageSettings;
+  guides?: DiagramGuide[];
 }
 
 export type PageSettingsPatch = Partial<PageSettings>;

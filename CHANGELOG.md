@@ -25,6 +25,20 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.
 - Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
 
+## [0.12.0] - 2026-09-22
+
+### Added
+
+- Added the searchable Outline panel with click selection, inline renaming, group expansion, hide/show, lock/unlock, and drag-based object reordering.
+- Added minimap navigation, rulers, draggable and lockable guides, guide deletion, canvas background control, and persisted per-document/page viewport state.
+- Added focus, fullscreen, and presentation modes with persisted workspace panel preferences.
+- Added local document thumbnails, favorites, sorting and diagram-type filtering, rename/duplicate actions, drag-and-drop project opening, and a trash with restore or permanent deletion.
+- Added locally persisted custom templates and a command-palette action for saving the current document as a template.
+
+### Changed
+
+- Hidden objects are excluded from canvas navigation and selection queries while remaining available in the Outline for recovery.
+
 ## [0.11.0] - 2026-09-21
 
 ### Added

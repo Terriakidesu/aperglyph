@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 
 describe('command history', () => {
@@ -124,6 +124,30 @@ describe('command history', () => {
       expect.objectContaining({ id: first.id, locked: true, style: expect.objectContaining({ opacity: 0.6 }) }),
       expect.objectContaining({ id: second.id, locked: true, style: expect.objectContaining({ opacity: 0.6 }) }),
     ]));
+  });
+
+  it('updates guides and outline reorder as undoable commands', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const second = createNode('ellipse', { x: 100, y: 0 });
+    document.pages[0].nodes.push(first, second);
+    const manager = new CommandManager();
+    const withGuide = manager.execute(new UpdatePageGuidesCommand(pageId, [{ id: 'guide-1', orientation: 'vertical', position: 120 }]), document);
+    expect(withGuide.pages[0].guides).toEqual([{ id: 'guide-1', orientation: 'vertical', position: 120 }]);
+    const reordered = manager.execute(new ReorderNodesCommand(pageId, [second.id], first.id), withGuide);
+    expect(reordered.pages[0].nodes.map((node) => node.id)).toEqual([second.id, first.id]);
+  });
+
+  it('preserves locked objects during outline reorder', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const locked = { ...createNode('ellipse', { x: 100, y: 0 }), locked: true };
+    const last = createNode('rectangle', { x: 200, y: 0 });
+    document.pages[0].nodes.push(first, locked, last);
+    const reordered = new CommandManager().execute(new ReorderNodesCommand(pageId, [locked.id, last.id], first.id), document);
+    expect(reordered.pages[0].nodes.map((node) => node.id)).toEqual([last.id, first.id, locked.id]);
   });
 
   it('keeps grouping and layout undoable and validates clipboard payloads', () => {

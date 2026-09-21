@@ -1,4 +1,5 @@
 import { editorEvents } from '../core/events';
+import { documentToSvg } from './files';
 import type { DiagramDocument } from '../core/types';
 import { clearRecoverySnapshot, saveDocument, saveRecoverySnapshot } from './indexedDb';
 
@@ -59,7 +60,7 @@ export class AutosaveController {
 
   private async save(document: DiagramDocument): Promise<void> {
     try {
-      await saveDocument(document);
+      await saveDocument(document, createThumbnail(document));
       await clearRecoverySnapshot();
       this.pendingDocument = null;
       this.options.onSaved?.(document);
@@ -81,5 +82,17 @@ export class AutosaveController {
     const normalized = error instanceof Error ? error : new Error('Unable to save this diagram locally.');
     this.options.onError?.(normalized);
     editorEvents.emit('storage:error', { error: normalized });
+  }
+}
+
+function createThumbnail(document: DiagramDocument): string | undefined {
+  const page = document.pages[0];
+  if (!page) return undefined;
+  try {
+    const svg = documentToSvg(page.nodes.filter((node) => !node.hidden), page.edges, page.settings.background, page.settings.width, page.settings.height);
+    const thumbnail = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    return thumbnail.length <= 600000 ? thumbnail : undefined;
+  } catch {
+    return undefined;
   }
 }

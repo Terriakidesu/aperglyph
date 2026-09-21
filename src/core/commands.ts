@@ -1,5 +1,5 @@
 import { cloneDocument, clonePageWithNewIds, createId, getPage } from './document';
-import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramNode, DiagramPage, EdgePatch, NodePatch, PageSettingsPatch, Point } from './types';
+import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, PageSettingsPatch, Point } from './types';
 
 export const CLIPBOARD_MIME = 'application/x-aperglyph';
 const CLIPBOARD_FORMAT = 'aperglyph-clipboard';
@@ -259,6 +259,20 @@ export class UpdatePageSettingsCommand implements DocumentCommand {
   }
 }
 
+export class UpdatePageGuidesCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly guides: DiagramGuide[], label = 'Update guides') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.pages = next.pages.map((page) => page.id === this.pageId ? { ...page, guides: structuredClone(this.guides) } : page);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class DuplicateSelectionCommand implements DocumentCommand {
   readonly label = 'Duplicate selection';
   constructor(private readonly pageId: string, private readonly payload: ClipboardPayload) {}
@@ -386,6 +400,27 @@ export class SetZOrderCommand implements DocumentCommand {
   }
 }
 
+export class ReorderNodesCommand implements DocumentCommand {
+  readonly label = 'Reorder objects';
+  constructor(private readonly pageId: string, private readonly nodeIds: string[], private readonly targetId: string) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    if (!page) return next;
+    const movingIds = new Set(page.nodes.filter((node) => this.nodeIds.includes(node.id) && !node.locked).map((node) => node.id));
+    if (movingIds.size === 0 || movingIds.has(this.targetId)) return next;
+    const moving = page.nodes.filter((node) => movingIds.has(node.id));
+    const remaining = page.nodes.filter((node) => !movingIds.has(node.id));
+    const targetIndex = remaining.findIndex((node) => node.id === this.targetId);
+    if (targetIndex < 0) return next;
+    remaining.splice(targetIndex, 0, ...moving);
+    page.nodes = remaining.map((node, index) => ({ ...node, zIndex: index }));
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class GroupNodesCommand implements DocumentCommand {
   readonly label = 'Group selection';
   private readonly groupId = createId('group');
@@ -473,7 +508,7 @@ function normalizeRotation(rotation: number): number {
 }
 
 function applyNodePatch(node: DiagramNode, changes: NodePatch): DiagramNode {
-  if (node.locked && changes.locked !== false) return node;
+  if (node.locked && changes.locked !== false && !Object.keys(changes).every((key) => key === 'hidden')) return node;
   return {
     ...node,
     ...changes,
@@ -492,6 +527,7 @@ function isClipboardNode(value: unknown): value is DiagramNode {
     && Number.isFinite(value.style.opacity)
     && typeof value.style.textColor === 'string'
     && (value.locked === undefined || typeof value.locked === 'boolean')
+    && (value.hidden === undefined || typeof value.hidden === 'boolean')
     && (value.groupId === undefined || typeof value.groupId === 'string')
     && (value.zIndex === undefined || Number.isFinite(value.zIndex));
 }

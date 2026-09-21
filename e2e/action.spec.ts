@@ -87,6 +87,39 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
   });
 
+  test('navigates through the outline, minimap, guides, and focus mode', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    await page.getByTitle('Add shape').click();
+    await canvas.click({ position: { x: 300, y: 220 } });
+    await page.getByTitle('Add shape').click();
+    await canvas.click({ position: { x: 500, y: 360 } });
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+
+    await page.getByTitle('Show outline').click();
+    await expect(page.locator('.outline-panel')).toBeVisible();
+    const outlineNodes = page.locator('.outline-node-row');
+    await expect(outlineNodes).toHaveCount(2);
+    await outlineNodes.first().dblclick();
+    const renameInput = page.getByLabel(/Rename Rectangle/).first();
+    await renameInput.fill('API');
+    await renameInput.press('Enter');
+    await expect(page.locator('.node-label').first()).toHaveText('API');
+    await outlineNodes.first().getByTitle('Hide object').click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(1);
+    await page.locator('.outline-node-row').first().getByTitle('Show object').click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+    await page.locator('.outline-node-row').first().click();
+    await page.getByTitle('Fit selection').click();
+    await expect(page.locator('.canvas-minimap')).toBeVisible();
+    await page.locator('.canvas-ruler-top').click({ position: { x: 220, y: 10 } });
+    await expect(page.locator('.canvas-guide')).toHaveCount(1);
+    await page.getByLabel('Focus mode').click();
+    await expect(page.locator('.outline-panel')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.outline-panel')).toBeVisible();
+  });
+
   test('edits and adds fields on an ERD shape in any diagram', async ({ page }) => {
     await page.locator('.template-card').first().click();
     await page.getByTitle('Drag Entity onto the canvas').click();
@@ -210,5 +243,30 @@ test.describe('diagram editing workflow', () => {
     page.once('dialog', (dialog) => void dialog.accept());
     await card.getByRole('button', { name: 'Delete Untitled diagram' }).click();
     await expect(card).toHaveCount(0);
+  });
+
+  test('persists workspace thumbnails, favorites, rename, and trash restore', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.waitForTimeout(900);
+    await page.getByRole('button', { name: 'Back to workspace' }).click();
+    let card = page.locator('.recent-card').filter({ hasText: 'Untitled diagram' }).first();
+    await expect(card.locator('.recent-preview img')).toBeVisible();
+    await card.getByTitle('Favorite').click();
+    await expect(card.getByTitle('Remove favorite')).toBeVisible();
+    page.once('dialog', (dialog) => void dialog.accept('Workspace diagram'));
+    await card.getByTitle('Rename').click();
+    card = page.locator('.recent-card').filter({ hasText: 'Workspace diagram' }).first();
+    await expect(card).toBeVisible();
+    await page.reload();
+    card = page.locator('.recent-card').filter({ hasText: 'Workspace diagram' }).first();
+    await expect(card.getByTitle('Remove favorite')).toBeVisible();
+    page.once('dialog', (dialog) => void dialog.accept());
+    await card.getByTitle('Move Workspace diagram to trash').click();
+    await expect(card).toHaveCount(0);
+    await page.getByTitle('Show trash').click();
+    const trashRow = page.locator('.trash-row').filter({ hasText: 'Workspace diagram' });
+    await expect(trashRow).toBeVisible();
+    await trashRow.getByRole('button', { name: 'Restore' }).click();
+    await expect(page.locator('.recent-card').filter({ hasText: 'Workspace diagram' })).toBeVisible();
   });
 });

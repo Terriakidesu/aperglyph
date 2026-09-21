@@ -1,14 +1,16 @@
-import { Keyboard, PanelLeftClose, PanelRightClose } from 'lucide-react';
+import { Keyboard, ListTree, Maximize2, Minimize2, MonitorPlay, PanelLeftClose, PanelRightClose, Shapes } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { createNode as buildNode } from '../core/document';
 import { editorEvents } from '../core/events';
 import { getActivePage, useEditorStore } from '../store/editorStore';
+import { saveLocalTemplate } from '../persistence';
 import { CanvasViewport } from './CanvasViewport';
 import { EditorToolbar } from './EditorToolbar';
 import { EditorTopBar } from './EditorTopBar';
 import { PageTabs } from './PageTabs';
 import { PropertiesPanel } from './PropertiesPanel';
+import { OutlinePanel } from './OutlinePanel';
 import { ShapeLibrary } from './ShapeLibrary';
 import { StatusBar } from './StatusBar';
 
@@ -39,8 +41,12 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const activePageId = useEditorStore((state) => state.activePageId);
   const viewport = useEditorStore((state) => state.viewport);
   const page = getActivePage(document, activePageId);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(() => readStoredBoolean('aperglyph.editor.left-open', true));
+  const [rightOpen, setRightOpen] = useState(() => readStoredBoolean('aperglyph.editor.right-open', true));
+  const [leftPanel, setLeftPanel] = useState<'shapes' | 'outline'>(() => readStoredPanel());
+  const [focusMode, setFocusMode] = useState(false);
+  const [presentationMode, setPresentationMode] = useState(false);
+  const [fullscreen, setFullscreen] = useState(() => Boolean(globalThis.document?.fullscreenElement));
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
@@ -58,6 +64,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'group', label: 'Group selection', hint: 'Selection', shortcut: '⌘G', run: () => groupSelection() },
     { id: 'new-page', label: 'Add page', hint: 'Pages', run: () => createPage() },
     { id: 'auto-layout', label: 'Auto layout', hint: 'Arrange', run: () => { void autoLayout(); } },
+    { id: 'toggle-outline', label: 'Show outline', hint: 'Workspace', run: () => { setLeftPanel('outline'); setLeftOpen(true); } },
+    { id: 'toggle-focus', label: focusMode ? 'Exit focus mode' : 'Enter focus mode', hint: 'Workspace', run: () => setFocusMode((value) => !value) },
+    { id: 'toggle-presentation', label: presentationMode ? 'Exit presentation mode' : 'Enter presentation mode', hint: 'Workspace', run: () => setPresentationMode((value) => !value) },
+    { id: 'save-template', label: 'Save current document as template', hint: 'Templates', run: () => { const name = globalThis.prompt('Template name', document.name); if (name?.trim()) saveLocalTemplate(document, name); } },
     { id: 'shortcuts', label: 'Open keyboard shortcuts', hint: 'Help', run: () => setShowShortcuts(true) },
   ];
   const matchingCommands = paletteCommands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(paletteQuery.trim().toLowerCase()));
@@ -116,6 +126,60 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   }, [showPalette]);
 
   useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem('aperglyph.editor.left-open', JSON.stringify(leftOpen));
+      globalThis.localStorage?.setItem('aperglyph.editor.right-open', JSON.stringify(rightOpen));
+      globalThis.localStorage?.setItem('aperglyph.editor.left-panel', leftPanel);
+    } catch {
+      // Local UI preferences are optional.
+    }
+  }, [leftOpen, leftPanel, rightOpen]);
+
+  const viewportKey = `${document.id}:${activePageId}`;
+  const restoredViewportKey = useRef<string | null>(null);
+  const skipViewportSaveKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (restoredViewportKey.current === viewportKey) return;
+    restoredViewportKey.current = viewportKey;
+    try {
+      const saved = JSON.parse(globalThis.localStorage?.getItem(`aperglyph.viewport.${viewportKey}`) ?? 'null') as { x?: number; y?: number; zoom?: number } | null;
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && Number.isFinite(saved.zoom)) {
+        skipViewportSaveKey.current = viewportKey;
+        useEditorStore.getState().updateViewport({ x: saved.x, y: saved.y, zoom: saved.zoom });
+      }
+    } catch {
+      // Preferred zoom is optional local UI state.
+    }
+  }, [viewportKey]);
+
+  useEffect(() => {
+    if (skipViewportSaveKey.current === viewportKey) {
+      skipViewportSaveKey.current = null;
+      return;
+    }
+    try {
+      globalThis.localStorage?.setItem(`aperglyph.viewport.${viewportKey}`, JSON.stringify(viewport));
+    } catch {
+      // Preferred zoom is optional local UI state.
+    }
+  }, [viewport, viewportKey]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setFullscreen(Boolean(globalThis.document?.fullscreenElement));
+    globalThis.document?.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => globalThis.document?.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (globalThis.document?.fullscreenElement) await globalThis.document.exitFullscreen?.();
+      else await globalThis.document?.documentElement.requestFullscreen?.();
+    } catch {
+      // Fullscreen is optional and may be blocked by the browser.
+    }
+  };
+
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (target.matches('input, textarea, [contenteditable="true"]')) return;
@@ -130,7 +194,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
-      if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); setShowPalette(false); setShowShortcuts(false); setTool('select'); return; }
+      if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); setShowPalette(false); setShowShortcuts(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
         const distance = event.shiftKey ? (page?.settings.snapToGrid ? page.settings.gridSize : 10) : 1;
@@ -147,14 +211,14 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
 
   useEffect(() => editorEvents.on('ui:shortcuts', () => setShowShortcuts(true)), []);
 
-  return <main className="editor-shell">
+  return <main className={`editor-shell ${focusMode ? 'focus-mode' : ''} ${presentationMode ? 'presentation-mode' : ''}`}>
     <EditorTopBar onExit={onExit} />
     <div className="editor-workspace">
       <EditorToolbar />
-      {leftOpen && <ShapeLibrary />}
+      {leftOpen && (leftPanel === 'outline' ? <OutlinePanel /> : <ShapeLibrary />)}
       <section className="canvas-column"><CanvasViewport /><PageTabs /><StatusBar /></section>
       {rightOpen && <PropertiesPanel />}
-      <div className="workspace-toggles"><button onClick={() => setLeftOpen((open) => !open)} title="Toggle shapes panel">{leftOpen ? <PanelLeftClose size={15} /> : <span>Shapes</span>}</button><button onClick={() => setRightOpen((open) => !open)} title="Toggle properties panel">{rightOpen ? <PanelRightClose size={15} /> : <span>Inspector</span>}</button></div>
+      <div className="workspace-toggles"><button onClick={() => { setLeftPanel('outline'); setLeftOpen(true); }} title="Show outline" aria-label="Show outline"><ListTree size={14} /></button><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} title="Show shapes" aria-label="Show shapes"><Shapes size={14} /></button><button onClick={() => setLeftOpen((open) => !open)} title="Toggle left panel" aria-label="Toggle left panel">{leftOpen ? <PanelLeftClose size={15} /> : <span>Left</span>}</button><button onClick={() => setRightOpen((open) => !open)} title="Toggle properties panel" aria-label="Toggle properties panel">{rightOpen ? <PanelRightClose size={15} /> : <span>Inspector</span>}</button><button onClick={() => setFocusMode((value) => !value)} title={focusMode ? 'Exit focus mode' : 'Focus mode'} aria-label={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={14} /></button><button onClick={() => setPresentationMode((value) => !value)} title={presentationMode ? 'Exit presentation mode' : 'Presentation mode'} aria-label={presentationMode ? 'Exit presentation mode' : 'Presentation mode'}><MonitorPlay size={14} /></button><button onClick={() => void toggleFullscreen()} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></div>
     </div>
     <button className="keyboard-button" onClick={() => setShowShortcuts(true)}><Keyboard size={14} /> Shortcuts</button>
      {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
@@ -172,4 +236,21 @@ interface PaletteCommand {
 
 function Shortcut({ keys, label }: { keys: string; label: string }) {
   return <div className="shortcut-row"><span>{label}</span><kbd>{keys}</kbd></div>;
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const value = globalThis.localStorage?.getItem(key);
+    return value === null || value === undefined ? fallback : JSON.parse(value) === true;
+  } catch {
+    return fallback;
+  }
+}
+
+function readStoredPanel(): 'shapes' | 'outline' {
+  try {
+    return globalThis.localStorage?.getItem('aperglyph.editor.left-panel') === 'outline' ? 'outline' : 'shapes';
+  } catch {
+    return 'shapes';
+  }
 }

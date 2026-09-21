@@ -1,8 +1,8 @@
-import { migrateDocument } from '../core/document';
+import { createId, migrateDocument } from '../core/document';
 import type { DiagramDocument } from '../core/types';
 
 const DATABASE_NAME = 'aperglyph-local';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const DOCUMENTS_STORE = 'documents';
 const RECOVERY_STORE = 'recovery';
 const ACTIVE_RECOVERY_ID = 'active-recovery';
@@ -16,6 +16,8 @@ export interface StoredDocument {
   createdAt: number;
   updatedAt: number;
   thumbnail?: string;
+  favorite?: boolean;
+  trashedAt?: number;
 }
 
 export interface RecoverySnapshot {
@@ -66,7 +68,7 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function createStoredDocument(document: DiagramDocument, thumbnail?: string): StoredDocument {
+function createStoredDocument(document: DiagramDocument, thumbnail?: string, metadata: Pick<StoredDocument, 'favorite' | 'trashedAt'> = {}): StoredDocument {
   return {
     id: document.id,
     name: document.name,
@@ -76,11 +78,16 @@ function createStoredDocument(document: DiagramDocument, thumbnail?: string): St
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
     thumbnail,
+    ...metadata,
   };
 }
 
-export async function saveDocument(document: DiagramDocument, thumbnail?: string): Promise<void> {
-  const record = createStoredDocument(document, thumbnail);
+export async function saveDocument(document: DiagramDocument, thumbnail?: string, metadata?: Pick<StoredDocument, 'favorite' | 'trashedAt'>): Promise<void> {
+  const existing = metadata ? undefined : await readStoredDocument(document.id);
+  const record = createStoredDocument(document, thumbnail ?? existing?.thumbnail, {
+    favorite: metadata?.favorite ?? existing?.favorite,
+    trashedAt: metadata?.trashedAt ?? existing?.trashedAt,
+  });
   if (!supportsIndexedDb()) {
     memoryDocuments.set(record.id, record);
     return;
@@ -99,10 +106,57 @@ export async function loadDocument(id: string): Promise<DiagramDocument | null> 
 }
 
 export async function listDocuments(): Promise<StoredDocument[]> {
-  if (!supportsIndexedDb()) return [...memoryDocuments.values()].sort(sortNewest);
+  if (!supportsIndexedDb()) return [...memoryDocuments.values()].filter((record) => !record.trashedAt).sort(sortNewest);
   const database = await openDatabase();
   const records = await requestResult<StoredDocument[]>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).getAll());
-  return records.sort(sortNewest).map((record) => ({ ...record, document: migrateDocument(record.document) }));
+  return records.filter((record) => !record.trashedAt).sort(sortNewest).map((record) => ({ ...record, document: migrateDocument(record.document) }));
+}
+
+export async function listTrashedDocuments(): Promise<StoredDocument[]> {
+  if (!supportsIndexedDb()) return [...memoryDocuments.values()].filter((record) => Boolean(record.trashedAt)).sort(sortNewest);
+  const database = await openDatabase();
+  const records = await requestResult<StoredDocument[]>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).getAll());
+  return records.filter((record) => Boolean(record.trashedAt)).sort(sortNewest).map((record) => ({ ...record, document: migrateDocument(record.document) }));
+}
+
+export async function updateDocumentMetadata(id: string, changes: Pick<StoredDocument, 'favorite' | 'trashedAt'>): Promise<void> {
+  const existing = await readStoredDocument(id);
+  if (!existing) return;
+  const next = { ...existing, ...changes };
+  if (Object.prototype.hasOwnProperty.call(changes, 'trashedAt') && changes.trashedAt === undefined) delete next.trashedAt;
+  if (!supportsIndexedDb()) {
+    memoryDocuments.set(id, next);
+    return;
+  }
+  const database = await openDatabase();
+  const transaction = database.transaction(DOCUMENTS_STORE, 'readwrite');
+  transaction.objectStore(DOCUMENTS_STORE).put(next);
+  await transactionComplete(transaction);
+}
+
+export async function trashDocument(id: string): Promise<void> {
+  await updateDocumentMetadata(id, { trashedAt: Date.now() });
+}
+
+export async function restoreDocument(id: string): Promise<void> {
+  await updateDocumentMetadata(id, { trashedAt: undefined });
+}
+
+export async function renameDocument(id: string, name: string): Promise<DiagramDocument | null> {
+  const existing = await readStoredDocument(id);
+  if (!existing || !name.trim()) return null;
+  const document = migrateDocument({ ...existing.document, name: name.trim(), updatedAt: Date.now() });
+  await saveDocument(document, existing.thumbnail, { favorite: existing.favorite, trashedAt: existing.trashedAt });
+  return document;
+}
+
+export async function duplicateDocument(id: string): Promise<DiagramDocument | null> {
+  const existing = await readStoredDocument(id);
+  if (!existing) return null;
+  const now = Date.now();
+  const document = migrateDocument({ ...structuredClone(existing.document), id: createId('doc'), name: `${existing.document.name} copy`, createdAt: now, updatedAt: now });
+  await saveDocument(document, existing.thumbnail, { favorite: false });
+  return document;
 }
 
 export async function deleteDocument(id: string): Promise<void> {
@@ -164,6 +218,12 @@ export async function getStorageEstimate(): Promise<StorageEstimate> {
 
 function sortNewest(a: StoredDocument, b: StoredDocument): number {
   return b.updatedAt - a.updatedAt;
+}
+
+async function readStoredDocument(id: string): Promise<StoredDocument | undefined> {
+  if (!supportsIndexedDb()) return memoryDocuments.get(id);
+  const database = await openDatabase();
+  return requestResult<StoredDocument | undefined>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).get(id));
 }
 
 function transactionComplete(transaction: IDBTransaction): Promise<void> {
