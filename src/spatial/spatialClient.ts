@@ -11,6 +11,7 @@ interface PendingRequest {
  */
 export class SpatialWorkerClient {
   private worker: Worker | null;
+  private workerReady = false;
   private readonly fallback = new Map<string, SpatialNode>();
   private readonly pending = new Map<number, PendingRequest>();
   private requestId = 0;
@@ -26,6 +27,7 @@ export class SpatialWorkerClient {
       this.worker.onerror = (event) => {
         this.worker?.terminate();
         this.worker = null;
+        this.workerReady = false;
         this.rejectAll(new Error(event.message || 'Spatial worker failed.'));
       };
     } catch {
@@ -37,28 +39,29 @@ export class SpatialWorkerClient {
     this.fallback.clear();
     nodes.forEach((node) => this.fallback.set(node.id, node));
     if (!this.worker) return;
+    this.workerReady = false;
     await this.send({ kind: 'initialize', nodes });
   }
 
   async upsert(nodes: SpatialNode[]): Promise<void> {
     nodes.forEach((node) => this.fallback.set(node.id, node));
-    if (!this.worker || nodes.length === 0) return;
+    if (!this.worker || !this.workerReady || nodes.length === 0) return;
     await this.send({ kind: 'upsert', nodes });
   }
 
   async remove(ids: string[]): Promise<void> {
     ids.forEach((id) => this.fallback.delete(id));
-    if (!this.worker || ids.length === 0) return;
+    if (!this.worker || !this.workerReady || ids.length === 0) return;
     await this.send({ kind: 'remove', ids });
   }
 
   queryViewport(bounds: SpatialBounds): Promise<string[]> {
-    if (!this.worker) return Promise.resolve(this.fallbackQuery(bounds));
+    if (!this.worker || !this.workerReady) return Promise.resolve(this.fallbackQuery(bounds));
     return this.send({ kind: 'queryViewport', bounds });
   }
 
   queryNearby(x: number, y: number, radius: number): Promise<string[]> {
-    if (!this.worker) {
+    if (!this.worker || !this.workerReady) {
       const bounds = { minX: x - radius, minY: y - radius, maxX: x + radius, maxY: y + radius };
       return Promise.resolve(this.fallbackQuery(bounds));
     }
@@ -67,6 +70,7 @@ export class SpatialWorkerClient {
 
   terminate(): void {
     this.worker?.terminate();
+    this.workerReady = false;
     this.rejectAll(new Error('Spatial worker was terminated.'));
   }
 
@@ -81,6 +85,7 @@ export class SpatialWorkerClient {
 
   private handleResponse(response: SpatialResponse): void {
     if (response.kind === 'ready') {
+      this.workerReady = true;
       this.pending.get(response.requestId)?.resolve([]);
     } else if (response.kind === 'result') {
       this.pending.get(response.requestId)?.resolve(response.ids);

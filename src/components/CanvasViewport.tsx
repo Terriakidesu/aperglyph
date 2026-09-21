@@ -4,8 +4,8 @@ import { createEdge } from '../core/document';
 import { nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramNode, Point, Viewport } from '../core/types';
-import { nodeToSpatialNode, SpatialWorkerClient, viewportBounds } from '../spatial';
-import type { SpatialNode } from '../spatial';
+import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
+import type { AlignmentGuide, SpatialNode } from '../spatial';
 
 interface CanvasSize { width: number; height: number }
 interface Marquee { start: Point; current: Point }
@@ -35,6 +35,8 @@ export function CanvasViewport() {
   const [connectorStart, setConnectorStart] = useState<string | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
   const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(null);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
   const spatialClient = useMemo(() => new SpatialWorkerClient(), []);
   const indexedPageRef = useRef<string | null>(null);
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
@@ -99,12 +101,6 @@ export function CanvasViewport() {
       y: (screen.y - size.height / 2) / camera.zoom + camera.y,
     };
   }, [screenPoint, size.height, size.width, viewport]);
-
-  const snapPoint = useCallback((point: Point) => {
-    const grid = page?.settings.gridSize ?? 16;
-    if (!page?.settings.snapToGrid) return point;
-    return { x: Math.round(point.x / grid) * grid, y: Math.round(point.y / grid) * grid };
-  }, [page?.settings.gridSize, page?.settings.snapToGrid]);
 
   const queryVisibleNodes = useCallback(async () => {
     if (!page || !spatialReadyRef.current || isPanningRef.current) return;
@@ -196,7 +192,25 @@ export function CanvasViewport() {
       return [id, current ? { ...current.position } : { x: 0, y: 0 }];
     }));
     const point = worldPoint(event);
-    dragRef.current = { mode: 'drag', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialPositions: positions };
+    const session: DragSession = { mode: 'drag', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialPositions: positions };
+    dragRef.current = session;
+    setAlignmentGuides([]);
+    setSnapCandidateIds([]);
+    const selectedNodes = page?.nodes.filter((candidate) => nextSelection.includes(candidate.id)) ?? [];
+    if (selectedNodes.length > 0) {
+      const minX = Math.min(...selectedNodes.map((candidate) => candidate.position.x));
+      const minY = Math.min(...selectedNodes.map((candidate) => candidate.position.y));
+      const maxX = Math.max(...selectedNodes.map((candidate) => candidate.position.x + candidate.size.width));
+      const maxY = Math.max(...selectedNodes.map((candidate) => candidate.position.y + candidate.size.height));
+      const radius = Math.max(500, Math.max(maxX - minX, maxY - minY) + 320);
+      void spatialClient.queryNearby((minX + maxX) / 2, (minY + maxY) / 2, radius).then((ids) => {
+        if (dragRef.current !== session) return;
+        const fallbackIds = page?.nodes.filter((candidate) => !nextSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? [];
+        setSnapCandidateIds(ids.length > 0 ? ids : fallbackIds);
+      }).catch(() => {
+        if (dragRef.current === session) setSnapCandidateIds(page?.nodes.filter((candidate) => !nextSelection.includes(candidate.id)).map((candidate) => candidate.id) ?? []);
+      });
+    }
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
@@ -210,6 +224,8 @@ export function CanvasViewport() {
       isPanningRef.current = true;
     } else if (activeTool === 'select') {
       if (!event.shiftKey) setSelection([]);
+      setAlignmentGuides([]);
+      setSnapCandidateIds([]);
       dragRef.current = { mode: 'marquee', pointerId: event.pointerId, startWorld: point, startClient: screen };
       setMarquee({ start: point, current: point });
     }
@@ -237,9 +253,16 @@ export function CanvasViewport() {
     const point = worldPoint(event);
     if (session.mode === 'drag' && session.initialPositions) {
       const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
-      const preview = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, snapPoint({ x: position.x + delta.x, y: position.y + delta.y })]));
+      const desiredPositions = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]));
+      const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
+      const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
+      const snapped = snapNodes(movingNodes, desiredPositions, candidateNodes, { gridSize: page?.settings.gridSize ?? 16, snapToGrid: page?.settings.snapToGrid ?? false, threshold: 10 / viewport.zoom });
+      const preview = snapped.positions;
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
-      frameRef.current = requestAnimationFrame(() => setDragPreview(preview));
+      frameRef.current = requestAnimationFrame(() => {
+        setDragPreview(preview);
+        setAlignmentGuides(snapped.guides);
+      });
     } else if (session.mode === 'marquee') {
       setMarquee({ start: session.startWorld, current: point });
     }
@@ -263,6 +286,8 @@ export function CanvasViewport() {
     } else if (session.mode === 'drag' && Object.keys(dragPreview).length > 0) {
       moveNodes(dragPreview);
       setDragPreview({});
+      setAlignmentGuides([]);
+      setSnapCandidateIds([]);
     } else if (session.mode === 'marquee' && marquee && page) {
       const left = Math.min(marquee.start.x, marquee.current.x);
       const right = Math.max(marquee.start.x, marquee.current.x);
@@ -274,6 +299,8 @@ export function CanvasViewport() {
       }).map((node) => node.id);
       setSelection(ids, ids.at(-1) ?? null);
       setMarquee(null);
+      setAlignmentGuides([]);
+      setSnapCandidateIds([]);
     }
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     dragRef.current = null;
@@ -313,6 +340,9 @@ export function CanvasViewport() {
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
         <g className="edge-layer">{renderedEdges.map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
         <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart === node.id} onPointerDown={beginNodeInteraction} />)}</g>
+        <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
+          ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
+          : <line key={`horizontal-${index}`} className="alignment-guide" x1={guide.start} y1={guide.position} x2={guide.end} y2={guide.position} />)}</g>
         {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
       </g>
     </svg>

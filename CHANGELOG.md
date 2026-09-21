@@ -13,6 +13,15 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.6.0] - 2026-09-21
+
+### Added
+
+- Added worker-assisted nearby-node candidate queries for dragging.
+- Added object snapping to node edges and centers.
+- Added alignment guide overlays during drag previews.
+- Improved grid snapping for multi-selection moves by preserving relative spacing.
+
 ## [0.5.2] - 2026-09-21
 
 ### Fixed
