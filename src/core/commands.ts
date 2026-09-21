@@ -1,5 +1,5 @@
 import { cloneDocument, getPage } from './document';
-import type { DiagramDocument, DiagramEdge, DiagramNode, Point } from './types';
+import type { DiagramDocument, DiagramEdge, DiagramNode, NodePatch, Point } from './types';
 
 export interface DocumentCommand {
   label: string;
@@ -114,7 +114,7 @@ export class UpdateNodeCommand implements DocumentCommand {
   constructor(
     private readonly pageId: string,
     private readonly nodeId: string,
-    private readonly changes: Partial<DiagramNode>,
+    private readonly changes: NodePatch,
     label = 'Update node',
   ) {
     this.label = label;

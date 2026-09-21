@@ -50,6 +50,11 @@ export interface DiagramNode {
   zIndex?: number;
 }
 
+export type NodePatch = Partial<Omit<DiagramNode, 'style' | 'data'>> & {
+  style?: Partial<NodeStyle>;
+  data?: Record<string, unknown>;
+};
+
 export interface DiagramEdge {
   id: string;
   type: string;

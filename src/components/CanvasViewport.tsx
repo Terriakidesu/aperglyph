@@ -1,0 +1,275 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import { createEdge } from '../core/document';
+import { getActivePage, useEditorStore } from '../store/editorStore';
+import type { DiagramNode, Point, Viewport } from '../core/types';
+
+interface CanvasSize { width: number; height: number }
+interface Marquee { start: Point; current: Point }
+interface DragSession {
+  mode: 'drag' | 'pan' | 'marquee';
+  pointerId: number;
+  startWorld: Point;
+  startClient: Point;
+  initialPositions?: Record<string, Point>;
+  initialViewport?: Viewport;
+}
+
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 3;
+
+export function CanvasViewport() {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragSession | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const [size, setSize] = useState<CanvasSize>({ width: 900, height: 700 });
+  const [dragPreview, setDragPreview] = useState<Record<string, Point>>({});
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
+  const [connectorStart, setConnectorStart] = useState<string | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
+
+  const document = useEditorStore((state) => state.document);
+  const activePageId = useEditorStore((state) => state.activePageId);
+  const selectedIds = useEditorStore((state) => state.selectedIds);
+  const activeTool = useEditorStore((state) => state.activeTool);
+  const viewport = useEditorStore((state) => state.viewport);
+  const setSelection = useEditorStore((state) => state.setSelection);
+  const moveNodes = useEditorStore((state) => state.moveNodes);
+  const createConnector = useEditorStore((state) => state.createEdge);
+  const updateViewport = useEditorStore((state) => state.updateViewport);
+  const page = getActivePage(document, activePageId);
+
+  useEffect(() => {
+    if (!stageRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setSize({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) });
+    });
+    observer.observe(stageRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (activeTool !== 'connector') setConnectorStart(null);
+  }, [activeTool]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !event.repeat) setSpacePressed(true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePressed(false);
+    };
+    const onBlur = () => setSpacePressed(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  const screenPoint = useCallback((event: { clientX: number; clientY: number }) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }, []);
+
+  const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera = viewport) => {
+    const screen = screenPoint(event);
+    return {
+      x: (screen.x - size.width / 2) / camera.zoom + camera.x,
+      y: (screen.y - size.height / 2) / camera.zoom + camera.y,
+    };
+  }, [screenPoint, size.height, size.width, viewport]);
+
+  const snapPoint = useCallback((point: Point) => {
+    const grid = page?.settings.gridSize ?? 16;
+    if (!page?.settings.snapToGrid) return point;
+    return { x: Math.round(point.x / grid) * grid, y: Math.round(point.y / grid) * grid };
+  }, [page?.settings.gridSize, page?.settings.snapToGrid]);
+
+  const beginNodeInteraction = (event: ReactPointerEvent<SVGGElement>, node: DiagramNode) => {
+    event.stopPropagation();
+    if (activeTool === 'pan' || spacePressed || event.button === 1) {
+      const point = worldPoint(event);
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: viewport };
+      svgRef.current?.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (node.locked) {
+      setSelection([node.id], node.id);
+      return;
+    }
+    if (activeTool === 'connector') {
+      if (!connectorStart) {
+        setConnectorStart(node.id);
+      } else if (connectorStart !== node.id) {
+        createConnector(createEdge({ nodeId: connectorStart }, { nodeId: node.id }));
+        setConnectorStart(null);
+      }
+      return;
+    }
+    if (activeTool !== 'select') {
+      setSelection([node.id], node.id);
+      return;
+    }
+
+    let nextSelection = selectedIds;
+    if (event.shiftKey) {
+      nextSelection = selectedIds.includes(node.id)
+        ? selectedIds.filter((id) => id !== node.id)
+        : [...selectedIds, node.id];
+    } else if (!selectedIds.includes(node.id)) {
+      nextSelection = [node.id];
+    }
+    setSelection(nextSelection, node.id);
+    const positions = Object.fromEntries((nextSelection.length ? nextSelection : [node.id]).map((id) => {
+      const current = page?.nodes.find((candidate) => candidate.id === id);
+      return [id, current ? { ...current.position } : { x: 0, y: 0 }];
+    }));
+    const point = worldPoint(event);
+    dragRef.current = { mode: 'drag', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialPositions: positions };
+    svgRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const target = event.target as Element;
+    if (target.closest?.('[data-node-id]') || target.closest?.('[data-edge-id]')) return;
+    const point = worldPoint(event);
+    const screen = screenPoint(event);
+    if (activeTool === 'pan' || spacePressed || event.button === 1) {
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screen, initialViewport: viewport };
+    } else if (activeTool === 'select') {
+      if (!event.shiftKey) setSelection([]);
+      dragRef.current = { mode: 'marquee', pointerId: event.pointerId, startWorld: point, startClient: screen };
+      setMarquee({ start: point, current: point });
+    }
+    svgRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const session = dragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    const point = worldPoint(event);
+    if (session.mode === 'drag' && session.initialPositions) {
+      const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
+      const preview = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, snapPoint({ x: position.x + delta.x, y: position.y + delta.y })]));
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = requestAnimationFrame(() => setDragPreview(preview));
+    } else if (session.mode === 'pan' && session.initialViewport) {
+      const screen = screenPoint(event);
+      updateViewport({ x: session.initialViewport.x - (screen.x - session.startClient.x) / session.initialViewport.zoom, y: session.initialViewport.y - (screen.y - session.startClient.y) / session.initialViewport.zoom });
+    } else if (session.mode === 'marquee') {
+      setMarquee({ start: session.startWorld, current: point });
+    }
+  };
+
+  const finishPointerInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const session = dragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    if (session.mode === 'drag' && Object.keys(dragPreview).length > 0) {
+      moveNodes(dragPreview);
+      setDragPreview({});
+    } else if (session.mode === 'marquee' && marquee && page) {
+      const left = Math.min(marquee.start.x, marquee.current.x);
+      const right = Math.max(marquee.start.x, marquee.current.x);
+      const top = Math.min(marquee.start.y, marquee.current.y);
+      const bottom = Math.max(marquee.start.y, marquee.current.y);
+      const ids = page.nodes.filter((node) => {
+        const position = dragPreview[node.id] ?? node.position;
+        return position.x < right && position.x + node.size.width > left && position.y < bottom && position.y + node.size.height > top;
+      }).map((node) => node.id);
+      setSelection(ids, ids.at(-1) ?? null);
+      setMarquee(null);
+    }
+    if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+  };
+
+  const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * (event.deltaY > 0 ? 0.92 : 1.08)));
+    const before = worldPoint(event);
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || nextZoom === viewport.zoom) return;
+    const screen = screenPoint(event);
+    updateViewport({ zoom: nextZoom, x: before.x - (screen.x - size.width / 2) / nextZoom, y: before.y - (screen.y - size.height / 2) / nextZoom });
+  };
+
+  const transform = `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
+  const gridSize = page?.settings.gridSize ?? 16;
+  const gridId = `grid-${page?.id ?? 'page'}`;
+  const marqueeRect = marquee ? {
+    x: Math.min(marquee.start.x, marquee.current.x), y: Math.min(marquee.start.y, marquee.current.y),
+    width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y),
+  } : null;
+
+  const renderedNodes = page?.nodes ?? [];
+  const nodeMap = useMemo(() => new Map(renderedNodes.map((node) => [node.id, node])), [renderedNodes]);
+
+  return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
+    <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>
+    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={(event) => event.preventDefault()}>
+      <defs>
+        <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="#2c3346" strokeWidth="0.7" opacity="0.62" /></pattern>
+        <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
+        <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
+      </defs>
+      <rect className="canvas-background" width={size.width} height={size.height} fill="#0f121a" />
+      <g transform={transform}>
+        <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
+        <g className="edge-layer">{(page?.edges ?? []).map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
+        <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart === node.id} onPointerDown={beginNodeInteraction} />)}</g>
+        {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
+      </g>
+    </svg>
+    <div className="canvas-coordinates">{Math.round(viewport.x)}, {Math.round(viewport.y)}</div>
+  </div>;
+}
+
+function EdgeView({ edge, source, target }: { edge: any; source?: DiagramNode; target?: DiagramNode }) {
+  if (!source || !target) return null;
+  const sourcePos = source.position;
+  const targetPos = target.position;
+  const sx = sourcePos.x + source.size.width / 2;
+  const sy = sourcePos.y + source.size.height / 2;
+  const tx = targetPos.x + target.size.width / 2;
+  const ty = targetPos.y + target.size.height / 2;
+  const curve = Math.max(70, Math.abs(tx - sx) * 0.42);
+  const path = `M ${sx} ${sy} C ${sx + (tx > sx ? curve : -curve)} ${sy}, ${tx - (tx > sx ? curve : -curve)} ${ty}, ${tx} ${ty}`;
+  const label = typeof edge.data?.label === 'string' ? edge.data.label : null;
+  return <g className="canvas-edge" data-edge-id={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} markerEnd={edge.style.endMarker === 'arrow' ? 'url(#arrow-end)' : undefined} /><circle cx={sx} cy={sy} r="3" fill="#8a92ab" />{label && <g transform={`translate(${(sx + tx) / 2} ${(sy + ty) / 2})`}><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke="#3a4258" /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}</g>;
+}
+
+function NodeView({ node, position, selected, connectorStart, onPointerDown }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; onPointerDown: (event: ReactPointerEvent<SVGGElement>, node: DiagramNode) => void }) {
+  const width = node.size.width;
+  const height = node.size.height;
+  const label = typeof node.data.label === 'string' ? node.data.label : node.type;
+  const commonProps = { fill: node.style.fill, stroke: node.style.stroke, strokeWidth: node.style.strokeWidth, opacity: node.style.opacity };
+  const shape = (() => {
+    if (node.type === 'diamond' || node.type === 'decision') {
+      const points = `${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`;
+      return <polygon points={points} {...commonProps} />;
+    }
+    if (node.type === 'circle') return <ellipse cx={width / 2} cy={height / 2} rx={width / 2} ry={height / 2} {...commonProps} />;
+    if (node.type === 'line') return <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} markerEnd="url(#arrow-end)" />;
+    if (node.type === 'actor') return <g><circle cx={width / 2} cy={28} r={16} {...commonProps} /><path d={`M${width / 2} 44 L${width / 2} 91 M${width / 2 - 25} 60 L${width / 2 + 25} 60 M${width / 2} 91 L${width / 2 - 21} 124 M${width / 2} 91 L${width / 2 + 21} 124`} fill="none" stroke={node.style.stroke} strokeWidth="3" strokeLinecap="round" /></g>;
+    if (node.type === 'entity') {
+      const fields = Array.isArray(node.data.fields) ? node.data.fields : [];
+      return <g><rect width={width} height={height} rx={node.style.radius} {...commonProps} /><rect width={width} height="42" rx={node.style.radius} fill={node.style.stroke} opacity="0.17" /><line x1="0" y1="42" x2={width} y2="42" stroke={node.style.stroke} strokeWidth="1" /><text className="node-entity-title" x="16" y="27">{label}</text>{fields.map((field, index) => <text key={String(field)} className="node-field" x="16" y={68 + index * 27}>{String(field)}</text>)}</g>;
+    }
+    if (node.type === 'store') return <g><rect width={width} height={height} rx="4" {...commonProps} /><line x1="0" y1="12" x2={width} y2="12" stroke={node.style.stroke} opacity="0.5" /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
+    if (node.type === 'boundary') return <g><rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray="7 5" /><text className="boundary-label" x="18" y="27">{label}</text></g>;
+    const radius = node.type === 'rounded-rectangle' || node.type === 'start' || node.type === 'use-case' ? Math.min(node.style.radius || 22, height / 2) : node.style.radius;
+    return <rect width={width} height={height} rx={radius} {...commonProps} />;
+  })();
+  const labelNode = !['entity', 'actor', 'store', 'boundary', 'line'].includes(node.type) ? <text className={`node-label ${node.type === 'start' || node.type === 'use-case' ? 'node-label-strong' : ''}`} x={width / 2} y={height / 2 + 5}>{label}</text> : node.type === 'actor' ? <text className="node-label" x={width / 2} y={height - 10}>{label}</text> : null;
+  return <g className={`canvas-node ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)}>
+    {shape}
+    {labelNode}
+    {selected && <g className="node-handles"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" /><rect className="handle" x={-4} y={-4} width="8" height="8" /><rect className="handle" x={width - 4} y={-4} width="8" height="8" /><rect className="handle" x={width - 4} y={height - 4} width="8" height="8" /><rect className="handle" x={-4} y={height - 4} width="8" height="8" /></g>}
+  </g>;
+}

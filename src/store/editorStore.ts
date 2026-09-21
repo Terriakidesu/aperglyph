@@ -9,7 +9,7 @@ import {
 } from '../core/commands';
 import { createDocument, createEdge, createNode } from '../core/document';
 import { editorEvents } from '../core/events';
-import type { DiagramDocument, DiagramEdge, DiagramNode, Point, ToolId, Viewport } from '../core/types';
+import type { DiagramDocument, DiagramEdge, DiagramNode, NodePatch, Point, ToolId, Viewport } from '../core/types';
 
 interface EditorStore {
   document: DiagramDocument;
@@ -30,7 +30,7 @@ interface EditorStore {
   createNode: (node: DiagramNode) => void;
   createEdge: (edge: DiagramEdge) => void;
   moveNodes: (positions: Record<string, Point>) => void;
-  updateNode: (nodeId: string, changes: Partial<DiagramNode>, label?: string) => void;
+  updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   deleteSelection: () => void;
   undo: () => void;
   redo: () => void;

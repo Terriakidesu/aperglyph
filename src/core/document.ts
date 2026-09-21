@@ -73,7 +73,7 @@ export function createDocument(
 export function createNode(
   type: string,
   position: Point,
-  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'style' | 'data'>> = {},
+  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data'>> & { style?: Partial<NodeStyle> } = {},
 ): DiagramNode {
   return {
     id: createId('node'),
@@ -91,7 +91,7 @@ export function createNode(
 export function createEdge(
   source: DiagramEdge['source'],
   target: DiagramEdge['target'],
-  options: Partial<Pick<DiagramEdge, 'type' | 'style' | 'data'>> = {},
+  options: Partial<Pick<DiagramEdge, 'type' | 'data'>> & { style?: Partial<EdgeStyle> } = {},
 ): DiagramEdge {
   return {
     id: createId('edge'),
