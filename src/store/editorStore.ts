@@ -19,9 +19,11 @@ interface EditorStore {
   activeTool: ToolId;
   viewport: Viewport;
   isDirty: boolean;
+  lastSavedAt: number | null;
   lastAction: string | null;
   commandManager: CommandManager;
   setDocument: (document: DiagramDocument) => void;
+  markSaved: (savedAt?: number) => void;
   setActivePage: (pageId: string) => void;
   setSelection: (ids: string[], primaryId?: string | null) => void;
   setTool: (tool: ToolId) => void;
@@ -62,14 +64,16 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     activeTool: 'select',
     viewport: { x: 0, y: 0, zoom: 1 },
     isDirty: false,
+    lastSavedAt: null,
     lastAction: null,
     commandManager: manager,
     setDocument: (document) => {
       manager.clear();
-      set({ document, activePageId: document.pages[0]?.id ?? '', selectedIds: [], primarySelectedId: null, isDirty: false, lastAction: null });
+      set({ document, activePageId: document.pages[0]?.id ?? '', selectedIds: [], primarySelectedId: null, isDirty: false, lastSavedAt: document.updatedAt, lastAction: null });
       editorEvents.emit('document:opened', { document });
       editorEvents.emit('history:changed', { canUndo: false, canRedo: false, lastAction: null });
     },
+    markSaved: (savedAt = Date.now()) => set({ isDirty: false, lastSavedAt: savedAt }),
     setActivePage: (pageId) => set({ activePageId: pageId, selectedIds: [], primarySelectedId: null }),
     setSelection: (ids, primaryId = ids.at(-1) ?? null) => {
       set({ selectedIds: ids, primarySelectedId: primaryId });
@@ -137,7 +141,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     reset: (name = 'Untitled diagram', type = 'general') => {
       const document = createDocument(name, type);
       manager.clear();
-      set({ document, activePageId: document.pages[0].id, selectedIds: [], primarySelectedId: null, isDirty: true, lastAction: null, viewport: { x: 0, y: 0, zoom: 1 } });
+      set({ document, activePageId: document.pages[0].id, selectedIds: [], primarySelectedId: null, isDirty: true, lastSavedAt: null, lastAction: null, viewport: { x: 0, y: 0, zoom: 1 } });
       editorEvents.emit('document:opened', { document });
       editorEvents.emit('history:changed', { canUndo: false, canRedo: false, lastAction: null });
     },

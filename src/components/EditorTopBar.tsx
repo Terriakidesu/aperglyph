@@ -1,4 +1,5 @@
 import { CloudOff, Download, MoreHorizontal, Redo2, Save, Undo2, X } from 'lucide-react';
+import { downloadProject } from '../persistence';
 import { useEditorStore } from '../store/editorStore';
 import { LogoMark } from './LogoMark';
 
@@ -17,6 +18,6 @@ export function EditorTopBar({ onExit }: EditorTopBarProps) {
   return <header className="editor-topbar">
     <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title"><strong>{document.name}</strong><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div></div>
     <div className="topbar-center"><div className="mode-switch"><button className="mode-switch-active">Design</button><button>Inspect</button></div></div>
-    <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 size={17} /></button></div><span className="topbar-divider" /><button className="sync-status"><CloudOff size={15} /> Device only</button><button className="secondary-button topbar-export"><Download size={15} /> Export</button><button className="icon-button"><MoreHorizontal size={18} /></button></div>
+    <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 size={17} /></button></div><span className="topbar-divider" /><button className="sync-status"><CloudOff size={15} /> Device only</button><button className="secondary-button topbar-export" onClick={() => downloadProject(document)}><Download size={15} /> Export .wdiag</button><button className="icon-button"><MoreHorizontal size={18} /></button></div>
   </header>;
 }
