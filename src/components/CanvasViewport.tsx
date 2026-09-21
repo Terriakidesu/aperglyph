@@ -1184,11 +1184,9 @@ function EdgeMarkersView({ edge, source, target, obstacles, markerFill }: { edge
   if (route.length < 2) return null;
   const start = route[0];
   const end = route[route.length - 1];
-  const startMarkerDirection = markerDirection(start, route[1], source);
-  const endMarkerDirection = markerDirection(end, route.at(-2) ?? start, target);
-  const startArrowDirection = markerArrowDirection(start, route[1]);
-  const endArrowDirection = markerArrowDirection(end, route.at(-2) ?? start);
-  return <>{renderEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start')}{renderEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end')}</>;
+  const startDirection = markerDirection(start, route[1]);
+  const endDirection = markerDirection(end, route.at(-2) ?? start);
+  return <>{renderEndpointMarker(start, startDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start')}{renderEndpointMarker(end, endDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end')}</>;
 }
 
 function EdgeEndpointHandles({ edge, source, target, obstacles, selected, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
@@ -1216,13 +1214,8 @@ function endpointDirection(point: Point, neighbor: Point, node?: DiagramNode): P
 }
 
 /** Every endpoint notation follows the same connector tangent as an arrowhead. */
-function markerDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
-  if (node) return endpointDirection(point, neighbor, node);
-  return directionBetween(point, neighbor);
-}
-
-/** Arrowheads follow the actual connector tangent, including diagonal spans. */
-function markerArrowDirection(point: Point, neighbor: Point): Point {
+/** Every endpoint notation follows the same connector tangent as an arrowhead. */
+function markerDirection(point: Point, neighbor: Point): Point {
   return directionBetween(point, neighbor);
 }
 

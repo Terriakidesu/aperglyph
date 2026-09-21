@@ -64,6 +64,13 @@ describe('native file helpers', () => {
     expect(svg).toContain('translate(40 80) rotate(28.30075576600638)');
   });
 
+  it('turns every endpoint notation with the connector tangent', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } }, { style: { startMarker: 'bar', endMarker: 'crowfoot' } });
+    const svg = documentToSvg([], [edge], '#10131c', 400, 300);
+    expect(svg).toContain('translate(40 80) rotate(28.30075576600638)');
+    expect(svg).toContain('translate(300 220) rotate(-151.69924423399362)');
+  });
+
   it('rotates attached straight arrowheads with a diagonal connector tangent', () => {
     const source = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 50 } });
     const target = createNode('rectangle', { x: 300, y: 200 }, { size: { width: 100, height: 50 } });

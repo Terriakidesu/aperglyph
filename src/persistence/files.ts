@@ -111,10 +111,8 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const end = route.at(-1) ?? start;
     const startDirection = endpointDirection(start, route[1], source);
     const endDirection = endpointDirection(end, route.at(-2) ?? start, target);
-    const startMarkerDirection = markerDirection(start, route[1], source);
-    const endMarkerDirection = markerDirection(end, route.at(-2) ?? start, target);
-    const startArrowDirection = markerArrowDirection(start, route[1]);
-    const endArrowDirection = markerArrowDirection(end, route.at(-2) ?? start);
+    const startMarkerDirection = markerDirection(start, route[1]);
+    const endMarkerDirection = markerDirection(end, route.at(-2) ?? start);
     const curveStartDirection = source ? startDirection : { x: -startDirection.x, y: -startDirection.y };
     const curveEndDirection = target ? { x: -endDirection.x, y: -endDirection.y } : endDirection;
     const jumps = routeJumps.get(edge.id) ?? [];
@@ -124,7 +122,7 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
       : '';
     const edgeStroke = outlineOnly ? '#000000' : edge.style.stroke;
     const line = `<path d="${path}" fill="none" stroke="${escapeXml(edgeStroke)}" stroke-width="${edge.style.strokeWidth}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
-    return `${masks}${line}${svgEndpointMarker(start, edge.style.startMarker === 'arrow' ? startArrowDirection : startMarkerDirection, edge.style.startMarker, edgeStroke, exportBackground, 'start')}${svgEndpointMarker(end, edge.style.endMarker === 'arrow' ? endArrowDirection : endMarkerDirection, edge.style.endMarker, edgeStroke, exportBackground, 'end')}`;
+     return `${masks}${line}${svgEndpointMarker(start, startMarkerDirection, edge.style.startMarker, edgeStroke, exportBackground, 'start')}${svgEndpointMarker(end, endMarkerDirection, edge.style.endMarker, edgeStroke, exportBackground, 'end')}`;
   }).join('');
   const nodeMarkup = nodes.map((node) => renderNode(node, outlineOnly)).join('');
   const viewBox = options.viewBox ?? { x: 0, y: 0, width, height };
@@ -162,12 +160,7 @@ function endpointDirection(point: Point, neighbor: Point, node?: DiagramNode): P
   return node ? outwardDirection(point, nodeCenter(node)) : { x: point.x - neighbor.x, y: point.y - neighbor.y };
 }
 
-function markerDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
-  if (node) return endpointDirection(point, neighbor, node);
-  return directionBetween(point, neighbor);
-}
-
-function markerArrowDirection(point: Point, neighbor: Point): Point {
+function markerDirection(point: Point, neighbor: Point): Point {
   return directionBetween(point, neighbor);
 }
 
