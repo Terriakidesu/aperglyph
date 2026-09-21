@@ -66,7 +66,7 @@ async function handleRequest(request: SpatialRequest): Promise<void> {
 
 async function loadWasm(): Promise<void> {
   try {
-    const moduleUrl = new URL('/wasm/aperglyph_diagram_engine.js', self.location.origin).href;
+    const moduleUrl = new URL(`${import.meta.env.BASE_URL}wasm/aperglyph_diagram_engine.js`, self.location.origin).href;
     const module = await import(/* @vite-ignore */ moduleUrl) as unknown as WasmModule;
     await module.default();
     wasmQueryViewport = module.query_viewport;

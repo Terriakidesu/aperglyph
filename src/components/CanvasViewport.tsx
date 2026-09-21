@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { createEdge, createNode as buildNode } from '../core/document';
 import { ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, normalizeEntityFields } from '../core/erd';
+import { editorEvents } from '../core/events';
 import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramNode, EdgeMarker, Point, Size, Viewport } from '../core/types';
@@ -71,6 +72,7 @@ export function CanvasViewport() {
   const moveNodes = useEditorStore((state) => state.moveNodes);
   const createConnector = useEditorStore((state) => state.createEdge);
   const addNode = useEditorStore((state) => state.createNode);
+  const setTool = useEditorStore((state) => state.setTool);
   const addEdge = useEditorStore((state) => state.createEdge);
   const updateEdge = useEditorStore((state) => state.updateEdge);
   const updateNode = useEditorStore((state) => state.updateNode);
@@ -87,6 +89,25 @@ export function CanvasViewport() {
     observer.observe(stageRef.current);
     return () => observer.disconnect();
   }, []);
+
+  const fitViewport = useCallback((scope: 'page' | 'selection') => {
+    if (!page || size.width <= 0 || size.height <= 0) return;
+    const selectedNodes = page.nodes.filter((node) => selectedIds.includes(node.id));
+    const nodes = scope === 'selection' && selectedNodes.length > 0 ? selectedNodes : page.nodes;
+    const bounds = nodes.length > 0
+      ? {
+        x: Math.min(...nodes.map((node) => node.position.x)),
+        y: Math.min(...nodes.map((node) => node.position.y)),
+        width: Math.max(...nodes.map((node) => node.position.x + node.size.width)) - Math.min(...nodes.map((node) => node.position.x)),
+        height: Math.max(...nodes.map((node) => node.position.y + node.size.height)) - Math.min(...nodes.map((node) => node.position.y)),
+      }
+      : { x: -page.settings.width / 2, y: -page.settings.height / 2, width: page.settings.width, height: page.settings.height };
+    const padding = 72;
+    const zoom = Math.min(3, Math.max(MIN_ZOOM, Math.min((size.width - padding * 2) / Math.max(1, bounds.width), (size.height - padding * 2) / Math.max(1, bounds.height))));
+    updateViewport({ zoom, x: -(bounds.x + bounds.width / 2), y: -(bounds.y + bounds.height / 2) });
+  }, [page, selectedIds, size.height, size.width, updateViewport]);
+
+  useEffect(() => editorEvents.on('viewport:fit', ({ scope }) => fitViewport(scope)), [fitViewport]);
 
   useEffect(() => {
     if (textEdit) {
@@ -413,6 +434,9 @@ export function CanvasViewport() {
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screen, initialViewport: viewport };
       isPanningRef.current = true;
+    } else if (activeTool === 'shape') {
+      addNode(buildNode('rectangle', { x: point.x - 90, y: point.y - 44 }, { data: { label: 'Rectangle' } }));
+      setTool('select');
     } else if (activeTool === 'select') {
       if (!event.shiftKey) setSelection([]);
       setAlignmentGuides([]);
@@ -550,7 +574,7 @@ export function CanvasViewport() {
     width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y),
   } : null;
 
-  const renderedNodes = page?.nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id)) ?? [];
+  const renderedNodes = page?.nodes.filter((node) => !visibleNodeIds || visibleNodeIds.has(node.id)).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)) ?? [];
   const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => {
     const moved = dragPreview[node.id] ? { ...node, position: dragPreview[node.id] } : node;
     return [node.id, resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved] as const;

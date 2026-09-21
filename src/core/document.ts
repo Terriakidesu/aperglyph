@@ -12,6 +12,14 @@ import type {
 } from './types';
 
 export const CURRENT_SCHEMA_VERSION = 1;
+const MAX_PAGES = 1000;
+const MAX_NODES_PER_PAGE = 50000;
+const MAX_EDGES_PER_PAGE = 100000;
+const MAX_WAYPOINTS_PER_EDGE = 10000;
+const MAX_STRING_LENGTH = 10000;
+const diagramTypes = new Set<DiagramType>(['general', 'flowchart', 'erd', 'dfd', 'use-case']);
+const edgeMarkers = new Set(['none', 'arrow', 'bar', 'circle', 'crowfoot', 'circle-bar', 'bar-crowfoot', 'circle-crowfoot']);
+const edgeDashes = new Set(['solid', 'dashed', 'dotted']);
 
 export const defaultNodeStyle: NodeStyle = {
   fill: '#171b28',
@@ -109,6 +117,37 @@ export function cloneDocument(document: DiagramDocument): DiagramDocument {
   return structuredClone(document);
 }
 
+/** Clone a page with fresh IDs so it can safely coexist with the source page. */
+export function clonePageWithNewIds(source: DiagramPage, name = `${source.name} copy`): DiagramPage {
+  const groupIds = new Map<string, string>();
+  const nodeIds = new Map<string, string>();
+  const nodes = source.nodes.map((node) => {
+    const id = createId('node');
+    nodeIds.set(node.id, id);
+    const groupId = node.groupId
+      ? (groupIds.get(node.groupId) ?? (() => {
+        const next = createId('group');
+        groupIds.set(node.groupId!, next);
+        return next;
+      })())
+      : undefined;
+    return { ...structuredClone(node), id, groupId };
+  });
+  const edges = source.edges.map((edge) => ({
+    ...structuredClone(edge),
+    id: createId('edge'),
+    source: { ...edge.source, nodeId: nodeIds.get(edge.source.nodeId) ?? edge.source.nodeId },
+    target: { ...edge.target, nodeId: nodeIds.get(edge.target.nodeId) ?? edge.target.nodeId },
+  }));
+  return {
+    ...structuredClone(source),
+    id: createId('page'),
+    name,
+    nodes,
+    edges,
+  };
+}
+
 export function getPage(document: DiagramDocument, pageId: string): DiagramPage | undefined {
   return document.pages.find((page) => page.id === pageId);
 }
@@ -131,13 +170,143 @@ export function parseProject(raw: string): DiagramDocument {
   if (!isRecord(parsed) || parsed.format !== 'aperglyph' || !isRecord(parsed.document)) {
     throw new Error('This file is not a valid AperGlyph project.');
   }
+  if (parsed.formatVersion !== undefined && parsed.formatVersion !== 1) throw new Error('Unsupported AperGlyph project format version.');
+  const errors = validateProjectDocument(parsed.document);
+  if (errors.length > 0) throw new Error(`Invalid AperGlyph project: ${errors[0]}`);
+  return migrateDocument(parsed.document as Partial<DiagramDocument>);
+}
 
-  const document = parsed.document as Partial<DiagramDocument>;
-  if (typeof document.id !== 'string' || typeof document.name !== 'string' || !Array.isArray(document.pages)) {
-    throw new Error('The AperGlyph project is missing required document fields.');
+export function validateProjectDocument(value: unknown): string[] {
+  const errors: string[] = [];
+  if (!isRecord(value)) return ['document must be an object'];
+  if (!isBoundedString(value.id, 'document.id', 1, 256, errors)) return errors;
+  isBoundedString(value.name, 'document.name', 1, 256, errors);
+  if (value.schemaVersion !== undefined && (!isInteger(value.schemaVersion) || value.schemaVersion < 1 || value.schemaVersion > CURRENT_SCHEMA_VERSION)) errors.push('document.schemaVersion is unsupported');
+  if (value.diagramType !== undefined && (typeof value.diagramType !== 'string' || !diagramTypes.has(value.diagramType as DiagramType))) errors.push('document.diagramType is invalid');
+  if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > MAX_PAGES) {
+    errors.push(`document.pages must contain between 1 and ${MAX_PAGES} pages`);
+    return errors;
   }
+  const pageIds = new Set<string>();
+  value.pages.forEach((page, pageIndex) => validatePage(page, pageIndex, pageIds, errors));
+  return errors;
+}
 
-  return migrateDocument(document);
+function validatePage(value: unknown, pageIndex: number, pageIds: Set<string>, errors: string[]): void {
+  const path = `pages[${pageIndex}]`;
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  if (!isBoundedString(value.id, `${path}.id`, 1, 256, errors)) return;
+  if (pageIds.has(value.id as string)) errors.push(`${path}.id is duplicated`);
+  pageIds.add(value.id as string);
+  isBoundedString(value.name, `${path}.name`, 1, 256, errors);
+  if (!Array.isArray(value.nodes) || value.nodes.length > MAX_NODES_PER_PAGE) errors.push(`${path}.nodes exceeds the maximum size`);
+  if (!Array.isArray(value.edges) || value.edges.length > MAX_EDGES_PER_PAGE) errors.push(`${path}.edges exceeds the maximum size`);
+  validatePageSettings(value.settings, `${path}.settings`, errors);
+  const nodes = Array.isArray(value.nodes) ? value.nodes : [];
+  const edges = Array.isArray(value.edges) ? value.edges : [];
+  const nodeIds = new Set<string>();
+  nodes.forEach((node, index) => validateNode(node, `${path}.nodes[${index}]`, nodeIds, errors));
+  const edgeIds = new Set<string>();
+  edges.forEach((edge, index) => validateEdge(edge, `${path}.edges[${index}]`, edgeIds, nodeIds, errors));
+}
+
+function validatePageSettings(value: unknown, path: string, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  finiteInRange(value.width, `${path}.width`, 320, 100000, errors);
+  finiteInRange(value.height, `${path}.height`, 240, 100000, errors);
+  isBoundedString(value.background, `${path}.background`, 1, 64, errors);
+  finiteInRange(value.gridSize, `${path}.gridSize`, 1, 512, errors);
+  if (typeof value.gridVisible !== 'boolean') errors.push(`${path}.gridVisible must be boolean`);
+  if (typeof value.snapToGrid !== 'boolean') errors.push(`${path}.snapToGrid must be boolean`);
+}
+
+function validateNode(value: unknown, path: string, ids: Set<string>, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  if (!isBoundedString(value.id, `${path}.id`, 1, 256, errors)) return;
+  if (ids.has(value.id as string)) errors.push(`${path}.id is duplicated`);
+  ids.add(value.id as string);
+  isBoundedString(value.library, `${path}.library`, 1, 128, errors);
+  isBoundedString(value.type, `${path}.type`, 1, 128, errors);
+  validatePoint(value.position, `${path}.position`, errors);
+  if (!isRecord(value.size)) errors.push(`${path}.size must be an object`);
+  else { finiteInRange(value.size.width, `${path}.size.width`, 1, 100000, errors); finiteInRange(value.size.height, `${path}.size.height`, 1, 100000, errors); }
+  finiteInRange(value.rotation, `${path}.rotation`, -360000, 360000, errors);
+  if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
+  if (value.groupId !== undefined) isBoundedString(value.groupId, `${path}.groupId`, 1, 256, errors);
+  if (value.zIndex !== undefined) finiteInRange(value.zIndex, `${path}.zIndex`, -100000000, 100000000, errors);
+  validateNodeStyle(value.style, `${path}.style`, errors);
+  validateData(value.data, `${path}.data`, errors);
+}
+
+function validateNodeStyle(value: unknown, path: string, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  isBoundedString(value.fill, `${path}.fill`, 1, 64, errors);
+  isBoundedString(value.stroke, `${path}.stroke`, 1, 64, errors);
+  finiteInRange(value.strokeWidth, `${path}.strokeWidth`, 0, 100, errors);
+  finiteInRange(value.radius, `${path}.radius`, 0, 100000, errors);
+  finiteInRange(value.opacity, `${path}.opacity`, 0, 1, errors);
+  isBoundedString(value.textColor, `${path}.textColor`, 1, 64, errors);
+}
+
+function validateEdge(value: unknown, path: string, ids: Set<string>, nodeIds: Set<string>, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  if (!isBoundedString(value.id, `${path}.id`, 1, 256, errors)) return;
+  if (ids.has(value.id as string)) errors.push(`${path}.id is duplicated`);
+  ids.add(value.id as string);
+  isBoundedString(value.type, `${path}.type`, 1, 128, errors);
+  validateEndpoint(value.source, `${path}.source`, nodeIds, errors);
+  validateEndpoint(value.target, `${path}.target`, nodeIds, errors);
+  if (!Array.isArray(value.waypoints) || value.waypoints.length > MAX_WAYPOINTS_PER_EDGE) errors.push(`${path}.waypoints exceeds the maximum size`);
+  (Array.isArray(value.waypoints) ? value.waypoints : []).forEach((point, index) => validatePoint(point, `${path}.waypoints[${index}]`, errors));
+  if (!isRecord(value.style)) errors.push(`${path}.style must be an object`);
+  else {
+    isBoundedString(value.style.stroke, `${path}.style.stroke`, 1, 64, errors);
+    finiteInRange(value.style.strokeWidth, `${path}.style.strokeWidth`, 0, 100, errors);
+    if (typeof value.style.dash !== 'string' || !edgeDashes.has(value.style.dash)) errors.push(`${path}.style.dash is invalid`);
+    if (typeof value.style.startMarker !== 'string' || !edgeMarkers.has(value.style.startMarker)) errors.push(`${path}.style.startMarker is invalid`);
+    if (typeof value.style.endMarker !== 'string' || !edgeMarkers.has(value.style.endMarker)) errors.push(`${path}.style.endMarker is invalid`);
+    isBoundedString(value.style.labelColor, `${path}.style.labelColor`, 1, 64, errors);
+  }
+  validateData(value.data, `${path}.data`, errors);
+}
+
+function validateEndpoint(value: unknown, path: string, nodeIds: Set<string>, errors: string[]): void {
+  if (!isRecord(value) || !isBoundedString(value.nodeId, `${path}.nodeId`, 1, 256, errors)) return;
+  if (!nodeIds.has(value.nodeId as string)) errors.push(`${path}.nodeId references a missing node`);
+  if (value.port !== undefined) isBoundedString(value.port, `${path}.port`, 1, 32, errors);
+}
+
+function validatePoint(value: unknown, path: string, errors: string[]): void {
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  finiteInRange(value.x, `${path}.x`, -100000000, 100000000, errors);
+  finiteInRange(value.y, `${path}.y`, -100000000, 100000000, errors);
+}
+
+function validateData(value: unknown, path: string, errors: string[], depth = 0): void {
+  if (depth > 8) { errors.push(`${path} is nested too deeply`); return; }
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    if (typeof value === 'number' && !Number.isFinite(value)) errors.push(`${path} contains a non-finite number`);
+    return;
+  }
+  if (typeof value === 'string') { if (value.length > MAX_STRING_LENGTH) errors.push(`${path} contains an oversized string`); return; }
+  if (Array.isArray(value)) { if (value.length > 10000) errors.push(`${path} contains too many items`); value.forEach((item, index) => validateData(item, `${path}[${index}]`, errors, depth + 1)); return; }
+  if (!isRecord(value)) { errors.push(`${path} contains an unsupported value`); return; }
+  const keys = Object.keys(value);
+  if (keys.length > 256) errors.push(`${path} contains too many fields`);
+  keys.forEach((key) => { if (key.length > 256) errors.push(`${path} contains an oversized key`); validateData(value[key], `${path}.${key}`, errors, depth + 1); });
+}
+
+function isBoundedString(value: unknown, path: string, minimum: number, maximum: number, errors: string[]): value is string {
+  if (typeof value !== 'string' || value.length < minimum || value.length > maximum) { errors.push(`${path} must be a string between ${minimum} and ${maximum} characters`); return false; }
+  return true;
+}
+
+function finiteInRange(value: unknown, path: string, minimum: number, maximum: number, errors: string[]): void {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) errors.push(`${path} must be a finite number between ${minimum} and ${maximum}`);
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
 }
 
 export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocument {
@@ -186,6 +355,6 @@ function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: Diagr
   };
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

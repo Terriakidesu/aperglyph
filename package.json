@@ -17,6 +17,7 @@
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.468.0",
+    "pdf-lib": "^1.17.1",
     "rbush": "^4.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

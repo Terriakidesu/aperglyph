@@ -1,5 +1,6 @@
-import { Keyboard, PanelLeftClose, PanelRightClose, Save } from 'lucide-react';
+import { Keyboard, PanelLeftClose, PanelRightClose } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { editorEvents } from '../core/events';
 import { useEditorStore } from '../store/editorStore';
 import { CanvasViewport } from './CanvasViewport';
 import { EditorToolbar } from './EditorToolbar';
@@ -17,6 +18,14 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
+  const selectAll = useEditorStore((state) => state.selectAll);
+  const copySelection = useEditorStore((state) => state.copySelection);
+  const cutSelection = useEditorStore((state) => state.cutSelection);
+  const pasteClipboard = useEditorStore((state) => state.pasteClipboard);
+  const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
+  const rotateSelection = useEditorStore((state) => state.rotateSelection);
+  const groupSelection = useEditorStore((state) => state.groupSelection);
+  const ungroupSelection = useEditorStore((state) => state.ungroupSelection);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -28,15 +37,24 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
+      if (modifier && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); return; }
+      if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); return; }
+      if (modifier && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); return; }
+      if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); return; }
+      if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
+      if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
       if (event.key === 'Escape') { setTool('select'); return; }
+      if (!modifier && event.key.toLowerCase() === 'r') { rotateSelection(); return; }
       const shortcuts: Record<string, typeof activeTool> = { v: 'select', h: 'pan', c: 'connector', t: 'text' };
       if (shortcuts[event.key.toLowerCase()]) setTool(shortcuts[event.key.toLowerCase()]);
       if (modifier && event.key.toLowerCase() === 'k') { event.preventDefault(); setShowShortcuts(true); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [deleteSelection, redo, setTool, undo]);
+  }, [copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, pasteClipboard, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
+
+  useEffect(() => editorEvents.on('ui:shortcuts', () => setShowShortcuts(true)), []);
 
   return <main className="editor-shell">
     <EditorTopBar onExit={onExit} />

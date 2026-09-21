@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createNode, migrateDocument, parseProject, serializeProject } from './document';
+import { createDocument, createNode, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
 
 describe('AperGlyph document model', () => {
   it('creates a versioned document with a page', () => {
@@ -47,5 +47,18 @@ describe('AperGlyph document model', () => {
     const migrated = migrateDocument(document);
     expect(migrated.pages[0].edges[0].style.startMarker).toBe('bar');
     expect(migrated.pages[0].edges[0].style.endMarker).toBe('crowfoot');
+  });
+
+  it('rejects malformed imported geometry and endpoint references', () => {
+    const document = createDocument('Unsafe');
+    const raw = JSON.parse(serializeProject(document)) as Record<string, unknown>;
+    const nested = raw.document as Record<string, unknown>;
+    const pages = nested.pages as Array<Record<string, unknown>>;
+    const page = pages[0];
+    page.nodes = [{ ...(document.pages[0].nodes[0] ?? createNode('rectangle', { x: 0, y: 0 })), id: 'node_a', position: { x: Infinity, y: 0 } }];
+    page.edges = [{ id: 'edge_a', type: 'straight', source: { nodeId: 'node_a' }, target: { nodeId: 'missing' }, waypoints: [], style: { stroke: '#fff', strokeWidth: 1, dash: 'solid', startMarker: 'none', endMarker: 'arrow', labelColor: '#fff' }, data: {} }];
+    expect(validateProjectDocument(nested).some((message) => message.includes('finite'))).toBe(true);
+    expect(validateProjectDocument(nested).some((message) => message.includes('missing node'))).toBe(true);
+    expect(() => parseProject(JSON.stringify({ format: 'aperglyph', formatVersion: 1, document: nested }))).toThrow(/Invalid AperGlyph project/);
   });
 });

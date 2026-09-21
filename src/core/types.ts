@@ -49,6 +49,7 @@ export interface DiagramNode {
   style: NodeStyle;
   data: Record<string, unknown>;
   locked?: boolean;
+  groupId?: string;
   zIndex?: number;
 }
 
@@ -87,6 +88,13 @@ export interface DiagramPage {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   settings: PageSettings;
+}
+
+export type PageSettingsPatch = Partial<PageSettings>;
+
+export interface ClipboardPayload {
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
 }
 
 export interface DiagramDocument {

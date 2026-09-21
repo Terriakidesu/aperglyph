@@ -1,16 +1,32 @@
 import { create } from 'zustand';
 import {
+  AlignNodesCommand,
   CommandManager,
   CreateEdgeCommand,
+  CreatePageCommand,
   CreateNodeCommand,
   DeleteNodesCommand,
+  DeletePageCommand,
+  DistributeNodesCommand,
+  DuplicatePageCommand,
+  DuplicateSelectionCommand,
+  GroupNodesCommand,
   MoveNodesCommand,
+  RenamePageCommand,
+  ReorderPageCommand,
+  RotateNodesCommand,
+  SetZOrderCommand,
+  UngroupNodesCommand,
   UpdateEdgeCommand,
   UpdateNodeCommand,
+  UpdatePageSettingsCommand,
+  offsetClipboard,
+  selectionClipboard,
 } from '../core/commands';
-import { createDocument, createEdge, createNode } from '../core/document';
+import { createDocument, createEdge, createNode, createPage as buildPage } from '../core/document';
 import { editorEvents } from '../core/events';
-import type { DiagramDocument, DiagramEdge, DiagramNode, EdgePatch, NodePatch, Point, ToolId, Viewport } from '../core/types';
+import type { Alignment, DistributionAxis, ZOrderAction } from '../core/commands';
+import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramNode, EdgePatch, NodePatch, PageSettingsPatch, Point, ToolId, Viewport } from '../core/types';
 
 interface EditorStore {
   document: DiagramDocument;
@@ -19,6 +35,7 @@ interface EditorStore {
   primarySelectedId: string | null;
   activeTool: ToolId;
   viewport: Viewport;
+  clipboard: ClipboardPayload | null;
   isDirty: boolean;
   lastSavedAt: number | null;
   lastAction: string | null;
@@ -36,6 +53,23 @@ interface EditorStore {
   moveNodes: (positions: Record<string, Point>) => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   deleteSelection: () => void;
+  selectAll: () => void;
+  copySelection: () => void;
+  cutSelection: () => void;
+  pasteClipboard: () => void;
+  duplicateSelection: () => void;
+  rotateSelection: (degrees?: number) => void;
+  alignSelection: (alignment: Alignment) => void;
+  distributeSelection: (axis: DistributionAxis) => void;
+  setZOrder: (action: ZOrderAction) => void;
+  groupSelection: () => void;
+  ungroupSelection: () => void;
+  createPage: (name?: string) => void;
+  deletePage: (pageId?: string) => void;
+  renamePage: (pageId: string, name: string) => void;
+  duplicatePage: (pageId?: string) => void;
+  reorderPage: (pageId: string, toIndex: number) => void;
+  updatePageSettings: (changes: PageSettingsPatch, pageId?: string, label?: string) => void;
   undo: () => void;
   redo: () => void;
   reset: (name?: string, type?: DiagramDocument['diagramType']) => void;
@@ -65,6 +99,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     primarySelectedId: null,
     activeTool: 'select',
     viewport: { x: 0, y: 0, zoom: 1 },
+    clipboard: null,
     isDirty: false,
     lastSavedAt: null,
     lastAction: null,
@@ -122,6 +157,114 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { activePageId, document } = get();
       const next = manager.execute(new UpdateNodeCommand(activePageId, nodeId, changes, label), document);
       updateDocument(next, label ?? 'Update node');
+    },
+    selectAll: () => {
+      const { document, activePageId } = get();
+      const page = getActivePage(document, activePageId);
+      if (!page) return;
+      get().setSelection([...page.nodes.map((node) => node.id), ...page.edges.map((edge) => edge.id)]);
+    },
+    copySelection: () => {
+      const { document, activePageId, selectedIds } = get();
+      const payload = selectionClipboard(document, activePageId, selectedIds);
+      if (payload.nodes.length > 0 || payload.edges.length > 0) set({ clipboard: payload });
+    },
+    cutSelection: () => {
+      get().copySelection();
+      get().deleteSelection();
+    },
+    pasteClipboard: () => {
+      const { document, activePageId, clipboard } = get();
+      if (!clipboard || (clipboard.nodes.length === 0 && clipboard.edges.length === 0)) return;
+      const payload = offsetClipboard(clipboard);
+      const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
+      updateDocument(next, 'Paste selection');
+      get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
+    },
+    duplicateSelection: () => {
+      const { document, activePageId, selectedIds } = get();
+      const source = selectionClipboard(document, activePageId, selectedIds);
+      if (source.nodes.length === 0 && source.edges.length === 0) return;
+      const payload = offsetClipboard(source);
+      const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
+      updateDocument(next, 'Duplicate selection');
+      get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
+    },
+    rotateSelection: (degrees = 90) => {
+      const { activePageId, document, selectedIds } = get();
+      const nodeIds = selectedIds.filter((id) => getActivePage(document, activePageId)?.nodes.some((node) => node.id === id));
+      if (nodeIds.length === 0) return;
+      const next = manager.execute(new RotateNodesCommand(activePageId, nodeIds, degrees), document);
+      updateDocument(next, 'Rotate selection');
+    },
+    alignSelection: (alignment) => {
+      const { activePageId, document, selectedIds } = get();
+      const next = manager.execute(new AlignNodesCommand(activePageId, selectedIds, alignment), document);
+      updateDocument(next, `Align ${alignment}`);
+    },
+    distributeSelection: (axis) => {
+      const { activePageId, document, selectedIds } = get();
+      const next = manager.execute(new DistributeNodesCommand(activePageId, selectedIds, axis), document);
+      updateDocument(next, `Distribute ${axis}`);
+    },
+    setZOrder: (action) => {
+      const { activePageId, document, selectedIds } = get();
+      const next = manager.execute(new SetZOrderCommand(activePageId, selectedIds, action), document);
+      updateDocument(next, action === 'front' ? 'Bring to front' : action === 'back' ? 'Send to back' : action === 'forward' ? 'Bring forward' : 'Send backward');
+    },
+    groupSelection: () => {
+      const { activePageId, document, selectedIds } = get();
+      const nodeIds = selectedIds.filter((id) => getActivePage(document, activePageId)?.nodes.some((node) => node.id === id));
+      if (nodeIds.length < 2) return;
+      const next = manager.execute(new GroupNodesCommand(activePageId, nodeIds), document);
+      updateDocument(next, 'Group selection');
+    },
+    ungroupSelection: () => {
+      const { activePageId, document, selectedIds } = get();
+      const next = manager.execute(new UngroupNodesCommand(activePageId, selectedIds), document);
+      updateDocument(next, 'Ungroup selection');
+    },
+    createPage: (name) => {
+      const { document } = get();
+      const page = buildPage(name?.trim() || `Page ${document.pages.length + 1}`);
+      const next = manager.execute(new CreatePageCommand(page), document);
+      updateDocument(next, 'Create page');
+      set({ activePageId: page.id, selectedIds: [], primarySelectedId: null });
+    },
+    deletePage: (pageId = get().activePageId) => {
+      const { document, activePageId } = get();
+      if (document.pages.length <= 1) return;
+      const targetIndex = document.pages.findIndex((page) => page.id === pageId);
+      if (targetIndex < 0) return;
+      const next = manager.execute(new DeletePageCommand(pageId), document);
+      updateDocument(next, 'Delete page');
+      const nextPage = next.pages[Math.min(targetIndex, next.pages.length - 1)];
+      set({ activePageId: nextPage?.id ?? activePageId, selectedIds: [], primarySelectedId: null });
+    },
+    renamePage: (pageId, name) => {
+      const { document } = get();
+      const next = manager.execute(new RenamePageCommand(pageId, name), document);
+      updateDocument(next, 'Rename page');
+    },
+    duplicatePage: (pageId = get().activePageId) => {
+      const { document } = get();
+      const pageIndex = document.pages.findIndex((page) => page.id === pageId);
+      const page = document.pages[pageIndex];
+      if (!page) return;
+      const command = new DuplicatePageCommand(page, pageIndex + 1);
+      const next = manager.execute(command, document);
+      updateDocument(next, 'Duplicate page');
+      set({ activePageId: command.pageId, selectedIds: [], primarySelectedId: null });
+    },
+    reorderPage: (pageId, toIndex) => {
+      const { document } = get();
+      const next = manager.execute(new ReorderPageCommand(pageId, toIndex), document);
+      updateDocument(next, 'Reorder page');
+    },
+    updatePageSettings: (changes, pageId = get().activePageId, label = 'Update page settings') => {
+      const { document } = get();
+      const next = manager.execute(new UpdatePageSettingsCommand(pageId, changes, label), document);
+      updateDocument(next, label);
     },
     deleteSelection: () => {
       const { activePageId, document, selectedIds } = get();

@@ -5,6 +5,8 @@ export interface EditorEventMap {
   'document:opened': { document: DiagramDocument };
   'selection:changed': { ids: string[] };
   'viewport:changed': Viewport;
+  'viewport:fit': { scope: 'page' | 'selection' };
+  'ui:shortcuts': undefined;
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };
   'node:moved': { nodeIds: string[]; positions: Record<string, Point> };

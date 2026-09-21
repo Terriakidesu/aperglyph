@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CommandManager, CreateEdgeCommand, CreateNodeCommand, DeleteNodesCommand, MoveNodesCommand, UpdateEdgeCommand } from './commands';
-import { createDocument, createEdge, createNode } from './document';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, MoveNodesCommand, RenamePageCommand, RotateNodesCommand, SetZOrderCommand, UpdateEdgeCommand, selectionClipboard, offsetClipboard } from './commands';
+import { createDocument, createEdge, createNode, createPage } from './document';
 
 describe('command history', () => {
   it('supports execute, undo, and redo', () => {
@@ -53,5 +53,36 @@ describe('command history', () => {
     const withoutEdge = manager.execute(new DeleteNodesCommand(pageId, [edge.id]), updated);
     expect(withoutEdge.pages[0].nodes).toHaveLength(2);
     expect(withoutEdge.pages[0].edges).toHaveLength(0);
+  });
+
+  it('supports page lifecycle commands', () => {
+    const document = createDocument();
+    const page = createPage('Review');
+    const manager = new CommandManager();
+    const withPage = manager.execute(new CreatePageCommand(page), document);
+    expect(withPage.pages.map((item) => item.name)).toEqual(['Page 1', 'Review']);
+    const renamed = manager.execute(new RenamePageCommand(page.id, 'Architecture'), withPage);
+    expect(renamed.pages[1].name).toBe('Architecture');
+  });
+
+  it('duplicates, aligns, distributes, rotates, and reorders selection geometry', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const second = createNode('rectangle', { x: 240, y: 40 });
+    const third = createNode('rectangle', { x: 520, y: 100 });
+    document.pages[0].nodes.push(first, second, third);
+    const manager = new CommandManager();
+    const aligned = manager.execute(new AlignNodesCommand(pageId, [first.id, second.id, third.id], 'top'), document);
+    expect(aligned.pages[0].nodes.map((node) => node.position.y)).toEqual([0, 0, 0]);
+    const distributed = manager.execute(new DistributeNodesCommand(pageId, [first.id, second.id, third.id], 'horizontal'), aligned);
+    expect(distributed.pages[0].nodes.map((node) => node.position.x)).toEqual([0, 260, 520]);
+    const rotated = manager.execute(new RotateNodesCommand(pageId, [first.id], 90), distributed);
+    expect(rotated.pages[0].nodes[0].rotation).toBe(90);
+    const reordered = manager.execute(new SetZOrderCommand(pageId, [first.id], 'front'), rotated);
+    expect(reordered.pages[0].nodes[0].zIndex).toBeGreaterThan(reordered.pages[0].nodes[1].zIndex ?? 0);
+    const payload = offsetClipboard(selectionClipboard(reordered, pageId, [first.id]), { x: 24, y: 24 });
+    const duplicated = manager.execute(new DuplicateSelectionCommand(pageId, payload), reordered);
+    expect(duplicated.pages[0].nodes).toHaveLength(4);
   });
 });
