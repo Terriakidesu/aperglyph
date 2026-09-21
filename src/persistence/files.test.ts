@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createNode, serializeProject } from '../core/document';
+import { createDocument, createEdge, createNode, serializeProject } from '../core/document';
 import { documentToSvg } from './files';
 
 describe('native file helpers', () => {
@@ -14,5 +14,14 @@ describe('native file helpers', () => {
   it('serializes a native project for import/export', () => {
     const document = createDocument('Project');
     expect(serializeProject(document)).toContain('"format": "aperglyph"');
+  });
+
+  it('exports cardinality markers with the connector geometry', () => {
+    const source = createNode('entity', { x: 0, y: 0 });
+    const target = createNode('entity', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } });
+    const svg = documentToSvg([source, target], [edge], '#10131c', 800, 600);
+    expect(svg).toContain('M 0 -7 L 0 7');
+    expect(svg).toContain('M 0 0 L 11 -7');
   });
 });

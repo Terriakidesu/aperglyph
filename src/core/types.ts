@@ -27,10 +27,12 @@ export interface EdgeStyle {
   stroke: string;
   strokeWidth: number;
   dash: 'solid' | 'dashed' | 'dotted';
-  startMarker: 'none' | 'arrow' | 'circle';
-  endMarker: 'none' | 'arrow' | 'circle';
+  startMarker: EdgeMarker;
+  endMarker: EdgeMarker;
   labelColor: string;
 }
+
+export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
 
 export interface Endpoint {
   nodeId: string;
@@ -64,6 +66,11 @@ export interface DiagramEdge {
   style: EdgeStyle;
   data: Record<string, unknown>;
 }
+
+export type EdgePatch = Partial<Pick<DiagramEdge, 'type' | 'source' | 'target' | 'waypoints'>> & {
+  style?: Partial<EdgeStyle>;
+  data?: Record<string, unknown>;
+};
 
 export interface PageSettings {
   width: number;

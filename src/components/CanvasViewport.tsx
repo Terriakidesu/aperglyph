@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { createEdge } from '../core/document';
+import { entityFieldLabel, normalizeEntityFields } from '../core/erd';
 import { curvedPath, edgeRoute, pointsToPath } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import type { DiagramEdge, DiagramNode, Point, Viewport } from '../core/types';
+import type { DiagramEdge, DiagramNode, EdgeMarker, Point, Viewport } from '../core/types';
+import { nearestConnectionPort, nodeCenter } from '../core/geometry';
 import type { ConnectionPort } from '../core/geometry';
 import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
 import type { AlignmentGuide, SpatialNode } from '../spatial';
@@ -13,12 +15,14 @@ interface Marquee { start: Point; current: Point }
 interface ConnectorAnchor { nodeId: string; port?: ConnectionPort }
 
 interface DragSession {
-  mode: 'drag' | 'pan' | 'marquee';
+  mode: 'drag' | 'pan' | 'marquee' | 'waypoint';
   pointerId: number;
   startWorld: Point;
   startClient: Point;
   initialPositions?: Record<string, Point>;
   initialViewport?: Viewport;
+  edgeId?: string;
+  waypointIndex?: number;
 }
 
 const MIN_ZOOM = 0.2;
@@ -40,6 +44,7 @@ export function CanvasViewport() {
   const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(null);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
+  const [waypointPreview, setWaypointPreview] = useState<{ edgeId: string; index: number; point: Point } | null>(null);
   const spatialClient = useMemo(() => new SpatialWorkerClient(), []);
   const indexedPageRef = useRef<string | null>(null);
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
@@ -54,6 +59,7 @@ export function CanvasViewport() {
   const setSelection = useEditorStore((state) => state.setSelection);
   const moveNodes = useEditorStore((state) => state.moveNodes);
   const createConnector = useEditorStore((state) => state.createEdge);
+  const updateEdge = useEditorStore((state) => state.updateEdge);
   const updateViewport = useEditorStore((state) => state.updateViewport);
   const page = getActivePage(document, activePageId);
 
@@ -100,8 +106,8 @@ export function CanvasViewport() {
   const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera = viewport) => {
     const screen = screenPoint(event);
     return {
-      x: (screen.x - size.width / 2) / camera.zoom + camera.x,
-      y: (screen.y - size.height / 2) / camera.zoom + camera.y,
+      x: (screen.x - size.width / 2) / camera.zoom - camera.x,
+      y: (screen.y - size.height / 2) / camera.zoom - camera.y,
     };
   }, [screenPoint, size.height, size.width, viewport]);
 
@@ -155,6 +161,7 @@ export function CanvasViewport() {
   }, [queryVisibleNodes]);
 
   const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => {
+    event.preventDefault();
     event.stopPropagation();
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       const point = worldPoint(event);
@@ -172,7 +179,10 @@ export function CanvasViewport() {
       if (!connectorStart) {
         setConnectorStart(anchor);
       } else if (connectorStart.nodeId !== node.id) {
-        createConnector(createEdge(connectorStart, anchor));
+        const sourceNode = page?.nodes.find((candidate) => candidate.id === connectorStart.nodeId);
+        const source = sourceNode ? { nodeId: connectorStart.nodeId, port: connectorStart.port ?? nearestConnectionPort(sourceNode, nodeCenter(node)) } : connectorStart;
+        const target = { nodeId: node.id, port: port ?? (sourceNode ? nearestConnectionPort(node, nodeCenter(sourceNode)) : undefined) };
+        createConnector(createEdge(source, target, document.diagramType === 'erd' ? { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } } : undefined));
         setConnectorStart(null);
       }
       return;
@@ -218,6 +228,38 @@ export function CanvasViewport() {
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
+  const beginEdgeInteraction = (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => {
+    if (activeTool === 'pan' || spacePressed || event.button === 1) {
+      event.preventDefault();
+      event.stopPropagation();
+      const point = worldPoint(event);
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: viewport };
+      isPanningRef.current = true;
+      svgRef.current?.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (activeTool !== 'select') return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nextSelection = event.shiftKey
+      ? selectedIds.includes(edge.id)
+        ? selectedIds.filter((id) => id !== edge.id)
+        : [...selectedIds, edge.id]
+      : [edge.id];
+    setSelection(nextSelection, nextSelection.includes(edge.id) ? edge.id : nextSelection.at(-1) ?? null);
+  };
+
+  const beginWaypointInteraction = (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => {
+    if (activeTool !== 'select' || spacePressed || event.button === 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelection([edge.id], edge.id);
+    const session: DragSession = { mode: 'waypoint', pointerId: event.pointerId, startWorld: worldPoint(event), startClient: screenPoint(event), edgeId: edge.id, waypointIndex: index };
+    dragRef.current = session;
+    setWaypointPreview({ edgeId: edge.id, index, point: { ...point } });
+    svgRef.current?.setPointerCapture(event.pointerId);
+  };
+
   const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
     const target = event.target as Element;
     if (target.closest?.('[data-node-id]') || target.closest?.('[data-edge-id]')) return;
@@ -247,15 +289,19 @@ export function CanvasViewport() {
           panFrameRef.current = null;
           if (!pending?.session.initialViewport) return;
           updateViewport({
-            x: pending.session.initialViewport.x - (pending.screen.x - pending.session.startClient.x) / pending.session.initialViewport.zoom,
-            y: pending.session.initialViewport.y - (pending.screen.y - pending.session.startClient.y) / pending.session.initialViewport.zoom,
+            x: pending.session.initialViewport.x + (pending.screen.x - pending.session.startClient.x) / pending.session.initialViewport.zoom,
+            y: pending.session.initialViewport.y + (pending.screen.y - pending.session.startClient.y) / pending.session.initialViewport.zoom,
           });
         });
       }
       return;
     }
     const point = worldPoint(event);
-    if (session.mode === 'drag' && session.initialPositions) {
+    if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
+      const gridSize = page?.settings.gridSize ?? 16;
+      const nextPoint = page?.settings.snapToGrid ? { x: Math.round(point.x / gridSize) * gridSize, y: Math.round(point.y / gridSize) * gridSize } : point;
+      setWaypointPreview({ edgeId: session.edgeId, index: session.waypointIndex, point: nextPoint });
+    } else if (session.mode === 'drag' && session.initialPositions) {
       const delta = { x: point.x - session.startWorld.x, y: point.y - session.startWorld.y };
       const desiredPositions = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]));
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
@@ -281,12 +327,21 @@ export function CanvasViewport() {
       const pending = pendingPanRef.current;
       if (pending?.session === session && session.initialViewport) {
         updateViewport({
-          x: session.initialViewport.x - (pending.screen.x - session.startClient.x) / session.initialViewport.zoom,
-          y: session.initialViewport.y - (pending.screen.y - session.startClient.y) / session.initialViewport.zoom,
+          x: session.initialViewport.x + (pending.screen.x - session.startClient.x) / session.initialViewport.zoom,
+          y: session.initialViewport.y + (pending.screen.y - session.startClient.y) / session.initialViewport.zoom,
         });
       }
       pendingPanRef.current = null;
       isPanningRef.current = false;
+    } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined && waypointPreview?.edgeId === session.edgeId && waypointPreview.index === session.waypointIndex) {
+      const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
+      if (edge) {
+        const waypoints = session.waypointIndex < edge.waypoints.length
+          ? edge.waypoints.map((waypoint, index) => index === session.waypointIndex ? waypointPreview.point : waypoint)
+          : [...edge.waypoints, waypointPreview.point];
+        updateEdge(edge.id, { waypoints }, 'Move waypoint');
+      }
+      setWaypointPreview(null);
     } else if (session.mode === 'drag' && Object.keys(dragPreview).length > 0) {
       moveNodes(dragPreview);
       setDragPreview({});
@@ -316,7 +371,7 @@ export function CanvasViewport() {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect || nextZoom === viewport.zoom) return;
     const screen = screenPoint(event);
-    updateViewport({ zoom: nextZoom, x: before.x - (screen.x - size.width / 2) / nextZoom, y: before.y - (screen.y - size.height / 2) / nextZoom });
+    updateViewport({ zoom: nextZoom, x: (screen.x - size.width / 2) / nextZoom - before.x, y: (screen.y - size.height / 2) / nextZoom - before.y });
   };
 
   const transform = `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
@@ -343,7 +398,15 @@ export function CanvasViewport() {
       <rect className="canvas-background" width={size.width} height={size.height} fill="#0f121a" />
       <g transform={transform}>
         <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
-        <g className="edge-layer">{renderedEdges.map((edge) => <EdgeView key={edge.id} edge={edge} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} />)}</g>
+        <g className="edge-layer">{renderedEdges.map((edge) => {
+          const previewWaypoints = waypointPreview?.edgeId === edge.id
+            ? waypointPreview.index < edge.waypoints.length
+              ? edge.waypoints.map((point, index) => waypointPreview.index === index ? waypointPreview.point : point)
+              : [...edge.waypoints, waypointPreview.point]
+            : edge.waypoints;
+          const preview = waypointPreview?.edgeId === edge.id ? { ...edge, waypoints: previewWaypoints } : edge;
+          return <EdgeView key={edge.id} edge={preview} source={nodeMap.get(edge.source.nodeId)} target={nodeMap.get(edge.target.nodeId)} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} onPointerDown={beginEdgeInteraction} onWaypointPointerDown={beginWaypointInteraction} markerFill={page?.settings.background ?? '#10131c'} />;
+        })}</g>
         <g className="node-layer">{renderedNodes.map((node) => <NodeView key={node.id} node={node} position={dragPreview[node.id] ?? node.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} showPorts={activeTool === 'connector'} onPointerDown={beginNodeInteraction} />)}</g>
         <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
           ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
@@ -355,15 +418,58 @@ export function CanvasViewport() {
   </div>;
 }
 
-function EdgeView({ edge, source, target }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode }) {
+function EdgeView({ edge, source, target, obstacles, selected, onPointerDown, onWaypointPointerDown, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; onPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => void; onWaypointPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => void; markerFill: string }) {
   if (!source || !target) return null;
-  const route = edgeRoute(edge, source, target);
+  const route = edgeRoute(edge, source, target, obstacles);
   const start = route[0];
   const end = route[route.length - 1];
   const path = edge.type === 'curved' ? curvedPath(route) : pointsToPath(route);
   const label = typeof edge.data?.label === 'string' ? edge.data.label : null;
   const labelPoint = route.length === 2 ? { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 } : route[Math.floor(route.length / 2)] ?? start;
-  return <g className="canvas-edge" data-edge-id={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} markerStart={edge.style.startMarker === 'arrow' ? 'url(#arrow-start)' : undefined} markerEnd={edge.style.endMarker === 'arrow' ? 'url(#arrow-end)' : undefined} /><circle cx={start.x} cy={start.y} r="3" fill="#8a92ab" />{label && <g transform={`translate(${labelPoint.x} ${labelPoint.y})`}><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke="#3a4258" /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}</g>;
+  const startDirection = outwardDirection(start, nodeCenter(source));
+  const endDirection = outwardDirection(end, nodeCenter(target));
+  const waypointHandles = selected && edge.type === 'orthogonal'
+    ? edge.waypoints.length > 0
+      ? edge.waypoints.map((point, index) => <circle key={`waypoint-${index}`} className="edge-waypoint" cx={point.x} cy={point.y} r="5" onPointerDown={(event) => onWaypointPointerDown(event, edge, index, point)} />)
+      : route.slice(1, -1).map((point) => <circle key={`auto-waypoint-${point.x}-${point.y}`} className="edge-waypoint auto" cx={point.x} cy={point.y} r="5" onPointerDown={(event) => onWaypointPointerDown(event, edge, edge.waypoints.length, point)} />)
+    : null;
+  return <g className={`canvas-edge ${selected ? 'selected' : ''}`} data-edge-id={edge.id} onPointerDown={(event) => onPointerDown(event, edge)}>
+    <path className="edge-shadow" d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" pointerEvents="none" />
+    {selected && <path className="edge-selection" d={path} fill="none" stroke="#a28fff" strokeWidth={edge.style.strokeWidth + 5} opacity="0.22" pointerEvents="none" />}
+    <path className="edge-visible" d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
+    <path className="edge-hit-area" d={path} fill="none" stroke="#ffffff" strokeOpacity="0" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} pointerEvents="stroke" />
+    {renderEndpointMarker(start, startDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start')}
+    {renderEndpointMarker(end, endDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end')}
+    {waypointHandles}
+    {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="none"><rect x={-28} y={-12} width={56} height={22} rx={11} fill="#171b28" stroke={selected ? '#7968c5' : '#3a4258'} /><text className="edge-label" textAnchor="middle" y="4">{label}</text></g>}
+  </g>;
+}
+
+function outwardDirection(point: Point, neighbor: Point): Point {
+  const dx = point.x - neighbor.x;
+  const dy = point.y - neighbor.y;
+  if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) > 0.001) return { x: Math.sign(dx), y: 0 };
+  if (Math.abs(dy) > 0.001) return { x: 0, y: Math.sign(dy) };
+  return { x: 1, y: 0 };
+}
+
+function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, key: string) {
+  if (marker === 'none') return null;
+  const angle = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
+  const strokeWidth = 1.6;
+  const lineProps = { fill: 'none', stroke, strokeWidth, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  const circle = <circle cx="0" cy="0" r="6" fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
+  const bar = <path d="M 0 -7 L 0 7" {...lineProps} />;
+  const crowfoot = (offset = 0) => <path d={`M ${offset} 0 L ${offset + 11} -7 M ${offset} 0 L ${offset + 11} 0 M ${offset} 0 L ${offset + 11} 7`} {...lineProps} />;
+  const glyph = marker === 'arrow'
+    ? <path d={key === 'start' ? 'M 0 0 L -10 -6 L -10 6 Z' : 'M 0 0 L 10 -6 L 10 6 Z'} fill={stroke} />
+    : marker === 'bar' ? bar
+      : marker === 'circle' ? circle
+        : marker === 'crowfoot' ? crowfoot()
+          : marker === 'circle-bar' ? <>{circle}<path d="M 10 -7 L 10 7" {...lineProps} /></>
+            : marker === 'bar-crowfoot' ? <>{bar}{crowfoot(5)}</>
+              : <>{circle}{crowfoot(8)}</>;
+  return <g key={key} className="edge-marker" transform={`translate(${point.x} ${point.y}) rotate(${angle})`} pointerEvents="none">{glyph}</g>;
 }
 
 function NodeView({ node, position, selected, connectorStart, showPorts, onPointerDown }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; showPorts: boolean; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort) => void }) {
@@ -380,8 +486,15 @@ function NodeView({ node, position, selected, connectorStart, showPorts, onPoint
     if (node.type === 'line') return <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} markerEnd="url(#arrow-end)" />;
     if (node.type === 'actor') return <g><circle cx={width / 2} cy={28} r={16} {...commonProps} /><path d={`M${width / 2} 44 L${width / 2} 91 M${width / 2 - 25} 60 L${width / 2 + 25} 60 M${width / 2} 91 L${width / 2 - 21} 124 M${width / 2} 91 L${width / 2 + 21} 124`} fill="none" stroke={node.style.stroke} strokeWidth="3" strokeLinecap="round" /></g>;
     if (node.type === 'entity') {
-      const fields = Array.isArray(node.data.fields) ? node.data.fields : [];
-      return <g><rect width={width} height={height} rx={node.style.radius} {...commonProps} /><rect width={width} height="42" rx={node.style.radius} fill={node.style.stroke} opacity="0.17" /><line x1="0" y1="42" x2={width} y2="42" stroke={node.style.stroke} strokeWidth="1" /><text className="node-entity-title" x="16" y="27">{label}</text>{fields.map((field, index) => <text key={String(field)} className="node-field" x="16" y={68 + index * 27}>{String(field)}</text>)}</g>;
+      const fields = normalizeEntityFields(node.data.fields);
+      const striped = node.data.striped !== false;
+      const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
+      const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+      const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
+      const textColor = node.style.textColor;
+      const headerHeight = 42;
+      const rowHeight = 27;
+      return <g><rect width={width} height={height} rx={node.style.radius} fill={rowFill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} opacity={node.style.opacity} /> <rect width={width} height={headerHeight} rx={node.style.radius} fill={headerFill} opacity={node.style.opacity} /><line x1="0" y1={headerHeight} x2={width} y2={headerHeight} stroke={node.style.stroke} strokeWidth="1" />{fields.map((field, index) => <g key={field.id}><rect x="0" y={headerHeight + index * rowHeight} width={width} height={rowHeight} fill={striped && index % 2 === 1 ? stripeFill : rowFill} /><text className="node-field" style={{ fill: textColor }} x="16" y={headerHeight + 18 + index * rowHeight}>{entityFieldLabel(field)}</text></g>)}<text className="node-entity-title" style={{ fill: node.style.textColor === '#f4f5fa' ? '#ffffff' : textColor }} x="16" y="27">{label}</text></g>;
     }
     if (node.type === 'store') return <g><rect width={width} height={height} rx="4" {...commonProps} /><line x1="0" y1="12" x2={width} y2="12" stroke={node.style.stroke} opacity="0.5" /><text className="node-label" x={width / 2} y={height / 2 + 5}>{label}</text></g>;
     if (node.type === 'boundary') return <g><rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray="7 5" /><text className="boundary-label" x="18" y="27">{label}</text></g>;

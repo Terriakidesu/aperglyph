@@ -32,12 +32,12 @@ export const flowchartPlugin: DiagramPlugin = {
 export const erdPlugin: DiagramPlugin = {
   id: 'erd', name: 'Entity relationship', description: 'Model tables, attributes, and relationships.',
   shapes: [
-    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 220, height: 150 }, defaultStyle: { fill: '#1d2334', stroke: '#8496ff' }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'] } },
+    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 220, height: 180 }, defaultStyle: { fill: '#f2f3f7', stroke: '#68707f', radius: 4, textColor: '#202532' }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], striped: true } },
     { id: 'attribute', type: 'attribute', label: 'Attribute', icon: 'database', defaultSize: { width: 180, height: 64 }, defaultData: { label: 'attribute' } },
   ],
   connectors: [
-    { id: 'relationship', label: 'Relationship', routing: 'orthogonal' },
-    { id: 'identifying', label: 'Identifying relationship', routing: 'orthogonal', defaultStyle: { dash: 'dashed' } },
+    { id: 'relationship', label: 'Relationship', routing: 'orthogonal', defaultStyle: { startMarker: 'bar', endMarker: 'crowfoot' } },
+    { id: 'identifying', label: 'Identifying relationship', routing: 'orthogonal', defaultStyle: { startMarker: 'bar', endMarker: 'crowfoot', dash: 'dashed' } },
   ],
   validators: [],
 };

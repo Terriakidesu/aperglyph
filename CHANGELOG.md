@@ -13,6 +13,22 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Spatial indexing and viewport virtualization
 - Additional diagram plugins and export formats
 
+## [0.9.0] - 2026-09-21
+
+### Added
+
+- Added semantic ERD entity attributes with primary/foreign-key, uniqueness, nullability, validation, and striped-row display controls.
+- Added selectable connector objects with undoable endpoint, port, routing, label, style, marker, waypoint, and delete editing.
+- Added cardinality marker presets including bars, circles, and Crow's Foot combinations for every diagram type.
+- Added draggable orthogonal waypoints and obstacle-aware routing around node bounds.
+- Anchored new and migrated orthogonal connectors to stable node ports.
+
+### Fixed
+
+- Prevented text inside shapes from becoming browser-selected or dragging independently of its parent shape.
+- Corrected pan/camera coordinate math so the canvas follows the pointer and partially visible nodes remain rendered.
+- Made the Inspector scrollable for complete connector editing controls.
+
 ## [0.8.0] - 2026-09-21
 
 ### Added

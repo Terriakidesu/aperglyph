@@ -6,6 +6,17 @@ export function nodeCenter(node: DiagramNode): Point {
   return { x: node.position.x + node.size.width / 2, y: node.position.y + node.size.height / 2 };
 }
 
+/** Selects the closest cardinal port so an orthogonal connection can keep a
+ * stable anchor after its route is recalculated. */
+export function nearestConnectionPort(node: DiagramNode, toward: Point): Exclude<ConnectionPort, 'center' | 'north' | 'east' | 'south' | 'west'> {
+  const center = nodeCenter(node);
+  const localTarget = rotateAround(toward, center, -node.rotation);
+  const dx = localTarget.x - center.x;
+  const dy = localTarget.y - center.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
+  return dy >= 0 ? 'bottom' : 'top';
+}
+
 /**
  * Find the point where a connector ray exits a node. The calculation happens
  * in the node's local coordinate space so rotated nodes keep correct ports.

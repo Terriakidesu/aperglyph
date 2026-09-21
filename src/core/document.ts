@@ -1,3 +1,4 @@
+import { nearestConnectionPort, nodeCenter } from './geometry';
 import type {
   DiagramDocument,
   DiagramEdge,
@@ -147,7 +148,7 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
       ...page,
       settings: { ...createPage().settings, ...(page.settings ?? {}) },
       nodes: Array.isArray(page.nodes) ? page.nodes : [],
-      edges: Array.isArray(page.edges) ? page.edges : [],
+       edges: Array.isArray(page.edges) ? page.edges.map((edge) => anchorOrthogonalEdge(edge, Array.isArray(page.nodes) ? page.nodes : [])) : [],
     }))
     : base.pages;
 
@@ -161,6 +162,18 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
     pages,
     createdAt: input.createdAt ?? base.createdAt,
     updatedAt: input.updatedAt ?? Date.now(),
+  };
+}
+
+function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramEdge {
+  if (edge.type !== 'orthogonal') return edge;
+  const source = nodes.find((node) => node.id === edge.source.nodeId);
+  const target = nodes.find((node) => node.id === edge.target.nodeId);
+  if (!source || !target) return edge;
+  return {
+    ...edge,
+    source: { ...edge.source, port: edge.source.port ?? nearestConnectionPort(source, nodeCenter(target)) },
+    target: { ...edge.target, port: edge.target.port ?? nearestConnectionPort(target, nodeCenter(source)) },
   };
 }
 

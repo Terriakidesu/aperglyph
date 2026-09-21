@@ -10,6 +10,8 @@ export interface EditorEventMap {
   'node:moved': { nodeIds: string[]; positions: Record<string, Point> };
   'node:removed': { nodeIds: string[] };
   'edge:created': { edgeId: string };
+  'edge:removed': { edgeIds: string[] };
+  'edge:changed': { edgeId: string };
   'storage:saved': { documentId: string };
   'storage:error': { error: Error };
 }

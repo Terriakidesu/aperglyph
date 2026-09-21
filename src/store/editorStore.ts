@@ -5,11 +5,12 @@ import {
   CreateNodeCommand,
   DeleteNodesCommand,
   MoveNodesCommand,
+  UpdateEdgeCommand,
   UpdateNodeCommand,
 } from '../core/commands';
 import { createDocument, createEdge, createNode } from '../core/document';
 import { editorEvents } from '../core/events';
-import type { DiagramDocument, DiagramEdge, DiagramNode, NodePatch, Point, ToolId, Viewport } from '../core/types';
+import type { DiagramDocument, DiagramEdge, DiagramNode, EdgePatch, NodePatch, Point, ToolId, Viewport } from '../core/types';
 
 interface EditorStore {
   document: DiagramDocument;
@@ -31,6 +32,7 @@ interface EditorStore {
   updateViewport: (changes: Partial<Viewport>) => void;
   createNode: (node: DiagramNode) => void;
   createEdge: (edge: DiagramEdge) => void;
+  updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   moveNodes: (positions: Record<string, Point>) => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   deleteSelection: () => void;
@@ -100,7 +102,14 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { activePageId, document } = get();
       const next = manager.execute(new CreateEdgeCommand(activePageId, edge), document);
       updateDocument(next, 'Create connector');
+      get().setSelection([edge.id], edge.id);
       editorEvents.emit('edge:created', { edgeId: edge.id });
+    },
+    updateEdge: (edgeId, changes, label) => {
+      const { activePageId, document } = get();
+      const next = manager.execute(new UpdateEdgeCommand(activePageId, edgeId, changes, label), document);
+      updateDocument(next, label ?? 'Update connector');
+      editorEvents.emit('edge:changed', { edgeId });
     },
     moveNodes: (positions) => {
       const { activePageId, document } = get();
@@ -117,10 +126,14 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     deleteSelection: () => {
       const { activePageId, document, selectedIds } = get();
       if (selectedIds.length === 0) return;
+      const page = getActivePage(document, activePageId);
+      const selectedNodeIds = selectedIds.filter((id) => page?.nodes.some((node) => node.id === id));
+      const removedEdgeIds = page?.edges.filter((edge) => selectedIds.includes(edge.id) || selectedNodeIds.includes(edge.source.nodeId) || selectedNodeIds.includes(edge.target.nodeId)).map((edge) => edge.id) ?? [];
       const next = manager.execute(new DeleteNodesCommand(activePageId, selectedIds), document);
       updateDocument(next, 'Delete selection');
       set({ selectedIds: [], primarySelectedId: null });
-      editorEvents.emit('node:removed', { nodeIds: selectedIds });
+      if (selectedNodeIds.length > 0) editorEvents.emit('node:removed', { nodeIds: selectedNodeIds });
+      if (removedEdgeIds.length > 0) editorEvents.emit('edge:removed', { edgeIds: removedEdgeIds });
     },
     undo: () => {
       const { document } = get();

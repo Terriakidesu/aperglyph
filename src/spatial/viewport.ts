@@ -9,10 +9,12 @@ export function viewportBounds(viewport: Viewport, size: Size, overscan = 240): 
   const worldWidth = size.width / viewport.zoom;
   const worldHeight = size.height / viewport.zoom;
   const worldOverscan = overscan / viewport.zoom;
+  const centerX = -viewport.x;
+  const centerY = -viewport.y;
   return {
-    minX: viewport.x - worldWidth / 2 - worldOverscan,
-    minY: viewport.y - worldHeight / 2 - worldOverscan,
-    maxX: viewport.x + worldWidth / 2 + worldOverscan,
-    maxY: viewport.y + worldHeight / 2 + worldOverscan,
+    minX: centerX - worldWidth / 2 - worldOverscan,
+    minY: centerY - worldHeight / 2 - worldOverscan,
+    maxX: centerX + worldWidth / 2 + worldOverscan,
+    maxY: centerY + worldHeight / 2 + worldOverscan,
   };
 }

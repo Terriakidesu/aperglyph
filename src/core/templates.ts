@@ -38,23 +38,23 @@ export function createTemplateDocument(
   } else if (type === 'erd') {
     const users = createNode('entity', { x: -330, y: -80 }, {
       library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#1d2334', stroke: '#8496ff' },
-      data: { label: 'users', fields: ['id · uuid · PK', 'email · varchar', 'created_at · timestamp'] },
+      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
+      data: { label: 'users', striped: true, fields: ['id · uuid · PK', 'email · varchar', 'created_at · timestamp'] },
     });
     const projects = createNode('entity', { x: 80, y: -80 }, {
       library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#1d2334', stroke: '#8496ff' },
-      data: { label: 'projects', fields: ['id · uuid · PK', 'owner_id · uuid · FK', 'name · varchar'] },
+      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
+      data: { label: 'projects', striped: true, fields: ['id · uuid · PK', 'owner_id · uuid · FK', 'name · varchar'] },
     });
     const diagrams = createNode('entity', { x: 490, y: -80 }, {
       library: 'erd', size: { width: 230, height: 190 },
-      style: { fill: '#1d2334', stroke: '#8496ff' },
-      data: { label: 'diagrams', fields: ['id · uuid · PK', 'project_id · uuid · FK', 'content · jsonb'] },
+      style: { fill: '#f2f3f7', stroke: '#68707f', textColor: '#202532', radius: 4 },
+      data: { label: 'diagrams', striped: true, fields: ['id · uuid · PK', 'project_id · uuid · FK', 'content · jsonb'] },
     });
     page.nodes.push(users, projects, diagrams);
     page.edges.push(
-      createEdge({ nodeId: users.id }, { nodeId: projects.id }, { data: { label: '1 : N' } }),
-      createEdge({ nodeId: projects.id }, { nodeId: diagrams.id }, { data: { label: '1 : N' } }),
+      createEdge({ nodeId: users.id, port: 'right' }, { nodeId: projects.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: projects.id, port: 'right' }, { nodeId: diagrams.id, port: 'left' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
     );
   } else if (type === 'dfd') {
     const source = createNode('external', { x: -370, y: -40 }, {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CommandManager, CreateNodeCommand, MoveNodesCommand } from './commands';
-import { createDocument, createNode } from './document';
+import { CommandManager, CreateEdgeCommand, CreateNodeCommand, DeleteNodesCommand, MoveNodesCommand, UpdateEdgeCommand } from './commands';
+import { createDocument, createEdge, createNode } from './document';
 
 describe('command history', () => {
   it('supports execute, undo, and redo', () => {
@@ -32,5 +32,26 @@ describe('command history', () => {
       [second.id]: { x: 120, y: 30 },
     }), document);
     expect(moved.pages[0].nodes.map((node) => node.position.y)).toEqual([30, 30]);
+  });
+
+  it('updates and deletes connectors independently of their nodes', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id }, { nodeId: target.id });
+    document.pages[0].nodes.push(source, target);
+    const manager = new CommandManager();
+    const withEdge = manager.execute(new CreateEdgeCommand(pageId, edge), document);
+    const updated = manager.execute(new UpdateEdgeCommand(pageId, edge.id, {
+      type: 'orthogonal',
+      source: { nodeId: source.id, port: 'right' },
+      data: { label: 'owns' },
+    }), withEdge);
+    expect(updated.pages[0].edges[0]).toMatchObject({ type: 'orthogonal', source: { port: 'right' }, data: { label: 'owns' } });
+
+    const withoutEdge = manager.execute(new DeleteNodesCommand(pageId, [edge.id]), updated);
+    expect(withoutEdge.pages[0].nodes).toHaveLength(2);
+    expect(withoutEdge.pages[0].edges).toHaveLength(0);
   });
 });

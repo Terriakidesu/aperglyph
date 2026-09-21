@@ -12,4 +12,9 @@ describe('viewport spatial helpers', () => {
     const bounds = viewportBounds({ x: 0, y: 0, zoom: 2 }, { width: 1000, height: 600 }, 200);
     expect(bounds).toEqual({ minX: -350, minY: -250, maxX: 350, maxY: 250 });
   });
+
+  it('uses the translated canvas center when culling after a pan', () => {
+    const bounds = viewportBounds({ x: 120, y: -80, zoom: 1 }, { width: 400, height: 200 }, 0);
+    expect(bounds).toEqual({ minX: -320, minY: -20, maxX: 80, maxY: 180 });
+  });
 });
