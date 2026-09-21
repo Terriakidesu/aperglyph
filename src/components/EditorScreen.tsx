@@ -1,4 +1,4 @@
-import { Keyboard, ListTree, Maximize2, Minimize2, MonitorPlay, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Shapes } from 'lucide-react';
+import { ListTree, Maximize2, Minimize2, MonitorPlay, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Shapes } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { createNode as buildNode } from '../core/document';
@@ -216,7 +216,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     <div className="editor-workspace">
       <EditorToolbar />
       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel /> : <ShapeLibrary />)}
-      <section className="canvas-column"><CanvasViewport /><PageTabs /><StatusBar /><button className="keyboard-button" onClick={() => setShowShortcuts(true)}><Keyboard size={14} /> Shortcuts</button></section>
+      <section className="canvas-column"><CanvasViewport /><PageTabs /><StatusBar /></section>
       {rightOpen && <PropertiesPanel />}
       <div className="workspace-toggles workspace-toggles-left"><button onClick={() => setLeftOpen((open) => !open)} title="Toggle left panel" aria-label="Toggle left panel">{leftOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button><button onClick={() => { setLeftPanel('outline'); setLeftOpen(true); }} title="Show outline" aria-label="Show outline"><ListTree size={14} /></button><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} title="Show shapes" aria-label="Show shapes"><Shapes size={14} /></button></div>
       <div className="workspace-toggles workspace-toggles-right"><button onClick={() => setRightOpen((open) => !open)} title="Toggle properties panel" aria-label="Toggle properties panel">{rightOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}</button><button onClick={() => setFocusMode((value) => !value)} title={focusMode ? 'Exit focus mode' : 'Focus mode'} aria-label={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={14} /></button><button onClick={() => setPresentationMode((value) => !value)} title={presentationMode ? 'Exit presentation mode' : 'Presentation mode'} aria-label={presentationMode ? 'Exit presentation mode' : 'Presentation mode'}><MonitorPlay size={14} /></button><button onClick={() => void toggleFullscreen()} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></div>
