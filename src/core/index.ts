@@ -6,4 +6,6 @@ export * from './events';
 export * from './geometry';
 export * from './layout';
 export * from './routing';
+export * from './text';
 export * from './types';
+export * from './useCase';

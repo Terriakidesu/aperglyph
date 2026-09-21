@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, jumpMaskPaths, pointsToPath } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, pointsToPath } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -8,6 +8,25 @@ describe('connector routing', () => {
     const target = createNode('rectangle', { x: 300, y: 0 }, { size: { width: 100, height: 50 } });
     const route = edgeRoute(createEdge({ nodeId: source.id }, { nodeId: target.id }), source, target);
     expect(route).toEqual([{ x: 100, y: 25 }, { x: 300, y: 25 }]);
+  });
+
+  it('separates parallel straight connectors without moving their endpoints', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 50 } });
+    const target = createNode('rectangle', { x: 300, y: 0 }, { size: { width: 100, height: 50 } });
+    const edge = createEdge({ nodeId: source.id }, { nodeId: target.id }, { data: { parallelOffset: 20 } });
+    const route = edgeRoute(edge, source, target);
+    expect(route[0]).toEqual({ x: 100, y: 25 });
+    expect(route.at(-1)).toEqual({ x: 300, y: 25 });
+    expect(route[1].y).toBe(45);
+  });
+
+  it('uses plugin connector routing without losing the semantic edge type', () => {
+    const source = createNode('entity', { x: 0, y: 0 });
+    const target = createNode('entity', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id }, { nodeId: target.id }, { type: 'relationship' });
+    expect(edgeRouting(edge)).toBe('orthogonal');
+    const route = edgeRoute(edge, source, target, [source, target]);
+    expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
   });
 
   it('routes orthogonal connectors through axis-aligned bends', () => {
@@ -36,6 +55,16 @@ describe('connector routing', () => {
   it('supports free-standing connector endpoints', () => {
     const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } });
     expect(edgeRoute(edge)).toEqual([{ x: 40, y: 80 }, { x: 300, y: 220 }]);
+  });
+
+  it('renders a self-loop outside the owning node', () => {
+    const node = createNode('rectangle', { x: 100, y: 100 }, { size: { width: 120, height: 70 } });
+    const edge = createEdge({ nodeId: node.id, port: 'right' }, { nodeId: node.id, port: 'bottom' }, { type: 'orthogonal' });
+    const route = edgeRoute(edge, node, node, [node]);
+    expect(route.length).toBeGreaterThan(2);
+    expect(route[0]).toEqual({ x: 220, y: 135 });
+    expect(route.at(-1)).toEqual({ x: 160, y: 170 });
+    expect(route.some((point) => point.x > 220)).toBe(true);
   });
 
   it('keeps free endpoint marker directions outside the connector', () => {

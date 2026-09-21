@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { registerSW } from 'virtual:pwa-register';
 import { createDocument } from './core/document';
+import { editorEvents } from './core/events';
 import type { DiagramDocument } from './core/types';
 import { AutosaveController, forgetActiveDocument, getRememberedDocumentId, getRecoverySnapshot, loadDocument, rememberActiveDocument, requestPersistentStorage } from './persistence';
 import { useEditorStore } from './store/editorStore';
@@ -18,12 +19,18 @@ export default function App() {
   const [offlineReady, setOfflineReady] = useState(false);
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(() => Boolean(getRememberedDocumentId()));
   const setDocument = useEditorStore((state) => state.setDocument);
   const markSaved = useEditorStore((state) => state.markSaved);
   const isDirty = useEditorStore((state) => state.isDirty);
   const autosaveRef = useRef<AutosaveController | null>(null);
   const updateSWRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    const unsubscribeStorageErrors = editorEvents.on('storage:error', ({ error }) => setStorageError(error.message));
+    return unsubscribeStorageErrors;
+  }, []);
 
   useEffect(() => {
     const autosave = new AutosaveController({ onSaved: () => markSaved() });
@@ -115,7 +122,7 @@ export default function App() {
   };
 
   if (resuming) return <div className="resume-screen" role="status">Restoring your local diagram…</div>;
-  return <><div className="pwa-status" aria-live="polite">{!online && <span className="pwa-message offline">Offline mode</span>}{installPrompt && <span className="pwa-message"><span>Install AperGlyph</span><button onClick={() => void installApp()}>Install</button></span>}{offlineReady && online && <span className="pwa-message">Ready for offline use <button onClick={() => setOfflineReady(false)}>Dismiss</button></span>}{updateAvailable && <span className="pwa-message update">New version available <button onClick={() => { void autosaveRef.current?.flush(useEditorStore.getState().document).then(() => updateSWRef.current?.(true)); }}>Save &amp; reload</button></span>}</div>{screen === 'editor' ? <EditorScreen onExit={exitEditor} /> : <HomeScreen onOpen={openDocument} onInstall={installPrompt ? () => void installApp() : undefined} />}</>;
+  return <><div className="pwa-status" aria-live="polite">{storageError && <span className="pwa-message storage-error"><span>{storageError}</span><button onClick={() => setStorageError(null)}>Dismiss</button></span>}{!online && <span className="pwa-message offline">Offline mode</span>}{installPrompt && <span className="pwa-message"><span>Install AperGlyph</span><button onClick={() => void installApp()}>Install</button></span>}{offlineReady && online && <span className="pwa-message">Ready for offline use <button onClick={() => setOfflineReady(false)}>Dismiss</button></span>}{updateAvailable && <span className="pwa-message update">New version available <button onClick={() => { void autosaveRef.current?.flush(useEditorStore.getState().document).then(() => updateSWRef.current?.(true)); }}>Save &amp; reload</button></span>}</div>{screen === 'editor' ? <EditorScreen onExit={exitEditor} /> : <HomeScreen onOpen={openDocument} onInstall={installPrompt ? () => void installApp() : undefined} />}</>;
 }
 
 export function createBlankDocument() {

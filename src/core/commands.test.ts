@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 
 describe('command history', () => {
@@ -34,6 +34,47 @@ describe('command history', () => {
     expect(moved.pages[0].nodes.map((node) => node.position.y)).toEqual([30, 30]);
   });
 
+  it('moves explicitly owned container children with their container', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const container = createNode('frame', { x: 0, y: 0 }, { container: true });
+    const child = { ...createNode('rectangle', { x: 40, y: 50 }), containerId: container.id };
+    document.pages[0].nodes.push(container, child);
+    const moved = new CommandManager().execute(new MoveNodesCommand(pageId, { [container.id]: { x: 100, y: 80 } }), document);
+    expect(moved.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual({ x: 140, y: 130 });
+  });
+
+  it('moves nested container descendants by the accumulated parent delta', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const outer = createNode('frame', { x: 0, y: 0 }, { container: true });
+    const inner = { ...createNode('section', { x: 40, y: 50 }, { container: true }), containerId: outer.id };
+    const child = { ...createNode('rectangle', { x: 80, y: 100 }), containerId: inner.id };
+    document.pages[0].nodes.push(outer, inner, child);
+    const moved = new CommandManager().execute(new MoveNodesCommand(pageId, { [outer.id]: { x: 100, y: 120 } }), document);
+    expect(moved.pages[0].nodes.find((node) => node.id === inner.id)?.position).toEqual({ x: 140, y: 170 });
+    expect(moved.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual({ x: 180, y: 220 });
+  });
+
+  it('detaches surviving children when their container is deleted', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const container = createNode('frame', { x: 0, y: 0 }, { container: true });
+    const child = { ...createNode('rectangle', { x: 40, y: 50 }), containerId: container.id };
+    document.pages[0].nodes.push(container, child);
+    const next = new CommandManager().execute(new DeleteNodesCommand(pageId, [container.id]), document);
+    expect(next.pages[0].nodes).toHaveLength(1);
+    expect(next.pages[0].nodes[0].containerId).toBeUndefined();
+  });
+
+  it('remaps explicit container ownership when duplicating a selection', () => {
+    const container = createNode('frame', { x: 0, y: 0 }, { container: true });
+    const child = { ...createNode('rectangle', { x: 40, y: 50 }), containerId: container.id };
+    const payload = offsetClipboard({ nodes: [child, container], edges: [] });
+    expect(payload.nodes[0].containerId).toBe(payload.nodes[1].id);
+    expect(payload.nodes[0].containerId).not.toBe(container.id);
+  });
+
   it('updates and deletes connectors independently of their nodes', () => {
     const document = createDocument();
     const pageId = document.pages[0].id;
@@ -53,6 +94,20 @@ describe('command history', () => {
     const withoutEdge = manager.execute(new DeleteNodesCommand(pageId, [edge.id]), updated);
     expect(withoutEdge.pages[0].nodes).toHaveLength(2);
     expect(withoutEdge.pages[0].edges).toHaveLength(0);
+  });
+
+  it('creates a quick-created shape and connector in one history entry', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const created = createNode('circle', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: created.id, port: 'left' });
+    document.pages[0].nodes.push(source);
+    const manager = new CommandManager();
+    const next = manager.execute(new CreateNodeAndEdgeCommand(pageId, created, edge), document);
+    expect(next.pages[0].nodes).toHaveLength(2);
+    expect(next.pages[0].edges).toHaveLength(1);
+    expect(manager.undo(next)?.pages[0].nodes).toHaveLength(1);
   });
 
   it('creates and offsets free endpoints', () => {

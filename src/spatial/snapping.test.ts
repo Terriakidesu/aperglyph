@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNode } from '../core/document';
-import { snapNodes } from './snapping';
+import { snapDraggedNodes, snapNodes } from './snapping';
 
 describe('object snapping', () => {
   it('aligns a moving rectangle to a nearby edge and returns a guide', () => {
@@ -25,5 +25,34 @@ describe('object snapping', () => {
     const result = snapNodes([moving], { [moving.id]: { x: 116, y: 7 } }, [target], { gridSize: 16, snapToGrid: false, snapToObjects: false, threshold: 10 });
     expect(result.positions[moving.id]).toEqual({ x: 116, y: 7 });
     expect(result.guides).toHaveLength(0);
+  });
+
+  it('uses one drag calculation for the preview and final release', () => {
+    const moving = createNode('rectangle', { x: 3, y: 7 });
+    const result = snapDraggedNodes(
+      [moving],
+      { [moving.id]: { x: 3, y: 7 } },
+      { x: 0, y: 0 },
+      { x: 12.25, y: 9.5 },
+      [],
+      { gridSize: 16, snapToGrid: true, snapToObjects: true, threshold: 10 },
+    );
+    expect(result.positions[moving.id]).toEqual({ x: 16, y: 16 });
+  });
+
+  it('Alt disables both grid and object snapping for the whole drag', () => {
+    const moving = createNode('rectangle', { x: 3, y: 7 });
+    const target = createNode('rectangle', { x: 200, y: 100 });
+    const result = snapDraggedNodes(
+      [moving],
+      { [moving.id]: { x: 3, y: 7 } },
+      { x: 0, y: 0 },
+      { x: 12.25, y: 9.5 },
+      [target],
+      { gridSize: 16, snapToGrid: true, snapToObjects: true, threshold: 10 },
+      { disableSnapping: true },
+    );
+    expect(result.positions[moving.id]).toEqual({ x: 15.25, y: 16.5 });
+    expect(result.guides).toEqual([]);
   });
 });

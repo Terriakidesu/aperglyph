@@ -93,4 +93,18 @@ describe('AperGlyph document model', () => {
     expect(validateProjectDocument(nested).some((message) => message.includes('missing node'))).toBe(true);
     expect(() => parseProject(JSON.stringify({ format: 'aperglyph', formatVersion: 1, document: nested }))).toThrow(/Invalid AperGlyph project/);
   });
+
+  it('rejects container ownership that references a missing node', () => {
+    const document = createDocument('Container ownership');
+    document.pages[0].nodes.push({ ...createNode('rectangle', { x: 0, y: 0 }), containerId: 'missing-container' });
+    expect(validateProjectDocument(document).some((message) => message.includes('containerId references a missing node'))).toBe(true);
+  });
+
+  it('requires container ownership to point at a container node', () => {
+    const document = createDocument('Container ownership');
+    const owner = createNode('rectangle', { x: 0, y: 0 });
+    const child = { ...createNode('rectangle', { x: 40, y: 50 }), containerId: owner.id };
+    document.pages[0].nodes.push(owner, child);
+    expect(validateProjectDocument(document).some((message) => message.includes('must reference a container node'))).toBe(true);
+  });
 });

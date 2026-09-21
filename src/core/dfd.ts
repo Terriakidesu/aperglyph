@@ -20,10 +20,17 @@ export function validateDfd(document: DiagramDocument): DfdDiagnostic[] {
     const nodeMap = new Map(page.nodes.map((node) => [node.id, node]));
     const dfdNodes = page.nodes.filter((node) => dfdRole(node));
     const connected = new Set<string>();
+    const processNumbers = new Map<string, string>();
 
     dfdNodes.forEach((node) => {
       const label = nodeLabel(node);
       if (!label) diagnostics.push({ severity: 'error', message: `${roleLabel(dfdRole(node))} is missing a name.`, nodeId: node.id });
+      if (node.type === 'process') {
+        const number = typeof node.data.number === 'string' ? node.data.number.trim() : '';
+        if (number && !/^\d+(?:\.\d+)*$/.test(number)) diagnostics.push({ severity: 'warning', message: 'Process numbers should use a form such as 1.0 or 2.1.', nodeId: node.id });
+        if (number && processNumbers.has(number)) diagnostics.push({ severity: 'error', message: `Process number “${number}” is used more than once.`, nodeId: node.id });
+        if (number) processNumbers.set(number, node.id);
+      }
     });
 
     page.edges.forEach((edge) => {

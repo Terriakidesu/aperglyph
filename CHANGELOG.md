@@ -18,12 +18,30 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added install/offline/update PWA lifecycle UX and bounded `.wdiag` import validation.
 - Added validated system clipboard integration for copy, cut, and paste with an in-memory fallback.
 - Added correctly oriented straight/curved arrowheads, draggable/reconnectable connector endpoints, connector reset defaults, and editor-session restoration after reload.
+- Added searchable shape-library groups with favorites, recents, center insertion, drag/drop previews, and shared preview/final geometry.
+- Added connector quick-create, self-loops, parallel routing, waypoints, draggable labels, marker/routing controls, line jumps, and semantic plugin connector routing.
+- Added explicit nested container ownership with Outline hierarchy controls, cycle validation, safe child movement, and ownership recovery when a container is deleted.
+- Added bounded local snapshots, named checkpoints, configurable retention, recovery timestamp preservation, and versioned full-workspace backup/restore.
+- Added richer ERD field metadata/paste tools, DFD process numbering checks, and UML use-case/package validation and relationship shapes.
 
 ### Changed
 
 - Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.
 - Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
+
+## [0.13.0] - 2026-09-22
+
+### Added
+
+- Added a persisted styling system with color pickers, recent colors, document palettes, stroke width, opacity, corner radius, text size, weight, alignment, wrapping, and automatic wrapped-label height.
+- Added independent light/dark canvas themes with per-page background and grid presentation controls.
+- Added undoable format painter, style copy/paste, formatting reset, same-type style application, reusable style presets, and mixed-value multi-selection editing.
+
+### Changed
+
+- Extended SVG and canvas rendering to use the shared text layout and style models, including connector opacity and styled labels.
+- Migrated legacy documents into the new style, palette, preset, and canvas-theme defaults without changing the schema version.
 
 ## [0.12.0] - 2026-09-22
 

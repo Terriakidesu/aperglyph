@@ -15,6 +15,11 @@ export interface Size {
 /** Boundary model used for connector intersection math. */
 export type ShapeBoundary = 'rectangle' | 'ellipse' | 'diamond';
 
+export type CanvasTheme = 'dark' | 'light';
+export type TextAlign = 'left' | 'center' | 'right';
+export type VerticalAlign = 'top' | 'middle' | 'bottom';
+export type FontWeight = 400 | 500 | 600 | 700;
+
 export interface Bounds extends Point, Size {}
 
 export interface NodeStyle {
@@ -24,6 +29,18 @@ export interface NodeStyle {
   radius: number;
   opacity: number;
   textColor: string;
+  fontSize: number;
+  fontWeight: FontWeight;
+  textAlign: TextAlign;
+  verticalAlign: VerticalAlign;
+  textWrap: boolean;
+  autoHeight: boolean;
+}
+
+export interface StylePreset {
+  id: string;
+  name: string;
+  style: Partial<NodeStyle>;
 }
 
 export interface EdgeStyle {
@@ -33,6 +50,8 @@ export interface EdgeStyle {
   startMarker: EdgeMarker;
   endMarker: EdgeMarker;
   labelColor: string;
+  opacity?: number;
+  jumpStyle?: 'arc' | 'gap' | 'none';
 }
 
 export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
@@ -61,6 +80,9 @@ export interface DiagramNode {
   locked?: boolean;
   hidden?: boolean;
   groupId?: string;
+  /** Explicit container ownership. Children are never inferred from overlap. */
+  containerId?: string;
+  container?: boolean;
   zIndex?: number;
 }
 
@@ -97,6 +119,7 @@ export interface PageSettings {
   width: number;
   height: number;
   background: string;
+  canvasTheme: CanvasTheme;
   gridSize: number;
   gridVisible: boolean;
   snapToGrid: boolean;
@@ -124,6 +147,8 @@ export interface DiagramDocument {
   name: string;
   diagramType: DiagramType;
   pages: DiagramPage[];
+  palette: string[];
+  stylePresets: StylePreset[];
   createdAt: number;
   updatedAt: number;
 }

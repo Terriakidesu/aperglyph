@@ -20,6 +20,13 @@ export interface SnapResult {
   guides: AlignmentGuide[];
 }
 
+export interface DragSnapModifiers {
+  /** Constrain the movement to the dominant axis, as used by Shift-drag. */
+  constrainAxis?: boolean;
+  /** Alt/Option is a temporary, per-drag snapping override. */
+  disableSnapping?: boolean;
+}
+
 interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
 
 /** Snap a moving selection to a grid and to nearby node edges/centers. */
@@ -72,6 +79,35 @@ export function snapNodes(
     guides.push({ orientation: 'horizontal', position: yMatch.value, start: Math.min(movingBounds.minX, yMatch.nodeBounds.minX) - 28, end: Math.max(movingBounds.maxX, yMatch.nodeBounds.maxX) + 28 });
   }
   return { positions, guides };
+}
+
+/**
+ * Resolve a drag in one place for both the animation preview and pointer
+ * release. Keeping this calculation pure prevents a quick release from
+ * committing a different position than the one shown during the drag.
+ */
+export function snapDraggedNodes(
+  movingNodes: DiagramNode[],
+  initialPositions: Record<string, Point>,
+  start: Point,
+  current: Point,
+  candidateNodes: DiagramNode[],
+  options: SnapOptions,
+  modifiers: DragSnapModifiers = {},
+): SnapResult {
+  const rawDelta = { x: current.x - start.x, y: current.y - start.y };
+  const delta = modifiers.constrainAxis
+    ? Math.abs(rawDelta.x) >= Math.abs(rawDelta.y) ? { x: rawDelta.x, y: 0 } : { x: 0, y: rawDelta.y }
+    : rawDelta;
+  const desiredPositions = Object.fromEntries(
+    Object.entries(initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]),
+  );
+  const snappingEnabled = options.snapToGrid && !modifiers.disableSnapping;
+  return snapNodes(movingNodes, desiredPositions, candidateNodes, {
+    ...options,
+    snapToGrid: snappingEnabled,
+    snapToObjects: snappingEnabled && options.snapToObjects !== false,
+  });
 }
 
 function selectionBounds(nodes: DiagramNode[], positions: Record<string, Point>): Bounds | null {

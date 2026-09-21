@@ -20,4 +20,16 @@ describe('DFD semantic validation', () => {
     expect(diagnostics.some((diagnostic) => diagnostic.message.includes('missing a name'))).toBe(true);
     expect(diagnostics.some((diagnostic) => diagnostic.message.includes('not connected'))).toBe(true);
   });
+
+  it('checks process numbering for duplicate and malformed values', () => {
+    const document = createDocument('DFD', 'dfd');
+    document.pages[0].nodes.push(
+      createNode('process', { x: 0, y: 0 }, { data: { label: 'One', number: '1.0' } }),
+      createNode('process', { x: 220, y: 0 }, { data: { label: 'Two', number: '1.0' } }),
+      createNode('process', { x: 440, y: 0 }, { data: { label: 'Three', number: 'bad' } }),
+    );
+    const diagnostics = validateDfd(document);
+    expect(diagnostics.some((diagnostic) => diagnostic.message.includes('used more than once'))).toBe(true);
+    expect(diagnostics.some((diagnostic) => diagnostic.message.includes('should use a form'))).toBe(true);
+  });
 });

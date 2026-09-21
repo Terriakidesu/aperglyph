@@ -42,6 +42,22 @@ export function deleteLocalTemplate(id: string): void {
   }
 }
 
+/** Replace local templates during an explicit workspace restore. */
+export function replaceLocalTemplates(templates: LocalTemplate[]): void {
+  if (typeof globalThis.localStorage === 'undefined') return;
+  const safeTemplates = templates.slice(0, 100).map((template) => ({
+    id: template.id,
+    name: template.name.trim().slice(0, 256),
+    createdAt: Number.isFinite(template.createdAt) ? template.createdAt : Date.now(),
+    document: structuredClone(migrateDocument(template.document)),
+  }));
+  try {
+    globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(safeTemplates));
+  } catch {
+    // Templates are optional and never block editing.
+  }
+}
+
 function isLocalTemplate(value: unknown): value is LocalTemplate {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;

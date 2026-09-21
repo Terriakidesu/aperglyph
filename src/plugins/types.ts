@@ -31,6 +31,8 @@ export interface ShapeDefinition {
   renderer?: string;
   /** Controls connector intersection math for this shape. */
   boundary?: ShapeBoundary;
+  /** Marks the shape as an explicit owner for separately assigned children. */
+  container?: boolean;
   /** Omit for the standard four cardinal perimeter anchors. */
   anchors?: ShapeAnchorResolver;
 }

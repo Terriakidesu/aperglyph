@@ -1,11 +1,13 @@
 import { editorEvents } from '../core/events';
 import { documentToSvg } from './files';
 import type { DiagramDocument } from '../core/types';
-import { clearRecoverySnapshot, saveDocument, saveRecoverySnapshot } from './indexedDb';
+import { clearRecoverySnapshot, getSnapshotLimit, saveDocument, saveDocumentSnapshot, saveRecoverySnapshot } from './indexedDb';
 
 interface AutosaveOptions {
   saveDelay?: number;
   recoveryDelay?: number;
+  snapshotInterval?: number;
+  snapshotLimit?: number;
   onSaved?: (document: DiagramDocument) => void;
   onError?: (error: Error) => void;
 }
@@ -17,9 +19,10 @@ export class AutosaveController {
   private unsubscribeChanged: (() => void) | null = null;
   private unsubscribeOpened: (() => void) | null = null;
   private readonly options: Required<Pick<AutosaveOptions, 'saveDelay' | 'recoveryDelay'>> & Omit<AutosaveOptions, 'saveDelay' | 'recoveryDelay'>;
+  private readonly lastSnapshotAt = new Map<string, number>();
 
   constructor(options: AutosaveOptions = {}) {
-    this.options = { saveDelay: 700, recoveryDelay: 220, ...options };
+    this.options = { saveDelay: 700, recoveryDelay: 220, snapshotInterval: 60 * 60 * 1000, snapshotLimit: 31, ...options };
   }
 
   start(): () => void {
@@ -61,6 +64,12 @@ export class AutosaveController {
   private async save(document: DiagramDocument): Promise<void> {
     try {
       await saveDocument(document, createThumbnail(document));
+      const now = Date.now();
+      const lastSnapshot = this.lastSnapshotAt.get(document.id) ?? 0;
+      if (now - lastSnapshot >= (this.options.snapshotInterval ?? 60 * 60 * 1000)) {
+        await saveDocumentSnapshot(document, { kind: 'automatic', name: 'Automatic snapshot', limit: this.options.snapshotLimit ?? getSnapshotLimit() });
+        this.lastSnapshotAt.set(document.id, now);
+      }
       await clearRecoverySnapshot();
       this.pendingDocument = null;
       this.options.onSaved?.(document);

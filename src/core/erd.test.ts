@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode } from './document';
-import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, normalizeEntityFields, validateErd } from './erd';
+import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, normalizeEntityFields, parseEntityFields, validateErd } from './erd';
 
 describe('ERD semantic model', () => {
   it('normalizes legacy compact attributes', () => {
@@ -32,5 +32,21 @@ describe('ERD semantic model', () => {
     expect(entityFieldValue(field, 'type')).toBe('uuid');
     expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(74.5 / 88);
     expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(109);
+  });
+
+  it('parses pasted attributes with compact flags', () => {
+    const fields = parseEntityFields('id uuid PK NN\ncustomer_id uuid FK\nemail varchar UQ');
+    expect(fields).toMatchObject([
+      { name: 'id', type: 'uuid', primaryKey: true, nullable: false },
+      { name: 'customer_id', type: 'uuid', foreignKey: true },
+      { name: 'email', type: 'varchar', unique: true },
+    ]);
+  });
+
+  it('validates explicit foreign-key references', () => {
+    const document = createDocument('Accounts', 'erd');
+    const entity = createNode('entity', { x: 0, y: 0 }, { data: { label: 'users', fields: [{ name: 'account_id', type: 'uuid', foreignKey: true, reference: { entityId: 'missing' } }] } });
+    document.pages[0].nodes.push(entity);
+    expect(validateErd(document).some((diagnostic) => diagnostic.message.includes('references a missing entity'))).toBe(true);
   });
 });

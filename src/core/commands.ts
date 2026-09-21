@@ -1,5 +1,6 @@
 import { cloneDocument, clonePageWithNewIds, createId, getPage } from './document';
-import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, PageSettingsPatch, Point } from './types';
+import { wrappedNodeHeight } from './text';
+import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset } from './types';
 
 export const CLIPBOARD_MIME = 'application/x-aperglyph';
 const CLIPBOARD_FORMAT = 'aperglyph-clipboard';
@@ -80,6 +81,23 @@ export class CreateEdgeCommand implements DocumentCommand {
   }
 }
 
+/** Creates the shape and its first connector as one undoable operation. */
+export class CreateNodeAndEdgeCommand implements DocumentCommand {
+  readonly label = 'Create connected shape';
+
+  constructor(private readonly pageId: string, private readonly node: DiagramNode, private readonly edge: DiagramEdge) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    if (!page || page.nodes.some((node) => node.id === this.node.id) || page.edges.some((edge) => edge.id === this.edge.id)) return next;
+    page.nodes.push(structuredClone(this.node));
+    page.edges.push(structuredClone(this.edge));
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class DeleteNodesCommand implements DocumentCommand {
   readonly label = 'Delete selection';
   constructor(private readonly pageId: string, private readonly selectionIds: string[]) {}
@@ -91,6 +109,10 @@ export class DeleteNodesCommand implements DocumentCommand {
       const ids = new Set(this.selectionIds);
       const removedNodeIds = new Set(page.nodes.filter((node) => ids.has(node.id) && !node.locked).map((node) => node.id));
       page.nodes = page.nodes.filter((node) => !removedNodeIds.has(node.id));
+      // Removing an owner must not leave dangling container references in the
+      // surviving document. Children remain on the canvas and become root
+      // objects, which is safer than silently deleting more user content.
+      page.nodes = page.nodes.map((node) => removedNodeIds.has(node.containerId ?? '') ? { ...node, containerId: undefined } : node);
       page.edges = page.edges.filter((edge) => !ids.has(edge.id) && (edge.source.nodeId === undefined || !removedNodeIds.has(edge.source.nodeId)) && (edge.target.nodeId === undefined || !removedNodeIds.has(edge.target.nodeId)));
     }
     next.updatedAt = Date.now();
@@ -106,13 +128,36 @@ export class MoveNodesCommand implements DocumentCommand {
     const next = cloneDocument(document);
     const page = getPage(next, this.pageId);
     if (page) {
-      page.nodes = page.nodes.map((node) => this.positions[node.id]
-        ? node.locked ? node : { ...node, position: { ...this.positions[node.id] } }
+      const positions = expandContainerPositions(page.nodes, this.positions);
+      page.nodes = page.nodes.map((node) => positions[node.id]
+        ? node.locked ? node : { ...node, position: { ...positions[node.id] } }
         : node);
     }
     next.updatedAt = Date.now();
     return next;
   }
+}
+
+/** Move explicit container children by the same delta, without inferring
+ * ownership from overlap. Nested ownership is resolved until it stabilizes. */
+function expandContainerPositions(nodes: DiagramNode[], requested: Record<string, Point>): Record<string, Point> {
+  const positions = { ...requested };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    nodes.forEach((node) => {
+      if (!node.containerId || positions[node.id]) return;
+      const parent = nodes.find((candidate) => candidate.id === node.containerId);
+      const parentTarget = parent && positions[parent.id];
+      if (!parent || !parentTarget) return;
+      positions[node.id] = {
+        x: node.position.x + parentTarget.x - parent.position.x,
+        y: node.position.y + parentTarget.y - parent.position.y,
+      };
+      changed = true;
+    });
+  }
+  return positions;
 }
 
 export class LayoutNodesCommand implements DocumentCommand {
@@ -145,8 +190,10 @@ export class UpdateNodeCommand implements DocumentCommand {
     const next = cloneDocument(document);
     const page = getPage(next, this.pageId);
     if (page) {
+      const node = page.nodes.find((candidate) => candidate.id === this.nodeId);
+      const changes = node ? validNodePatch(page.nodes, node, this.changes) : this.changes;
       page.nodes = page.nodes.map((node) => node.id === this.nodeId
-        ? applyNodePatch(node, this.changes)
+        ? applyNodePatch(node, changes)
         : node);
     }
     next.updatedAt = Date.now();
@@ -164,7 +211,30 @@ export class UpdateNodesCommand implements DocumentCommand {
     const next = cloneDocument(document);
     const ids = new Set(this.nodeIds);
     const page = getPage(next, this.pageId);
-    if (page) page.nodes = page.nodes.map((node) => ids.has(node.id) ? applyNodePatch(node, this.changes) : node);
+    if (page) {
+      const nodes = page.nodes.slice();
+      nodes.forEach((node, index) => {
+        if (ids.has(node.id)) nodes[index] = applyNodePatch(node, validNodePatch(nodes, node, this.changes));
+      });
+      page.nodes = nodes;
+    }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+/** Updates different style patches in one history entry without replacing
+ * unrelated node properties or the style fields that are not being changed. */
+export class UpdateNodeStylesCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly styles: Record<string, Partial<NodeStyle>>, label = 'Update styles') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    if (page) page.nodes = page.nodes.map((node) => this.styles[node.id] ? applyNodePatch(node, { style: this.styles[node.id] }) : node);
     next.updatedAt = Date.now();
     return next;
   }
@@ -254,6 +324,32 @@ export class UpdatePageSettingsCommand implements DocumentCommand {
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
     next.pages = next.pages.map((page) => page.id === this.pageId ? { ...page, settings: { ...page.settings, ...this.changes } } : page);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class UpdateDocumentPaletteCommand implements DocumentCommand {
+  readonly label = 'Update document palette';
+  constructor(private readonly palette: string[]) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.palette = [...new Set(this.palette)].slice(0, 64);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class UpdateStylePresetsCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly presets: StylePreset[], label = 'Update style presets') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.stylePresets = structuredClone(this.presets).slice(0, 64);
     next.updatedAt = Date.now();
     return next;
   }
@@ -492,7 +588,10 @@ export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 
       return next;
     })()) : undefined;
     return { ...structuredClone(node), id, groupId, position: { x: node.position.x + offset.x, y: node.position.y + offset.y }, zIndex: (node.zIndex ?? 0) + 1 };
-  });
+  }).map((node, index) => ({
+    ...node,
+    containerId: payload.nodes[index].containerId ? nodeIds.get(payload.nodes[index].containerId!) : undefined,
+  }));
   const edges = payload.edges.map((edge) => ({
     ...structuredClone(edge),
     id: createId('edge'),
@@ -509,12 +608,45 @@ function normalizeRotation(rotation: number): number {
 
 function applyNodePatch(node: DiagramNode, changes: NodePatch): DiagramNode {
   if (node.locked && changes.locked !== false && !Object.keys(changes).every((key) => key === 'hidden')) return node;
-  return {
+  const next: DiagramNode = {
     ...node,
     ...changes,
     style: changes.style ? { ...node.style, ...changes.style } : node.style,
     data: changes.data ? { ...node.data, ...changes.data } : node.data,
   };
+  const widthChanged = changes.size?.width !== undefined && changes.size.width !== node.size.width;
+  const textChanged = changes.data?.label !== undefined
+    || changes.style?.textWrap !== undefined
+    || changes.style?.autoHeight !== undefined
+    || changes.style?.fontSize !== undefined
+    || changes.style?.fontWeight !== undefined
+    || widthChanged;
+  if (textChanged && next.type !== 'entity' && next.style.textWrap && next.style.autoHeight) {
+    next.size = { ...next.size, height: wrappedNodeHeight(next) };
+  }
+  return next;
+}
+
+function validNodePatch(nodes: DiagramNode[], node: DiagramNode, changes: NodePatch): NodePatch {
+  if (!Object.prototype.hasOwnProperty.call(changes, 'containerId')) return changes;
+  if (changes.containerId === undefined) return changes;
+  const owner = nodes.find((candidate) => candidate.id === changes.containerId);
+  if (!owner || !owner.container || owner.id === node.id || containsContainer(nodes, owner.id, node.id)) {
+    const { containerId: _ignored, ...safeChanges } = changes;
+    return safeChanges;
+  }
+  return changes;
+}
+
+function containsContainer(nodes: DiagramNode[], startId: string, targetId: string): boolean {
+  const visited = new Set<string>();
+  let current: string | undefined = startId;
+  while (current) {
+    if (current === targetId || visited.has(current)) return true;
+    visited.add(current);
+    current = nodes.find((node) => node.id === current)?.containerId;
+  }
+  return false;
 }
 
 function isClipboardNode(value: unknown): value is DiagramNode {

@@ -12,6 +12,32 @@ export interface RouteJump {
   orientation: 'horizontal' | 'vertical';
 }
 
+export type EdgeRouting = 'straight' | 'orthogonal' | 'curved';
+
+/** Resolve a plugin connector's semantic type to its geometric route mode. */
+export function edgeRouting(edge: DiagramEdge): EdgeRouting {
+  const persisted = edge.data?.routing;
+  if (persisted === 'straight' || persisted === 'orthogonal' || persisted === 'curved') return persisted;
+  if (edge.type === 'orthogonal' || edge.type === 'curved' || edge.type === 'straight') return edge.type;
+  if (edge.type === 'relationship' || edge.type === 'identifying' || edge.type === 'data-flow') return 'orthogonal';
+  return 'straight';
+}
+
+/** Stable visual separation for multiple connectors between the same nodes. */
+export function parallelEdgeOffset(edge: DiagramEdge, edges: DiagramEdge[]): number {
+  const sourceId = edge.source.nodeId;
+  const targetId = edge.target.nodeId;
+  if (!sourceId || !targetId || sourceId === targetId) return 0;
+  const parallel = edges.filter((candidate) => {
+    const candidateSource = candidate.source.nodeId;
+    const candidateTarget = candidate.target.nodeId;
+    return (candidateSource === sourceId && candidateTarget === targetId) || (candidateSource === targetId && candidateTarget === sourceId);
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (parallel.length < 2) return 0;
+  const index = parallel.findIndex((candidate) => candidate.id === edge.id);
+  return (index - (parallel.length - 1) / 2) * 20;
+}
+
 /**
  * Returns the rendered connector route. Orthogonal routes use a small
  * visibility-grid search so bends stay outside node rectangles instead of
@@ -21,7 +47,11 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   const start = resolveEndpointPoint(edge.source, source, edge.target.point ?? (target ? nodeCenter(target) : undefined));
   const end = resolveEndpointPoint(edge.target, target, edge.source.point ?? (source ? nodeCenter(source) : undefined));
   if (!start || !end) return [];
-  if (edge.type !== 'orthogonal') return [start, end];
+  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, edge.source.port);
+  const routing = edgeRouting(edge);
+  if (routing !== 'orthogonal') return routing === 'straight' && Number.isFinite(edge.data?.parallelOffset) && Number(edge.data?.parallelOffset) !== 0
+    ? parallelRoute(start, end, Number(edge.data?.parallelOffset))
+    : [start, end];
   if (obstacles.length === 0) return legacyOrthogonalRoute(start, end, edge.waypoints);
 
   const rectangles = obstacles.map((node) => inflate(node, ROUTE_PADDING));
@@ -39,6 +69,28 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   }
   appendPoint(route, end);
   return simplifyRoute(route);
+}
+
+function parallelRoute(start: Point, end: Point, offset: number): Point[] {
+  const length = Math.max(EPSILON, distanceBetween(start, end));
+  const normal = { x: -(end.y - start.y) / length, y: (end.x - start.x) / length };
+  const shift = { x: normal.x * offset, y: normal.y * offset };
+  return [start, { x: start.x + shift.x, y: start.y + shift.y }, { x: end.x + shift.x, y: end.y + shift.y }, end];
+}
+
+function selfLoopRoute(node: DiagramNode, start: Point, end: Point, port?: string): Point[] {
+  const side = port === 'left' || port === 'top' || port === 'bottom' || port === 'right' ? port : 'right';
+  const gap = Math.max(44, Math.max(node.size.width, node.size.height) * 0.35);
+  if (side === 'left' || side === 'right') {
+    const direction = side === 'right' ? 1 : -1;
+    const outer = (side === 'right' ? node.position.x + node.size.width : node.position.x) + direction * gap;
+    const far = outer + direction * gap * 0.55;
+    return simplifyRoute([start, { x: outer, y: start.y }, { x: far, y: (start.y + end.y) / 2 }, { x: outer, y: end.y }, end]);
+  }
+  const direction = side === 'bottom' ? 1 : -1;
+  const outer = (side === 'bottom' ? node.position.y + node.size.height : node.position.y) + direction * gap;
+  const far = outer + direction * gap * 0.55;
+  return simplifyRoute([start, { x: start.x, y: outer }, { x: (start.x + end.x) / 2, y: far }, { x: end.x, y: outer }, end]);
 }
 
 /** Resolves an endpoint to its current world-space location. */

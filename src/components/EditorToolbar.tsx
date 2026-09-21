@@ -1,4 +1,4 @@
-import { Hand, LayoutGrid, MousePointer2, Plus, Spline, Type, ZoomIn } from 'lucide-react';
+import { Hand, LayoutGrid, MousePointer2, Spline, Type, ZoomIn } from 'lucide-react';
 import { useState } from 'react';
 import { editorEvents } from '../core/events';
 import type { LayoutMode } from '../core/layout';
@@ -25,7 +25,6 @@ export function EditorToolbar() {
       {tools.map(({ id, label, icon: Icon, shortcut }) => <button key={id} className={`rail-button ${activeTool === id ? 'active' : ''}`} onClick={() => setTool(id)} title={`${label} (${shortcut})`}><Icon size={18} /><span>{label}</span>{activeTool === id && <i />}</button>)}
     </div>
     <div className="rail-separator" />
-    <button className={`rail-button rail-add ${activeTool === 'shape' ? 'active' : ''}`} title="Add shape" onClick={() => setTool('shape')}><Plus size={18} /><span>Shape</span></button>
     <div className="rail-arrange"><button className={`rail-button ${arrangeOpen ? 'active' : ''}`} title="Arrange layout" onClick={() => setArrangeOpen((open) => !open)}><LayoutGrid size={17} /><span>Arrange</span></button>{arrangeOpen && <div className="rail-popover"><strong>Arrange</strong>{(['hierarchical', 'horizontal', 'vertical', 'tree', 'grid', 'compact'] as LayoutMode[]).map((mode) => <button key={mode} onClick={() => { void autoLayout(mode); setArrangeOpen(false); }}>{mode.replace('-', ' ')}</button>)}</div>}</div>
     <div className="rail-spacer" />
       <button className="rail-button" title="Fit page" aria-label="Fit page" onClick={() => editorEvents.emit('viewport:fit', { scope: 'page' })}><ZoomIn size={18} /><span>Fit</span></button>

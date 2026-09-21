@@ -9,6 +9,18 @@ export interface EntityField {
   foreignKey: boolean;
   unique: boolean;
   nullable: boolean;
+  defaultValue?: string;
+  description?: string;
+  reference?: EntityReference;
+}
+
+export type ReferentialAction = 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'NO ACTION';
+
+export interface EntityReference {
+  entityId: string;
+  fieldId?: string;
+  onDelete?: ReferentialAction;
+  onUpdate?: ReferentialAction;
 }
 
 export type EntityVariant = 'key-field' | 'key-field-type' | 'field-type' | 'field' | 'field-nullability' | 'key-field-nullability' | 'key-field-type-nullability';
@@ -104,7 +116,30 @@ export function createEntityField(overrides: Partial<EntityField> = {}): EntityF
     foreignKey: overrides.foreignKey ?? false,
     unique: overrides.unique ?? false,
     nullable: overrides.nullable ?? true,
+    ...(overrides.defaultValue === undefined ? {} : { defaultValue: overrides.defaultValue }),
+    ...(overrides.description === undefined ? {} : { description: overrides.description }),
+    ...(overrides.reference ? { reference: structuredClone(overrides.reference) } : {}),
   };
+}
+
+/** Parse one attribute per line from the compact text form used by SQL notes. */
+export function parseEntityFields(raw: string): EntityField[] {
+  return raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const parts = line.includes('·')
+      ? line.split('·').map((part) => part.trim()).filter(Boolean)
+      : line.split(/\s+/).map((part) => part.trim()).filter(Boolean);
+    const name = parts.shift() ?? 'new_field';
+    const type = parts.length > 0 && !isFieldFlag(parts[0]) ? parts.shift()! : 'varchar';
+    const flags = new Set(parts.map((part) => part.toUpperCase().replace(/[:,]$/, '')));
+    return createEntityField({
+      name,
+      type,
+      primaryKey: flags.has('PK') || flags.has('PRIMARY') || flags.has('PRIMARY KEY'),
+      foreignKey: flags.has('FK') || flags.has('FOREIGN') || flags.has('FOREIGN KEY'),
+      unique: flags.has('UQ') || flags.has('UNIQUE'),
+      nullable: !(flags.has('NN') || flags.has('NOT') || flags.has('NOT NULL')),
+    });
+  });
 }
 
 /** Converts the original compact string field format into structured fields. */
@@ -132,6 +167,14 @@ export function normalizeEntityFields(value: unknown): EntityField[] {
       foreignKey: field.foreignKey === true,
       unique: field.unique === true,
       nullable: field.nullable !== false,
+      defaultValue: typeof field.defaultValue === 'string' ? field.defaultValue : undefined,
+      description: typeof field.description === 'string' ? field.description : undefined,
+      reference: isRecord(field.reference) && typeof field.reference.entityId === 'string' ? {
+        entityId: field.reference.entityId,
+        ...(typeof field.reference.fieldId === 'string' ? { fieldId: field.reference.fieldId } : {}),
+        ...(isReferentialAction(field.reference.onDelete) ? { onDelete: field.reference.onDelete } : {}),
+        ...(isReferentialAction(field.reference.onUpdate) ? { onUpdate: field.reference.onUpdate } : {}),
+      } : undefined,
     });
     return createEntityField({ id: `field_${index}_attribute`, name: `field_${index + 1}` });
   });
@@ -158,6 +201,8 @@ export function validateErd(document: DiagramDocument): ErdDiagnostic[] {
         if (!name) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} contains an unnamed attribute.`, nodeId: entity.id });
         if (seen.has(name)) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} contains duplicate attribute “${field.name}”.`, nodeId: entity.id });
         seen.add(name);
+        if (field.reference && !entityIds.has(field.reference.entityId)) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} attribute “${field.name}” references a missing entity.`, nodeId: entity.id });
+        if (field.reference && !field.foreignKey) diagnostics.push({ severity: 'warning', message: `${label || 'Entity'} attribute “${field.name}” has a reference but is not marked FK.`, nodeId: entity.id });
       });
     });
     page.edges.forEach((edge) => {
@@ -173,4 +218,12 @@ function slugify(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null;
+}
+
+function isFieldFlag(value: string): boolean {
+  return ['PK', 'FK', 'UQ', 'NN', 'PRIMARY', 'PRIMARY KEY', 'FOREIGN', 'FOREIGN KEY', 'UNIQUE', 'NOT', 'NOT NULL'].includes(value.toUpperCase().replace(/[:,]$/, ''));
+}
+
+function isReferentialAction(value: unknown): value is ReferentialAction {
+  return value === 'CASCADE' || value === 'RESTRICT' || value === 'SET NULL' || value === 'NO ACTION';
 }

@@ -1,15 +1,20 @@
 import { nearestConnectionPort, nodeCenter } from './geometry';
+import { wrappedNodeHeight } from './text';
 import type {
+  CanvasTheme,
   DiagramDocument,
   DiagramEdge,
   DiagramNode,
   DiagramPage,
   DiagramType,
   EdgeStyle,
+  FontWeight,
   NodeStyle,
   Point,
   SerializedProject,
   ShapeBoundary,
+  TextAlign,
+  VerticalAlign,
 } from './types';
 
 export const CURRENT_SCHEMA_VERSION = 1;
@@ -22,6 +27,13 @@ const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
 const diagramTypes = new Set<DiagramType>(['general', 'flowchart', 'erd', 'dfd', 'use-case']);
 const edgeMarkers = new Set(['none', 'arrow', 'bar', 'circle', 'crowfoot', 'circle-bar', 'bar-crowfoot', 'circle-crowfoot']);
 const edgeDashes = new Set(['solid', 'dashed', 'dotted']);
+const edgeJumpStyles = new Set(['arc', 'gap', 'none']);
+const canvasThemes = new Set<CanvasTheme>(['dark', 'light']);
+const textAlignments = new Set<TextAlign>(['left', 'center', 'right']);
+const verticalAlignments = new Set<VerticalAlign>(['top', 'middle', 'bottom']);
+const fontWeights = new Set<FontWeight>([400, 500, 600, 700]);
+
+export const defaultDocumentPalette = ['#171b28', '#2c2752', '#1f2e43', '#15362f', '#302b24', '#f2f3f7'];
 
 export const defaultNodeStyle: NodeStyle = {
   fill: '#171b28',
@@ -30,6 +42,12 @@ export const defaultNodeStyle: NodeStyle = {
   radius: 10,
   opacity: 1,
   textColor: '#f4f5fa',
+  fontSize: 12,
+  fontWeight: 500,
+  textAlign: 'center',
+  verticalAlign: 'middle',
+  textWrap: true,
+  autoHeight: true,
 };
 
 export const defaultEdgeStyle: EdgeStyle = {
@@ -39,6 +57,8 @@ export const defaultEdgeStyle: EdgeStyle = {
   startMarker: 'none',
   endMarker: 'arrow',
   labelColor: '#aeb5c9',
+  opacity: 1,
+  jumpStyle: 'arc',
 };
 
 export function createId(prefix = 'id'): string {
@@ -58,6 +78,7 @@ export function createPage(name = 'Page 1'): DiagramPage {
       width: 1600,
       height: 1000,
       background: '#10131c',
+      canvasTheme: 'dark',
       gridSize: 16,
       gridVisible: true,
       snapToGrid: true,
@@ -77,6 +98,8 @@ export function createDocument(
     name,
     diagramType,
     pages: [createPage()],
+    palette: [...defaultDocumentPalette],
+    stylePresets: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -85,9 +108,9 @@ export function createDocument(
 export function createNode(
   type: string,
   position: Point,
-  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data'>> & { style?: Partial<NodeStyle>; boundary?: ShapeBoundary } = {},
+  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data' | 'container'>> & { style?: Partial<NodeStyle>; boundary?: ShapeBoundary } = {},
 ): DiagramNode {
-  return {
+  const node: DiagramNode = {
     id: createId('node'),
     library: options.library ?? 'general',
     type,
@@ -95,10 +118,18 @@ export function createNode(
     size: options.size ?? { width: 180, height: 88 },
     rotation: 0,
     ...(options.boundary ? { boundary: options.boundary } : {}),
-    style: { ...defaultNodeStyle, ...options.style },
+    ...(options.container ? { container: true } : {}),
+    style: {
+      ...defaultNodeStyle,
+      ...(type === 'entity' ? { textWrap: false, autoHeight: false } : {}),
+      ...options.style,
+    },
     data: options.data ?? { label: type },
     zIndex: 0,
   };
+  const requiredHeight = wrappedNodeHeight(node);
+  if (requiredHeight > node.size.height) node.size = { ...node.size, height: requiredHeight };
+  return node;
 }
 
 export function createEdge(
@@ -136,7 +167,10 @@ export function clonePageWithNewIds(source: DiagramPage, name = `${source.name} 
       })())
       : undefined;
     return { ...structuredClone(node), id, groupId };
-  });
+  }).map((node, index) => ({
+    ...node,
+    containerId: source.nodes[index].containerId ? nodeIds.get(source.nodes[index].containerId!) : undefined,
+  }));
   const edges = source.edges.map((edge) => ({
     ...structuredClone(edge),
     id: createId('edge'),
@@ -188,6 +222,8 @@ export function validateProjectDocument(value: unknown): string[] {
   isBoundedString(value.name, 'document.name', 1, 256, errors);
   if (value.schemaVersion !== undefined && (!isInteger(value.schemaVersion) || value.schemaVersion < 1 || value.schemaVersion > CURRENT_SCHEMA_VERSION)) errors.push('document.schemaVersion is unsupported');
   if (value.diagramType !== undefined && (typeof value.diagramType !== 'string' || !diagramTypes.has(value.diagramType as DiagramType))) errors.push('document.diagramType is invalid');
+  validatePalette(value.palette, 'document.palette', errors);
+  validateStylePresets(value.stylePresets, 'document.stylePresets', errors);
   finiteInRange(value.createdAt, 'document.createdAt', 0, 100000000000000, errors);
   finiteInRange(value.updatedAt, 'document.updatedAt', 0, 100000000000000, errors);
   if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > MAX_PAGES) {
@@ -197,6 +233,25 @@ export function validateProjectDocument(value: unknown): string[] {
   const pageIds = new Set<string>();
   value.pages.forEach((page, pageIndex) => validatePage(page, pageIndex, pageIds, errors));
   return errors;
+}
+
+function validatePalette(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > 64) { errors.push(`${path} must contain at most 64 colors`); return; }
+  value.forEach((color, index) => isBoundedString(color, `${path}[${index}]`, 1, 64, errors));
+}
+
+function validateStylePresets(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > 64) { errors.push(`${path} must contain at most 64 presets`); return; }
+  value.forEach((preset, index) => {
+    const presetPath = `${path}[${index}]`;
+    if (!isRecord(preset)) { errors.push(`${presetPath} must be an object`); return; }
+    isBoundedString(preset.id, `${presetPath}.id`, 1, 256, errors);
+    isBoundedString(preset.name, `${presetPath}.name`, 1, 128, errors);
+    if (!isRecord(preset.style)) errors.push(`${presetPath}.style must be an object`);
+    else validatePartialNodeStyle(preset.style, `${presetPath}.style`, errors);
+  });
 }
 
 function validatePage(value: unknown, pageIndex: number, pageIds: Set<string>, errors: string[]): void {
@@ -217,6 +272,27 @@ function validatePage(value: unknown, pageIndex: number, pageIds: Set<string>, e
   const edges = Array.isArray(value.edges) ? value.edges : [];
   const nodeIds = new Set<string>();
   nodes.forEach((node, index) => validateNode(node, `${path}.nodes[${index}]`, nodeIds, errors));
+  nodes.forEach((node, index) => {
+    if (!isRecord(node) || node.containerId === undefined) return;
+    if (typeof node.containerId !== 'string' || !nodeIds.has(node.containerId)) errors.push(`${path}.nodes[${index}].containerId references a missing node`);
+    if (node.containerId === node.id) errors.push(`${path}.nodes[${index}].containerId cannot reference itself`);
+    const owner = nodes.find((candidate) => isRecord(candidate) && candidate.id === node.containerId);
+    if (owner && owner.container !== true) errors.push(`${path}.nodes[${index}].containerId must reference a container node`);
+  });
+  nodes.forEach((node, index) => {
+    if (!isRecord(node) || typeof node.id !== 'string') return;
+    const visited = new Set<string>();
+    let owner = typeof node.containerId === 'string' ? node.containerId : undefined;
+    while (owner) {
+      if (visited.has(owner)) {
+        errors.push(`${path}.nodes[${index}].containerId contains a cycle`);
+        break;
+      }
+      visited.add(owner);
+      const parent = nodes.find((candidate) => isRecord(candidate) && candidate.id === owner);
+      owner = parent && typeof parent.containerId === 'string' ? parent.containerId : undefined;
+    }
+  });
   const edgeIds = new Set<string>();
   edges.forEach((edge, index) => validateEdge(edge, `${path}.edges[${index}]`, edgeIds, nodeIds, errors));
 }
@@ -226,6 +302,7 @@ function validatePageSettings(value: unknown, path: string, errors: string[]): v
   finiteInRange(value.width, `${path}.width`, 320, 100000, errors);
   finiteInRange(value.height, `${path}.height`, 240, 100000, errors);
   isBoundedString(value.background, `${path}.background`, 1, 64, errors);
+  if (value.canvasTheme !== undefined && (typeof value.canvasTheme !== 'string' || !canvasThemes.has(value.canvasTheme as CanvasTheme))) errors.push(`${path}.canvasTheme is invalid`);
   finiteInRange(value.gridSize, `${path}.gridSize`, 1, 512, errors);
   if (typeof value.gridVisible !== 'boolean') errors.push(`${path}.gridVisible must be boolean`);
   if (typeof value.snapToGrid !== 'boolean') errors.push(`${path}.snapToGrid must be boolean`);
@@ -254,6 +331,8 @@ function validateNode(value: unknown, path: string, ids: Set<string>, errors: st
   if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
   if (value.hidden !== undefined && typeof value.hidden !== 'boolean') errors.push(`${path}.hidden must be boolean`);
   if (value.groupId !== undefined) isBoundedString(value.groupId, `${path}.groupId`, 1, 256, errors);
+  if (value.containerId !== undefined) isBoundedString(value.containerId, `${path}.containerId`, 1, 256, errors);
+  if (value.container !== undefined && typeof value.container !== 'boolean') errors.push(`${path}.container must be boolean`);
   if (value.zIndex !== undefined) finiteInRange(value.zIndex, `${path}.zIndex`, -100000000, 100000000, errors);
   validateNodeStyle(value.style, `${path}.style`, errors);
   validateData(value.data, `${path}.data`, errors);
@@ -267,6 +346,27 @@ function validateNodeStyle(value: unknown, path: string, errors: string[]): void
   finiteInRange(value.radius, `${path}.radius`, 0, 100000, errors);
   finiteInRange(value.opacity, `${path}.opacity`, 0, 1, errors);
   isBoundedString(value.textColor, `${path}.textColor`, 1, 64, errors);
+  if (value.fontSize !== undefined) finiteInRange(value.fontSize, `${path}.fontSize`, 6, 96, errors);
+  if (value.fontWeight !== undefined && (typeof value.fontWeight !== 'number' || !fontWeights.has(value.fontWeight as FontWeight))) errors.push(`${path}.fontWeight is invalid`);
+  if (value.textAlign !== undefined && (typeof value.textAlign !== 'string' || !textAlignments.has(value.textAlign as TextAlign))) errors.push(`${path}.textAlign is invalid`);
+  if (value.verticalAlign !== undefined && (typeof value.verticalAlign !== 'string' || !verticalAlignments.has(value.verticalAlign as VerticalAlign))) errors.push(`${path}.verticalAlign is invalid`);
+  if (value.textWrap !== undefined && typeof value.textWrap !== 'boolean') errors.push(`${path}.textWrap must be boolean`);
+  if (value.autoHeight !== undefined && typeof value.autoHeight !== 'boolean') errors.push(`${path}.autoHeight must be boolean`);
+}
+
+function validatePartialNodeStyle(value: Record<string, unknown>, path: string, errors: string[]): void {
+  if (value.fill !== undefined) isBoundedString(value.fill, `${path}.fill`, 1, 64, errors);
+  if (value.stroke !== undefined) isBoundedString(value.stroke, `${path}.stroke`, 1, 64, errors);
+  if (value.strokeWidth !== undefined) finiteInRange(value.strokeWidth, `${path}.strokeWidth`, 0, 100, errors);
+  if (value.radius !== undefined) finiteInRange(value.radius, `${path}.radius`, 0, 100000, errors);
+  if (value.opacity !== undefined) finiteInRange(value.opacity, `${path}.opacity`, 0, 1, errors);
+  if (value.textColor !== undefined) isBoundedString(value.textColor, `${path}.textColor`, 1, 64, errors);
+  if (value.fontSize !== undefined) finiteInRange(value.fontSize, `${path}.fontSize`, 6, 96, errors);
+  if (value.fontWeight !== undefined && (typeof value.fontWeight !== 'number' || !fontWeights.has(value.fontWeight as FontWeight))) errors.push(`${path}.fontWeight is invalid`);
+  if (value.textAlign !== undefined && (typeof value.textAlign !== 'string' || !textAlignments.has(value.textAlign as TextAlign))) errors.push(`${path}.textAlign is invalid`);
+  if (value.verticalAlign !== undefined && (typeof value.verticalAlign !== 'string' || !verticalAlignments.has(value.verticalAlign as VerticalAlign))) errors.push(`${path}.verticalAlign is invalid`);
+  if (value.textWrap !== undefined && typeof value.textWrap !== 'boolean') errors.push(`${path}.textWrap must be boolean`);
+  if (value.autoHeight !== undefined && typeof value.autoHeight !== 'boolean') errors.push(`${path}.autoHeight must be boolean`);
 }
 
 function validateEdge(value: unknown, path: string, ids: Set<string>, nodeIds: Set<string>, errors: string[]): void {
@@ -283,6 +383,8 @@ function validateEdge(value: unknown, path: string, ids: Set<string>, nodeIds: S
   else {
     isBoundedString(value.style.stroke, `${path}.style.stroke`, 1, 64, errors);
     finiteInRange(value.style.strokeWidth, `${path}.style.strokeWidth`, 0, 100, errors);
+    if (value.style.opacity !== undefined) finiteInRange(value.style.opacity, `${path}.style.opacity`, 0, 1, errors);
+    if (value.style.jumpStyle !== undefined && (typeof value.style.jumpStyle !== 'string' || !edgeJumpStyles.has(value.style.jumpStyle))) errors.push(`${path}.style.jumpStyle is invalid`);
     if (typeof value.style.dash !== 'string' || !edgeDashes.has(value.style.dash)) errors.push(`${path}.style.dash is invalid`);
     if (typeof value.style.startMarker !== 'string' || !edgeMarkers.has(value.style.startMarker)) errors.push(`${path}.style.startMarker is invalid`);
     if (typeof value.style.endMarker !== 'string' || !edgeMarkers.has(value.style.endMarker)) errors.push(`${path}.style.endMarker is invalid`);
@@ -338,13 +440,16 @@ function isInteger(value: unknown): value is number {
 export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocument {
   const base = createDocument(input.name ?? 'Recovered diagram', input.diagramType ?? 'general');
   const pages = Array.isArray(input.pages) && input.pages.length > 0
-    ? input.pages.map((page, index) => ({
-      ...createPage(page.name ?? `Page ${index + 1}`),
-      ...page,
-      settings: { ...createPage().settings, ...(page.settings ?? {}) },
-      nodes: Array.isArray(page.nodes) ? page.nodes : [],
-       edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, Array.isArray(page.nodes) ? page.nodes : [], input.diagramType ?? base.diagramType)) : [],
-    }))
+    ? input.pages.map((page, index) => {
+      const nodes = Array.isArray(page.nodes) ? page.nodes.map(migrateNode) : [];
+      return {
+        ...createPage(page.name ?? `Page ${index + 1}`),
+        ...page,
+        settings: { ...createPage().settings, ...(page.settings ?? {}) },
+        nodes,
+        edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, input.diagramType ?? base.diagramType)) : [],
+      };
+    })
     : base.pages;
 
   return {
@@ -355,9 +460,42 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
     name: input.name ?? base.name,
     diagramType: input.diagramType ?? base.diagramType,
     pages,
+    palette: normalizePalette(input.palette),
+    stylePresets: normalizeStylePresets(input.stylePresets),
     createdAt: input.createdAt ?? base.createdAt,
     updatedAt: input.updatedAt ?? Date.now(),
   };
+}
+
+function migrateNode(node: DiagramNode): DiagramNode {
+  const legacyEntity = node.type === 'entity' && node.style?.textWrap === undefined && node.style?.autoHeight === undefined;
+  const migrated: DiagramNode = {
+    ...node,
+    style: {
+      ...defaultNodeStyle,
+      ...(legacyEntity ? { textWrap: false, autoHeight: false } : {}),
+      ...(node.style ?? {}),
+    },
+    data: node.data ?? {},
+  };
+  const requiredHeight = wrappedNodeHeight(migrated);
+  return requiredHeight > migrated.size.height
+    ? { ...migrated, size: { ...migrated.size, height: requiredHeight } }
+    : migrated;
+}
+
+function normalizePalette(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...defaultDocumentPalette];
+  const colors = value.filter((color): color is string => typeof color === 'string' && color.length > 0 && color.length <= 64);
+  return [...new Set(colors)].slice(0, 64);
+}
+
+function normalizeStylePresets(value: unknown): DiagramDocument['stylePresets'] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((preset) => {
+    if (!isRecord(preset) || typeof preset.id !== 'string' || typeof preset.name !== 'string' || !isRecord(preset.style)) return [];
+    return [{ id: preset.id, name: preset.name, style: structuredClone(preset.style) }];
+  }).slice(0, 64) as DiagramDocument['stylePresets'];
 }
 
 function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramEdge {
@@ -376,6 +514,8 @@ function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramE
 function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: DiagramType): DiagramEdge {
   const anchored = anchorOrthogonalEdge({
     ...edge,
+    style: { ...defaultEdgeStyle, ...(edge.style ?? {}) },
+    data: { ...(edge.data ?? {}) },
     source: normalizeAttachedEndpoint(edge.source, nodes),
     target: normalizeAttachedEndpoint(edge.target, nodes),
   }, nodes);

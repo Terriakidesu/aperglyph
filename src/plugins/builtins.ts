@@ -1,5 +1,6 @@
 import { validateDfd } from '../core/dfd';
 import { entityFieldAnchors } from '../core/anchors';
+import { validateUseCase } from '../core/useCase';
 import type { DiagramDocument } from '../core/types';
 import type { DiagramPlugin } from './types';
 
@@ -13,8 +14,14 @@ export const generalPlugin: DiagramPlugin = {
      { id: 'rounded-rectangle', type: 'rounded-rectangle', label: 'Rounded rectangle', icon: 'rounded-rectangle', renderer: 'rounded-rectangle' },
      { id: 'circle', type: 'circle', label: 'Circle', icon: 'circle', defaultSize: { width: 112, height: 112 }, renderer: 'ellipse', boundary: 'ellipse' },
      { id: 'diamond', type: 'diamond', label: 'Diamond', icon: 'diamond', defaultSize: { width: 160, height: 110 }, renderer: 'diamond', boundary: 'diamond' },
-     { id: 'text', type: 'text', label: 'Text', icon: 'text', defaultSize: { width: 190, height: 56 }, defaultData: { label: 'Text label' }, renderer: 'rectangle' },
-     { id: 'line', type: 'line', label: 'Line', icon: 'line', defaultSize: { width: 190, height: 32 }, renderer: 'line' },
+       { id: 'text', type: 'text', label: 'Text', icon: 'text', defaultSize: { width: 190, height: 56 }, defaultStyle: { fill: 'transparent', stroke: 'transparent', radius: 0, textAlign: 'left', autoHeight: true }, defaultData: { label: 'Text label' }, renderer: 'rectangle' },
+       { id: 'line', type: 'line', label: 'Line', icon: 'line', defaultSize: { width: 190, height: 32 }, defaultStyle: { fill: 'transparent' }, renderer: 'line' },
+       { id: 'frame', type: 'frame', label: 'Frame', icon: 'square', defaultSize: { width: 320, height: 220 }, defaultStyle: { fill: 'transparent', stroke: '#7d86a2', radius: 14, textAlign: 'left', verticalAlign: 'top' }, defaultData: { label: 'Frame' }, renderer: 'boundary', container: true, tags: ['container', 'section', 'boundary'] },
+       { id: 'section', type: 'section', label: 'Section', icon: 'square', defaultSize: { width: 360, height: 180 }, defaultStyle: { fill: 'transparent', stroke: '#5d6f91', radius: 8, textAlign: 'left', verticalAlign: 'top' }, defaultData: { label: 'Section' }, renderer: 'boundary', container: true, tags: ['container', 'header'] },
+       { id: 'note', type: 'note', label: 'Note', icon: 'text', defaultSize: { width: 190, height: 110 }, defaultStyle: { fill: '#40385f', stroke: '#b0a2ff', radius: 6, textAlign: 'left', verticalAlign: 'top', textColor: '#f4f5fa' }, defaultData: { label: 'Note' }, renderer: 'rounded-rectangle', tags: ['annotation', 'callout'] },
+       { id: 'sticky-note', type: 'sticky-note', label: 'Sticky note', icon: 'text', defaultSize: { width: 170, height: 150 }, defaultStyle: { fill: '#5a4a2f', stroke: '#e7ba70', radius: 3, textAlign: 'left', verticalAlign: 'top', textColor: '#fff4d7' }, defaultData: { label: 'Sticky note' }, renderer: 'rectangle', tags: ['annotation', 'note'] },
+       { id: 'callout', type: 'callout', label: 'Callout', icon: 'workflow', defaultSize: { width: 220, height: 110 }, defaultStyle: { fill: '#24354e', stroke: '#78b6ed', radius: 12, textAlign: 'left', verticalAlign: 'top' }, defaultData: { label: 'Callout' }, renderer: 'rounded-rectangle', tags: ['annotation', 'note'] },
+       { id: 'table', type: 'table', label: 'Table', icon: 'table', defaultSize: { width: 260, height: 150 }, defaultStyle: { fill: '#202a3b', stroke: '#7b8ba8', radius: 4 }, defaultData: { label: 'Table' }, renderer: 'rectangle', container: true, tags: ['container', 'data'] },
   ],
   connectors: [straight, { id: 'curved', label: 'Curved connector', routing: 'curved' }, orthogonal],
   validators: [],
@@ -46,7 +53,7 @@ export const flowchartPlugin: DiagramPlugin = {
 export const erdPlugin: DiagramPlugin = {
   id: 'erd', name: 'Entity relationship', description: 'Model tables, attributes, and relationships.',
   shapes: [
-    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 230, height: 88 }, defaultStyle: { fill: '#171b28', stroke: '#8f7dff', radius: 2, textColor: '#f4f5fa' }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], entityVariant: 'key-field-type', columnHeaders: false, striped: true, headerFill: '#272147' }, renderer: 'entity', anchors: entityFieldAnchors },
+    { id: 'entity', type: 'entity', label: 'Entity', icon: 'table', defaultSize: { width: 230, height: 88 }, defaultStyle: { fill: '#171b28', stroke: '#8f7dff', radius: 2, textColor: '#f4f5fa', textWrap: false, autoHeight: false }, defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], entityVariant: 'key-field-type', columnHeaders: false, striped: true, headerFill: '#272147' }, renderer: 'entity', anchors: entityFieldAnchors },
     { id: 'attribute', type: 'attribute', label: 'Attribute', icon: 'database', defaultSize: { width: 180, height: 64 }, defaultData: { label: 'attribute' }, renderer: 'rectangle' },
   ],
   connectors: [
@@ -72,14 +79,16 @@ export const useCasePlugin: DiagramPlugin = {
   shapes: [
     { id: 'actor', type: 'actor', label: 'Actor', icon: 'circle', defaultSize: { width: 120, height: 140 }, defaultStyle: { fill: '#182a32', stroke: '#55bed2' }, defaultData: { label: 'Actor' }, renderer: 'actor' },
     { id: 'use-case', type: 'use-case', label: 'Use case', icon: 'circle', defaultSize: { width: 190, height: 72 }, defaultStyle: { fill: '#2a2550', stroke: '#9c86ff', radius: 36 }, defaultData: { label: 'Use case' }, renderer: 'use-case', boundary: 'ellipse' },
-    { id: 'boundary', type: 'boundary', label: 'System boundary', icon: 'square', defaultSize: { width: 260, height: 180 }, defaultStyle: { fill: '#151927', stroke: '#747d98', radius: 18 }, defaultData: { label: 'System' }, renderer: 'boundary' },
+    { id: 'boundary', type: 'boundary', label: 'System boundary', icon: 'square', defaultSize: { width: 260, height: 180 }, defaultStyle: { fill: '#151927', stroke: '#747d98', radius: 18 }, defaultData: { label: 'System' }, renderer: 'boundary', container: true, tags: ['container', 'system'] },
+    { id: 'package', type: 'package', label: 'Package', icon: 'square', defaultSize: { width: 260, height: 180 }, defaultStyle: { fill: '#151927', stroke: '#747d98', radius: 10 }, defaultData: { label: 'Package' }, renderer: 'boundary', container: true, tags: ['container', 'package'] },
+    { id: 'note', type: 'note', label: 'Note', icon: 'text', defaultSize: { width: 180, height: 100 }, defaultStyle: { fill: '#40385f', stroke: '#b0a2ff', radius: 5, textAlign: 'left', verticalAlign: 'top' }, defaultData: { label: 'Note' }, renderer: 'rounded-rectangle', tags: ['annotation'] },
   ],
   connectors: [
     { id: 'association', label: 'Association', routing: 'straight', defaultStyle: { endMarker: 'none' } },
     { id: 'include', label: '«include»', routing: 'straight', defaultStyle: { dash: 'dashed' } },
     { id: 'extend', label: '«extend»', routing: 'straight', defaultStyle: { dash: 'dashed' } },
   ],
-  validators: [],
+  validators: [{ id: 'use-case-rules', label: 'Use-case relationship rules', validate: (document) => validateUseCase(document as DiagramDocument).map((diagnostic) => diagnostic.message) }],
 };
 
 export const builtInPlugins: DiagramPlugin[] = [generalPlugin, flowchartPlugin, erdPlugin, dfdPlugin, useCasePlugin];

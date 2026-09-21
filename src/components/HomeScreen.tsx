@@ -1,5 +1,5 @@
 import {
-  ArrowRight, Boxes, Copy, Database, FilePlus2, LayoutTemplate, MoreHorizontal,
+  ArrowRight, Boxes, Copy, Database, Download, FilePlus2, LayoutTemplate, MoreHorizontal,
   Network, Plus, RotateCcw, Search, ShieldCheck, Sparkles, Trash2, Upload, Workflow,
 } from 'lucide-react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createId, migrateDocument } from '../core/document';
 import { createTemplateDocument } from '../core/templates';
 import type { DiagramDocument, DiagramType } from '../core/types';
-import { clearRecoverySnapshot, deleteDocument, deleteLocalTemplate, duplicateDocument, getRecoverySnapshot, getStorageEstimate, listDocuments, listLocalTemplates, listTrashedDocuments, readProjectFile, renameDocument, restoreDocument, trashDocument, updateDocumentMetadata } from '../persistence';
+import { clearRecoverySnapshot, createWorkspaceBackup, deleteDocument, deleteLocalTemplate, downloadWorkspaceBackup, duplicateDocument, getRecoverySnapshot, getStorageEstimate, listDocuments, listLocalTemplates, listTrashedDocuments, readProjectFile, renameDocument, requestPersistentStorage, restoreDocument, restoreWorkspaceBackup, trashDocument, updateDocumentMetadata } from '../persistence';
 import type { LocalTemplate, RecoverySnapshot, StorageEstimate, StoredDocument } from '../persistence';
 import { LogoMark } from './LogoMark';
 
@@ -56,6 +56,8 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
   const [typeFilter, setTypeFilter] = useState<'all' | DiagramType>('all');
   const [sortMode, setSortMode] = useState<'updated' | 'name' | 'type'>('updated');
   const fileInput = useRef<HTMLInputElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +83,45 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
       onOpen(await readProjectFile(file));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : 'Unable to open this file.');
+    }
+  };
+
+  const exportWorkspace = async () => {
+    try {
+      setBackupBusy(true);
+      downloadWorkspaceBackup(await createWorkspaceBackup());
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Unable to export the workspace backup.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const importWorkspace = async (file: File) => {
+    if (!window.confirm('Restore this backup and replace the current local workspace? This cannot be undone.')) return;
+    try {
+      setBackupBusy(true);
+      await restoreWorkspaceBackup(await file.text(), { replace: true });
+      const [documents, trash, snapshot, estimate] = await Promise.all([listDocuments(), listTrashedDocuments(), getRecoverySnapshot(), getStorageEstimate()]);
+      setSavedDocuments(documents);
+      setTrashedDocuments(trash);
+      setLocalTemplates(listLocalTemplates());
+      setRecovery(snapshot);
+      setStorage(estimate);
+      setFileError(null);
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Unable to restore the workspace backup.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const requestStorage = async () => {
+    try {
+      await requestPersistentStorage();
+      setStorage(await getStorageEstimate());
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'The browser could not change persistent storage settings.');
     }
   };
 
@@ -184,6 +225,7 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
           <div className="welcome-actions">
             <button className="primary-button large" onClick={() => openTemplate('general', 'Untitled diagram')}><Plus size={17} /> New diagram</button>
             <button className="secondary-button large" onClick={() => fileInput.current?.click()}><Upload size={16} /> Open file</button>
+            <button className="secondary-button large" disabled={backupBusy} onClick={() => void exportWorkspace()}><Download size={16} /> Backup</button>
           </div>
         </section>
 
@@ -195,6 +237,8 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
           <div className="workspace-stat"><span className="stat-label">Last saved</span><strong>{lastSaved ? formatRelativeTime(lastSaved) : 'not yet'}</strong><span className="stat-trend saved-trend">● safely on device</span></div>
           <div className="workspace-stat stat-note"><div className="stat-note-icon"><ShieldCheck size={16} /></div><span><strong>Offline by design.</strong> Your work never needs a server.</span></div>
         </section>
+
+        <section className="workspace-backup"><div><span className="panel-kicker">Backup &amp; restore</span><h2>Keep a copy of this workspace</h2><p>Export diagrams, templates, thumbnails, preferences, and local snapshots to one JSON file.</p>{storage && storage.quota > 0 && storage.usageRatio >= .8 && <span className="storage-warning">Browser storage is {Math.round(storage.usageRatio * 100)}% full. Export a backup or request more persistent space.</span>}</div><div className="workspace-backup-actions"><button className="secondary-button" disabled={backupBusy} onClick={() => void exportWorkspace()}><Download size={14} /> Export workspace backup</button><button className="secondary-button" disabled={backupBusy} onClick={() => backupInput.current?.click()}><Upload size={14} /> Import workspace backup</button>{storage && !storage.persistent && <button className="text-button storage-request" onClick={() => void requestStorage()}>Request persistent storage</button>}</div></section>
 
           <section className="section-block" id="templates">
           <div className="section-heading"><div><h2>Start with a canvas</h2><p>Pick a language for your thinking, or make your own.</p></div><button className="text-button" onClick={() => document.getElementById('templates')?.scrollIntoView({ behavior: 'smooth' })}>View all <ArrowRight size={14} /></button></div>
@@ -233,8 +277,9 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
 
        {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
        {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="Close shortcuts">×</button></div><div className="shortcut-list"><div className="shortcut-row"><span>Select tool</span><kbd>V</kbd></div><div className="shortcut-row"><span>Pan canvas</span><kbd>H</kbd></div><div className="shortcut-row"><span>Undo / redo</span><kbd>Ctrl Z / Ctrl Shift Z</kbd></div><div className="shortcut-row"><span>Copy / paste</span><kbd>Ctrl C / Ctrl V</kbd></div><div className="shortcut-row"><span>Duplicate</span><kbd>Ctrl D</kbd></div></div></div></div>}
-      <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
-      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.12.0</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
+       <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
+       <input ref={backupInput} className="visually-hidden" type="file" accept=".json,.wbackup,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWorkspace(file); event.target.value = ''; }} />
+      <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.13.0</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
     </main>
   );
 }

@@ -37,6 +37,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const autoLayout = useEditorStore((state) => state.autoLayout);
   const resetEdge = useEditorStore((state) => state.resetEdge);
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
+  const clearFormatPainter = useEditorStore((state) => state.clearFormatPainter);
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
   const viewport = useEditorStore((state) => state.viewport);
@@ -194,7 +195,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
-      if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); setShowPalette(false); setShowShortcuts(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
+       if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
         const distance = event.shiftKey ? (page?.settings.snapToGrid ? page.settings.gridSize : 10) : 1;
@@ -207,7 +208,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-   }, [copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboard, pastePayload, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
+    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboard, pastePayload, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
 
   useEffect(() => editorEvents.on('ui:shortcuts', () => setShowShortcuts(true)), []);
 

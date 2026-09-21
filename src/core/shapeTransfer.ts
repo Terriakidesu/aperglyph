@@ -11,6 +11,7 @@ export interface ShapeDropPayload {
   defaultStyle?: Partial<NodeStyle>;
   defaultData?: Record<string, unknown>;
   boundary?: ShapeBoundary;
+  container?: boolean;
 }
 
 export function serializeShapeDrop(libraryId: string, shape: ShapeDefinition): string {
@@ -22,6 +23,7 @@ export function serializeShapeDrop(libraryId: string, shape: ShapeDefinition): s
     defaultStyle: shape.defaultStyle,
     defaultData: shape.defaultData,
     boundary: shape.boundary,
+    container: shape.container,
   };
   return JSON.stringify(payload);
 }
@@ -40,6 +42,7 @@ export function parseShapeDrop(dataTransfer: Pick<DataTransfer, 'getData'>): Sha
       defaultStyle: isRecord(value.defaultStyle) ? value.defaultStyle as Partial<NodeStyle> : undefined,
       defaultData: isRecord(value.defaultData) ? value.defaultData : undefined,
       boundary: isBoundary(value.boundary) ? value.boundary : undefined,
+      container: value.container === true,
     };
   } catch {
     return null;

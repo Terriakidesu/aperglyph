@@ -39,5 +39,32 @@ export function PageTabs() {
     setMenuOpen(false);
   };
 
-  return <div className="page-tabs"><div className="page-tabs-inner">{document.pages.map((page, index) => <button key={page.id} className={`page-tab ${page.id === activePageId ? 'active' : ''}`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}<button className="add-page" title="Create page" aria-label="Create page" onClick={() => createPage()}><Plus size={15} /></button><button className={`page-more ${menuOpen ? 'active' : ''}`} title="Page actions" aria-label="Page actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={16} /></button>{menuOpen && activePage && <div className="page-menu" onPointerDown={(event) => event.stopPropagation()}><strong>{activePage.name}</strong><button onClick={promptRename}>Rename</button><button onClick={() => { duplicatePage(activePage.id); setMenuOpen(false); }}>Duplicate</button><button disabled={activeIndex <= 0} onClick={() => { reorderPage(activePage.id, activeIndex - 1); setMenuOpen(false); }}>Move left</button><button disabled={activeIndex >= document.pages.length - 1} onClick={() => { reorderPage(activePage.id, activeIndex + 1); setMenuOpen(false); }}>Move right</button><button onClick={() => updatePageSettings({ gridVisible: !activePage.settings.gridVisible }, activePage.id, 'Toggle grid')}>{activePage.settings.gridVisible ? 'Hide grid' : 'Show grid'}</button><button onClick={() => updatePageSettings({ snapToGrid: !activePage.settings.snapToGrid }, activePage.id, 'Toggle snap')}>{activePage.settings.snapToGrid ? 'Disable snapping' : 'Enable snapping'}</button><button onClick={promptSettings}>Page settings</button><button className="context-danger" disabled={document.pages.length <= 1} onClick={() => { deletePage(activePage.id); setMenuOpen(false); }}>Delete</button></div>}</div><div className="page-count">{document.pages.length} page{document.pages.length !== 1 ? 's' : ''}</div></div>;
+  const toggleCanvasTheme = () => {
+    if (!activePage) return;
+    const light = activePage.settings.canvasTheme !== 'light';
+    updatePageSettings({ canvasTheme: light ? 'light' : 'dark', background: light ? '#f6f7fb' : '#10131c' }, activePage.id, `Use ${light ? 'light' : 'dark'} canvas`);
+    setMenuOpen(false);
+  };
+
+  return <div className="page-tabs">
+    <div className="page-tabs-inner">
+      {document.pages.map((page, index) => <button key={page.id} className={`page-tab ${page.id === activePageId ? 'active' : ''}`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}
+      <button className="add-page" title="Create page" aria-label="Create page" onClick={() => createPage()}><Plus size={15} /></button>
+      <button className={`page-more ${menuOpen ? 'active' : ''}`} title="Page actions" aria-label="Page actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={16} /></button>
+      {menuOpen && activePage && <div className="page-menu" onPointerDown={(event) => event.stopPropagation()}>
+        <strong>{activePage.name}</strong>
+        <button onClick={promptRename}>Rename</button>
+        <button onClick={() => { duplicatePage(activePage.id); setMenuOpen(false); }}>Duplicate</button>
+        <button disabled={activeIndex <= 0} onClick={() => { reorderPage(activePage.id, activeIndex - 1); setMenuOpen(false); }}>Move left</button>
+        <button disabled={activeIndex >= document.pages.length - 1} onClick={() => { reorderPage(activePage.id, activeIndex + 1); setMenuOpen(false); }}>Move right</button>
+        <button onClick={() => updatePageSettings({ gridVisible: !activePage.settings.gridVisible }, activePage.id, 'Toggle grid')}>{activePage.settings.gridVisible ? 'Hide grid' : 'Show grid'}</button>
+        <button onClick={() => updatePageSettings({ snapToGrid: !activePage.settings.snapToGrid }, activePage.id, 'Toggle snap')}>{activePage.settings.snapToGrid ? 'Disable snapping' : 'Enable snapping'}</button>
+        <button onClick={toggleCanvasTheme}>Use {activePage.settings.canvasTheme === 'light' ? 'dark' : 'light'} canvas</button>
+        <label className="page-color-input">Canvas color<input type="color" value={/^#[0-9a-f]{6}$/i.test(activePage.settings.background) ? activePage.settings.background : '#10131c'} onChange={(event) => updatePageSettings({ background: event.target.value }, activePage.id, 'Change canvas color')} /></label>
+        <button onClick={promptSettings}>Page settings</button>
+        <button className="context-danger" disabled={document.pages.length <= 1} onClick={() => { deletePage(activePage.id); setMenuOpen(false); }}>Delete</button>
+      </div>}
+    </div>
+    <span className="page-count">{document.pages.length} page{document.pages.length === 1 ? '' : 's'}</span>
+  </div>;
 }
