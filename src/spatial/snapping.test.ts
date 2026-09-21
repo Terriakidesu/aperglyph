@@ -18,4 +18,12 @@ describe('object snapping', () => {
     expect(result.positions[second.id].x - result.positions[first.id].x).toBe(70);
     expect(result.positions[first.id].x).toBe(16);
   });
+
+  it('does not align to nearby objects when the master snap switch is off', () => {
+    const moving = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 60 } });
+    const target = createNode('rectangle', { x: 220, y: 4 }, { size: { width: 100, height: 60 } });
+    const result = snapNodes([moving], { [moving.id]: { x: 116, y: 7 } }, [target], { gridSize: 16, snapToGrid: false, snapToObjects: false, threshold: 10 });
+    expect(result.positions[moving.id]).toEqual({ x: 116, y: 7 });
+    expect(result.guides).toHaveLength(0);
+  });
 });

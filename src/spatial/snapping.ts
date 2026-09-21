@@ -10,6 +10,8 @@ export interface AlignmentGuide {
 export interface SnapOptions {
   gridSize: number;
   snapToGrid: boolean;
+  /** Master switch used by the editor's Snap control. */
+  snapToObjects?: boolean;
   threshold: number;
 }
 
@@ -44,7 +46,7 @@ export function snapNodes(
   }
 
   const movingIds = new Set(movingNodes.map((node) => node.id));
-  const candidates = candidateNodes.filter((node) => !movingIds.has(node.id));
+  const candidates = options.snapToObjects === false ? [] : candidateNodes.filter((node) => !movingIds.has(node.id));
   const xMatch = closestMatch(axisTargets(movingBounds.minX, movingBounds.maxX), candidates.flatMap((node) => {
     const bounds = nodeBounds(node);
     return axisTargets(bounds.minX, bounds.maxX).map((target) => ({ value: target, nodeBounds: bounds }));

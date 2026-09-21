@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import { Lock, Ruler, Trash2, Unlock } from 'lucide-react';
 import { createEdge, createId, createNode as buildNode } from '../core/document';
 import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
 import type { ShapeDropPayload } from '../core/shapeTransfer';
@@ -18,6 +19,7 @@ import { nodeToSpatialNode, snapNodes, SpatialWorkerClient, viewportBounds } fro
 import type { AlignmentGuide, SpatialNode } from '../spatial';
 
 interface CanvasSize { width: number; height: number }
+interface WorldBounds { x: number; y: number; width: number; height: number }
 interface Marquee { start: Point; current: Point }
 interface ConnectorAnchor { nodeId: string; port?: ConnectionPort; offset?: number }
 type ResizeHandle = 'nw' | 'ne' | 'se' | 'sw';
@@ -102,6 +104,33 @@ function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(left.x - right.x, left.y - right.y);
 }
 
+function navigationBounds(nodes: DiagramNode[], edges: DiagramEdge[], visibleWorld: WorldBounds): WorldBounds {
+  const points: Point[] = [
+    { x: visibleWorld.x, y: visibleWorld.y },
+    { x: visibleWorld.x + visibleWorld.width, y: visibleWorld.y + visibleWorld.height },
+  ];
+  nodes.filter((node) => !node.hidden).forEach((node) => {
+    points.push(node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height });
+  });
+  edges.forEach((edge) => {
+    if (edge.source.point) points.push(edge.source.point);
+    if (edge.target.point) points.push(edge.target.point);
+    points.push(...edge.waypoints);
+  });
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const contentWidth = Math.max(1, maxX - minX);
+  const contentHeight = Math.max(1, maxY - minY);
+  const padding = Math.max(96, Math.min(480, Math.max(contentWidth, contentHeight) * 0.12));
+  const width = Math.max(640, contentWidth + padding * 2);
+  const height = Math.max(420, contentHeight + padding * 2);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  return { x: centerX - width / 2, y: centerY - height / 2, width, height };
+}
+
 function rotatePoint(point: Point, center: Point, degrees: number): Point {
   const radians = degrees * Math.PI / 180;
   const cos = Math.cos(radians);
@@ -131,8 +160,8 @@ function nearestConnectionAnchor(nodes: DiagramNode[], point: Point, excludedNod
   return nearest;
 }
 
-function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Point, nodes: DiagramNode[], sourceNodeId: string): ConnectorAnchor | null {
-  const nearest = nearestConnectionAnchor(nodes, point, sourceNodeId);
+function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Point, nodes: DiagramNode[], sourceNodeId: string, snappingEnabled = true): ConnectorAnchor | null {
+  const nearest = snappingEnabled ? nearestConnectionAnchor(nodes, point, sourceNodeId) : null;
   if (nearest) return nearest.anchor;
   const element = globalThis.document.elementFromPoint(event.clientX, event.clientY);
   const portElement = element?.closest?.('[data-connection-port]');
@@ -142,6 +171,7 @@ function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Po
   const node = nodes.find((candidate) => candidate.id === nodeId);
   if (!node || node.hidden) return null;
   const explicitPort = asConnectionPort(portElement?.getAttribute('data-connection-port') ?? null);
+  if (!snappingEnabled && !explicitPort) return null;
   const port = explicitPort ?? nearestConnectionPort(node, point);
   const rawOffset = portElement?.getAttribute('data-connection-offset');
   const explicitOffset = rawOffset ? Number(rawOffset) : undefined;
@@ -174,6 +204,7 @@ export function CanvasViewport() {
   const [shapeDragPreview, setShapeDragPreview] = useState<ShapeDragPreview | null>(null);
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
   const [guidePreview, setGuidePreview] = useState<DiagramGuide | null>(null);
+  const [guidesOpen, setGuidesOpen] = useState(false);
   const [showCanvasHint, setShowCanvasHint] = useState(() => {
     try {
       return globalThis.localStorage?.getItem('aperglyph.canvas-hint-dismissed') !== 'true';
@@ -620,6 +651,7 @@ export function CanvasViewport() {
     }
 
     if (activeTool === 'connector') {
+      if (!port && !page?.settings.snapToGrid) return;
       const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
       if (!connectorStart) {
         setConnectorStart(anchor);
@@ -758,17 +790,18 @@ export function CanvasViewport() {
     const edge = page.edges.find((candidate) => candidate.id === session.edgeId);
     if (!edge) return;
     const oppositeNodeId = session.endpoint === 'source' ? edge.target.nodeId : edge.source.nodeId;
-    const nearest = nearestConnectionAnchor(page.nodes, point, oppositeNodeId);
+    const snappingEnabled = page.settings.snapToGrid;
+    const nearest = snappingEnabled ? nearestConnectionAnchor(page.nodes, point, oppositeNodeId) : null;
     if (nearest) {
       const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor: nearest.anchor, point: nearest.point };
       endpointPreviewRef.current = preview;
       setEndpointPreview(preview);
       return;
     }
-    const candidate = page.nodes
+    const candidate = snappingEnabled ? page.nodes
       .filter((node) => !node.hidden && (!oppositeNodeId || node.id !== oppositeNodeId))
       .filter((node) => point.x >= node.position.x - ENDPOINT_SNAP_DISTANCE && point.x <= node.position.x + node.size.width + ENDPOINT_SNAP_DISTANCE && point.y >= node.position.y - ENDPOINT_SNAP_DISTANCE && point.y <= node.position.y + node.size.height + ENDPOINT_SNAP_DISTANCE)
-      .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0]
+      .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0] : undefined;
     if (candidate) {
       const port = nearestConnectionPort(candidate, point);
       const offset = connectionOffset(candidate, point, port);
@@ -830,7 +863,7 @@ export function CanvasViewport() {
     }
     const point = worldPoint(event);
     if (session.mode === 'connector' && connectorDragPreview) {
-      const snapped = page ? nearestConnectionAnchor(page.nodes, point, session.connectorSource?.nodeId) : null;
+      const snapped = page?.settings.snapToGrid ? nearestConnectionAnchor(page.nodes, point, session.connectorSource?.nodeId) : null;
       setConnectorDragPreview({ ...connectorDragPreview, current: snapped?.point ?? point, target: snapped ?? undefined });
     } else if (session.mode === 'endpoint') {
       updateEndpointPreview(session, point);
@@ -878,7 +911,8 @@ export function CanvasViewport() {
       const desiredPositions = Object.fromEntries(Object.entries(session.initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]));
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
       const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
-      const snapped = snapNodes(movingNodes, desiredPositions, candidateNodes, { gridSize: page?.settings.gridSize ?? 16, snapToGrid: page?.settings.snapToGrid ?? false, threshold: 10 / viewport.zoom });
+      const snappingEnabled = page?.settings.snapToGrid ?? false;
+      const snapped = snapNodes(movingNodes, desiredPositions, candidateNodes, { gridSize: page?.settings.gridSize ?? 16, snapToGrid: snappingEnabled, snapToObjects: snappingEnabled, threshold: 10 / viewport.zoom });
       const preview = snapped.positions;
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
@@ -910,7 +944,7 @@ export function CanvasViewport() {
       const moved = distanceBetween(screenPoint(event), session.startClient) > 5;
       if (moved) {
         const point = worldPoint(event);
-        const target = page ? connectionDropAnchor(event, point, page.nodes, session.connectorSource.nodeId) : null;
+        const target = page ? connectionDropAnchor(event, point, page.nodes, session.connectorSource.nodeId, page.settings.snapToGrid) : null;
         if (target) createConnection(session.connectorSource, target);
         setConnectorStart(null);
       } else if (activeTool !== 'connector') {
@@ -1047,13 +1081,14 @@ export function CanvasViewport() {
   const rulerMarks = buildRulerMarks(size, viewport);
   const minimapWidth = 180;
   const minimapHeight = 112;
-  const minimapPageWidth = page?.settings.width ?? 1600;
-  const minimapPageHeight = page?.settings.height ?? 1000;
-  const minimapScale = Math.min((minimapWidth - 12) / minimapPageWidth, (minimapHeight - 12) / minimapPageHeight);
-  const minimapOffset = { x: (minimapWidth - minimapPageWidth * minimapScale) / 2, y: (minimapHeight - minimapPageHeight * minimapScale) / 2 };
-  const minimapPoint = (point: Point) => ({ x: minimapOffset.x + (point.x + minimapPageWidth / 2) * minimapScale, y: minimapOffset.y + (point.y + minimapPageHeight / 2) * minimapScale });
   const visibleWorld = { x: -viewport.x - size.width / 2 / viewport.zoom, y: -viewport.y - size.height / 2 / viewport.zoom, width: size.width / viewport.zoom, height: size.height / viewport.zoom };
-  const minimapViewport = minimapPoint(visibleWorld);
+  const minimapWorld = navigationBounds(page?.nodes ?? [], page?.edges ?? [], visibleWorld);
+  const minimapScale = Math.min((minimapWidth - 12) / minimapWorld.width, (minimapHeight - 12) / minimapWorld.height);
+  const minimapOffset = { x: (minimapWidth - minimapWorld.width * minimapScale) / 2, y: (minimapHeight - minimapWorld.height * minimapScale) / 2 };
+  const minimapPoint = (point: Point) => ({ x: minimapOffset.x + (point.x - minimapWorld.x) * minimapScale, y: minimapOffset.y + (point.y - minimapWorld.y) * minimapScale });
+  const minimapRect = (bounds: WorldBounds) => ({ ...minimapPoint({ x: bounds.x, y: bounds.y }), width: bounds.width * minimapScale, height: bounds.height * minimapScale });
+  const minimapViewport = minimapRect(visibleWorld);
+  const guideWorld = { left: visibleWorld.x - visibleWorld.width, right: visibleWorld.x + visibleWorld.width * 2, top: visibleWorld.y - visibleWorld.height, bottom: visibleWorld.y + visibleWorld.height * 2 };
 
   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''}`} ref={stageRef}>
      {showCanvasHint && <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>}
@@ -1071,11 +1106,11 @@ export function CanvasViewport() {
          <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : '#10131c'} />
          {shapePreview && <g className="shape-drop-preview" transform={`translate(${shapePreview.position.x} ${shapePreview.position.y})`} pointerEvents="none"><rect width={shapePreview.width} height={shapePreview.height} rx="8" /><text x={shapePreview.width / 2} y={shapePreview.height / 2 + 4} textAnchor="middle">{shapePreview.label}</text></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
-         <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
-           ? <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guide.position} y1={-minimapPageHeight / 2} x2={guide.position} y2={minimapPageHeight / 2} onPointerDown={(event) => beginGuideDrag(event, 'vertical', guide)} onDoubleClick={() => removeGuide(guide.id)} />
-           : <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={-minimapPageWidth / 2} y1={guide.position} x2={minimapPageWidth / 2} y2={guide.position} onPointerDown={(event) => beginGuideDrag(event, 'horizontal', guide)} onDoubleClick={() => removeGuide(guide.id)} />)}{guidePreview && (guidePreview.orientation === 'vertical'
-           ? <line className="canvas-guide preview" x1={guidePreview.position} y1={-minimapPageHeight} x2={guidePreview.position} y2={minimapPageHeight} />
-           : <line className="canvas-guide preview" x1={-minimapPageWidth} y1={guidePreview.position} x2={minimapPageWidth} y2={guidePreview.position} />)}</g>
+          <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
+            ? <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guide.position} y1={guideWorld.top} x2={guide.position} y2={guideWorld.bottom} onPointerDown={(event) => beginGuideDrag(event, 'vertical', guide)} onDoubleClick={() => removeGuide(guide.id)} />
+            : <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guideWorld.left} y1={guide.position} x2={guideWorld.right} y2={guide.position} onPointerDown={(event) => beginGuideDrag(event, 'horizontal', guide)} onDoubleClick={() => removeGuide(guide.id)} />)}{guidePreview && (guidePreview.orientation === 'vertical'
+            ? <line className="canvas-guide preview" x1={guidePreview.position} y1={guideWorld.top} x2={guidePreview.position} y2={guideWorld.bottom} />
+            : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>
          <g className="edge-layer">{renderedEdges.map((edge) => {
           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
@@ -1108,10 +1143,10 @@ export function CanvasViewport() {
       {contextMenu.target.kind !== 'canvas' && <button className="context-danger" onClick={deleteContextTarget}>Delete</button>}
        {contextMenu.target.kind === 'canvas' && <button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button>}
      </div>}
-     <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = ((event.clientX - rect.left - minimapOffset.x) / minimapScale) - minimapPageWidth / 2; const y = ((event.clientY - rect.top - minimapOffset.y) / minimapScale) - minimapPageHeight / 2; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
-       <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-page" x={minimapOffset.x} y={minimapOffset.y} width={minimapPageWidth * minimapScale} height={minimapPageHeight * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, visibleWorld.width * minimapScale)} height={Math.max(2, visibleWorld.height * minimapScale)} /></svg>
-     </div>
-     {(page?.guides?.length ?? 0) > 0 && <div className="guide-controls"><span>Guides</span>{page?.guides?.map((guide) => <div key={guide.id} className="guide-control"><i className={guide.orientation} /><button title={guide.locked ? 'Unlock guide' : 'Lock guide'} aria-label={guide.locked ? 'Unlock guide' : 'Lock guide'} onClick={() => toggleGuideLock(guide.id)}>{guide.locked ? <span>•</span> : <span>○</span>}</button><button title="Delete guide" aria-label="Delete guide" disabled={guide.locked} onClick={() => removeGuide(guide.id)}>×</button></div>)}</div>}
+      <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
+        <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>
+      </div>
+      {(page?.guides?.length ?? 0) > 0 && <details className="guide-controls" open={guidesOpen} onToggle={(event) => setGuidesOpen(event.currentTarget.open)}><summary><Ruler size={12} /> Guides <span>{page?.guides?.length}</span></summary><div className="guide-control-list">{page?.guides?.map((guide) => <div key={guide.id} className="guide-control"><i className={guide.orientation} /><span>{guide.orientation === 'vertical' ? `X ${Math.round(guide.position)}` : `Y ${Math.round(guide.position)}`}</span><button title={guide.locked ? 'Unlock guide' : 'Lock guide'} aria-label={guide.locked ? 'Unlock guide' : 'Lock guide'} onClick={() => toggleGuideLock(guide.id)}>{guide.locked ? <Lock size={12} /> : <Unlock size={12} />}</button><button title="Delete guide" aria-label="Delete guide" disabled={guide.locked} onClick={() => removeGuide(guide.id)}><Trash2 size={12} /></button></div>)}</div></details>}
    </div>;
 }
 
@@ -1180,6 +1215,7 @@ function endpointDirection(point: Point, neighbor: Point, node?: DiagramNode): P
   return node ? outwardDirection(point, nodeCenter(node)) : { x: point.x - neighbor.x, y: point.y - neighbor.y };
 }
 
+/** Every endpoint notation follows the same connector tangent as an arrowhead. */
 function markerDirection(point: Point, neighbor: Point, node?: DiagramNode): Point {
   if (node) return endpointDirection(point, neighbor, node);
   return directionBetween(point, neighbor);
