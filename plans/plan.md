@@ -1,2391 +1,796 @@
-Yes. With cloud functions deliberately excluded, I would make the project a **fully client-side, local-first diagramming PWA** whose heavy computation is handled by Rust/WASM in a Web Worker.
+# AperGlyph roadmap after 0.10
 
-The architecture should be designed so that adding a backend later does not require rewriting the editor, but **nothing in Version 1 depends on a server**.
+This document supersedes the original linear Phase 1–16 implementation plan.
+Those phases described the foundation that now exists in the repository. The
+roadmap below starts from the current `0.10.x` editor and prioritizes workflow
+speed, local data safety, semantic diagram features, and polish.
 
-# 1. Project vision
+## Product direction
 
-The application is essentially:
+AperGlyph remains:
 
-> **A free, unlimited, offline-capable Lucidchart-style diagram editor for ERDs, flowcharts, DFDs, UML use case diagrams, and future diagram standards.**
+> **Local-first, offline-first, static-hostable, serverless, and account-free.**
 
-Core principles:
+The editor must remain fully usable without a backend, account, network, or
+cloud storage. New features should improve the number of ideas a user can
+express per click without introducing server dependencies.
 
-* No account required
-* No backend required
-* No diagram count limit
-* No artificial object limit
-* No page limit imposed by the application
-* No watermarks
-* Fully functional offline
-* Installable as a PWA
-* Local autosaving
-* User-controlled file import/export
-* SVG-based primary renderer
-* Rust/WASM for computationally expensive operations
-* Component-based UI
-* Event-driven internal architecture
-* Plugin/module-based diagram types
-* Static hosting compatible
-* Desktop-first, but responsive enough for tablets
-* Architecture ready for future cloud functionality without implementing it now
+The document model remains authoritative, SVG remains presentation, IndexedDB
+remains local persistence, and the plugin registry remains the extension point
+for diagram standards and shapes.
 
-The only practical limits should come from the user's browser/device resources.
+### Guardrails
 
----
+- No server, authentication, account, telemetry requirement, or cloud storage.
+- No artificial document, page, or object quota; report browser/device limits
+  honestly instead.
+- All edits remain undoable commands and all durable data remains local-first.
+- Imported content is treated as untrusted and validated/sanitized.
+- New plugin behavior belongs in a plugin, not in generic editor conditionals.
+- Heavy geometry, spatial, routing, and layout work may use the existing
+  worker/WASM boundary, but the UI must retain a TypeScript fallback.
+- Cloud collaboration and synchronization stay optional post-1.0 ideas, never
+  a prerequisite for using the editor.
 
-# 2. Recommended technology stack
+## Completed architecture and current features
 
-| Area                   | Technology                              |
-| ---------------------- | --------------------------------------- |
-| Language               | TypeScript                              |
-| UI                     | React                                   |
-| Build system           | Vite                                    |
-| State                  | Zustand or equivalent lightweight store |
-| Rendering              | SVG                                     |
-| Heavy computation      | Rust                                    |
-| Rust → Web             | WebAssembly                             |
-| JS/WASM integration    | `wasm-bindgen`                          |
-| Background computation | Web Worker                              |
-| Local database         | IndexedDB                               |
-| IndexedDB wrapper      | Dexie or equivalent                     |
-| PWA                    | Service Worker + Web App Manifest       |
-| PWA build tooling      | Workbox / Vite PWA integration          |
-| Testing                | Vitest + Playwright                     |
-| Rust testing           | `cargo test`                            |
-| Static hosting         | GitHub Pages / Cloudflare Pages         |
-| Package management     | pnpm                                    |
-| Repository             | GitHub                                  |
+These capabilities are established in the current repository and should not be
+listed as future work unless a follow-up enhancement is explicitly described
+below.
 
-`wasm-bindgen` is particularly useful because it provides the JS/WASM interoperability layer and can generate TypeScript bindings for Rust exports. ([Wasm Bindgen][1])
+### Editor foundation
 
----
+- Document model and schema versioning
+- SVG canvas
+- Pan and zoom
+- Selection and multi-selection
+- Resize and rotation
+- Inline text editing
+- Undo and redo
+- Copy, cut, paste, and duplicate
+- Group and ungroup
+- Alignment and distribution
+- Z-order operations
+- Locking
+- Page create, delete, rename, duplicate, reorder, and settings
+- Grid snapping and object snapping
+- Alignment guides
+- Context menus and keyboard shortcuts
 
-# 3. Overall system architecture
+### Connectors and geometry
 
-```text
-┌──────────────────────────────────────────────────────────────┐
-│                     WEB DIAGRAM PWA                          │
-│                                                              │
-│  ┌──────────────── PRESENTATION LAYER ────────────────────┐  │
-│  │                                                        │  │
-│  │ React / TypeScript                                     │  │
-│  │                                                        │  │
-│  │ Topbar       Shape Library      Properties Panel       │  │
-│  │ Toolbar      SVG Canvas         Page Manager           │  │
-│  │ Status Bar   Context Menu       Dialogs                │  │
-│  └────────────────────────┬───────────────────────────────┘  │
-│                           │                                  │
-│  ┌──────────────── EDITOR CORE ───────────────────────────┐  │
-│  │                                                       │  │
-│  │ Document Store                                        │  │
-│  │ Command Manager                                       │  │
-│  │ Event Bus                                             │  │
-│  │ Selection Manager                                     │  │
-│  │ Tool Manager                                          │  │
-│  │ Viewport Manager                                      │  │
-│  │ Plugin Manager                                        │  │
-│  └────────────────────────┬──────────────────────────────┘  │
-│                           │                                  │
-│                  Worker Message API                          │
-│                           │                                  │
-│  ┌────────────────────────▼──────────────────────────────┐  │
-│  │                 WEB WORKER                           │  │
-│  │                                                      │  │
-│  │                 Rust / WASM                          │  │
-│  │                                                      │  │
-│  │ Geometry        Spatial Index       Routing          │  │
-│  │ Hit Testing     Snapping            Layout           │  │
-│  │ Validation      Graph Algorithms    Intersections    │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌──────────────── LOCAL STORAGE ─────────────────────────┐  │
-│  │                                                       │  │
-│  │ IndexedDB                                             │  │
-│  │ ├── Diagrams                                          │  │
-│  │ ├── Preferences                                       │  │
-│  │ ├── Recovery                                          │  │
-│  │ └── Local metadata                                    │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌──────────────── PWA LAYER ─────────────────────────────┐  │
-│  │                                                       │  │
-│  │ Service Worker                                        │  │
-│  │ App Manifest                                          │  │
-│  │ Offline Asset Cache                                   │  │
-│  │ Update Management                                     │  │
-│  └───────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-```
+- Connector ports and endpoint reconnection
+- Anchor snapping across built-in and plugin shapes
+- ERD field-row anchors
+- Straight, curved, and orthogonal routing
+- Waypoints and waypoint editing
+- Obstacle-aware routing
+- Connector jumps
+- Endpoint and cardinality markers
+- SVG/canvas marker direction consistency
+- Connector labels and route/style editing
 
-There is deliberately:
+### Persistence and delivery
 
-```text
-NO
-├── API server
-├── Database server
-├── Authentication server
-├── WebSocket server
-├── Cloud storage
-└── Collaboration service
-```
+- IndexedDB document storage
+- Debounced autosave
+- Crash/recovery state
+- Editor-session restoration
+- Versioned `.wdiag` JSON import/export
+- SVG, PNG, and PDF export
+- Selection-aware/content-bounds export
+- Installable PWA
+- Offline application mode
+- Update detection and save-before-reload handling
+- GitHub Pages/static-host deployment
+- Bounded import validation and migration handling
 
-The PWA service worker and the application's computational Web Worker are different things. Service workers handle things such as offline application delivery, while Web Workers are suitable for background computation. ([MDN Web Docs][2])
+### Runtime and engineering
 
----
+- Rust/WASM geometry/runtime crate
+- Spatial worker with RBush broad phase and WASM narrow-phase support
+- WASM graph layout with TypeScript fallback
+- Plugin registry for General, Flowchart, ERD, DFD, and UML Use Case
+- Hot-reloadable shape definitions
+- Vitest unit tests and benchmarks
+- Playwright browser workflows
+- CI/CD
+- README, changelog, licensing, and security documentation
 
-# 4. Architectural styles
+## Priority and release rules
 
-The application combines several architectural patterns rather than trying to force everything into one.
+- **P0:** core workflow blocker or high-frequency operation; do first in the
+  target release.
+- **P1:** important quality-of-life improvement; schedule after the P0 path is
+  reliable.
+- **P2:** useful polish or advanced workflow; schedule only after the release
+  acceptance criteria are met.
 
-| Architecture             | Purpose                        |
-| ------------------------ | ------------------------------ |
-| **Component-based**      | UI                             |
-| **Event-driven**         | Internal communication         |
-| **Command pattern**      | Editing + undo/redo            |
-| **Plugin architecture**  | Diagram types                  |
-| **Local-first**          | Persistence                    |
-| **Worker architecture**  | Heavy computation              |
-| **Layered architecture** | Separation of responsibilities |
-| **Data/model-driven**    | Diagram representation         |
+Each release should ship with unit coverage for document behavior, browser
+coverage for the user workflow, migration/import coverage where relevant, and
+no known data-loss path.
 
-A concise formal description would be:
+## v0.11 — Interaction QoL
 
-> **A local-first, component-based, event-driven Progressive Web Application with a plugin-driven diagram engine and a Rust/WebAssembly computational subsystem.**
+**Goal:** make common editing operations fast enough that users rarely need to
+hunt through panels.
 
----
+### P0
 
-# 5. The document model is the source of truth
+- Arrow keys nudge the selection by 1 px.
+- Shift + Arrow nudges by grid size, or 10 px when grid snapping is off.
+- Shift while dragging constrains movement to the dominant X/Y axis.
+- Shift while resizing preserves aspect ratio.
+- Alt/Option-drag duplicates the selection.
+- Escape exits a drag, resize, rotate, connector, text, or menu operation
+  cleanly.
+- Equal-spacing commands work for horizontal and vertical selections.
+- Resize handles are visually distinct from connector ports.
+- Multi-selection exposes a common-property editor.
+- Fit Selection, Fit Page, and 100% zoom are real viewport commands.
+- Grid visibility can be toggled from the toolbar/status bar.
+- Connecting shows a clear target preview and snap indication.
+- Reset Connector Route restores automatic routing and clears manual waypoints.
+- Icon-only controls have useful tooltips.
+- The introductory canvas hint disappears after first use.
+- Inspector section collapse state persists locally.
 
-Do **not** use SVG as your document format.
+### P1/P2
 
-SVG is only a renderer.
+- Alt/Option-resize from center.
+- `F2` or Enter renames the selected object.
+- Repeat last transform or duplicate spacing.
+- Select all objects of the same type.
+- Expand selection to connected objects.
+- Lock/unlock the entire selection.
+- Flip horizontally or vertically.
+- Reset rotation.
+- Replace a shape while preserving its connections.
+- Match width, height, or complete size.
+- Smart repeated duplication.
+- Isolation mode and double-click-to-enter-group behavior.
+- Breadcrumbs for nested group editing.
+- Cleaner handles, movement delta, rotation-angle, and resize-dimension
+  tooltips.
+- Selection count in the status bar.
 
-```text
-Diagram Document
-       ↓
-Editor Engine
-       ↓
-SVG Renderer
-       ↓
-Screen
-```
+### Command palette
 
-A document could conceptually look like:
-
-```typescript
-interface DiagramDocument {
-    schemaVersion: number;
-
-    id: string;
-    name: string;
-
-    diagramType: string;
-
-    pages: DiagramPage[];
-
-    createdAt: number;
-    updatedAt: number;
-}
-```
-
-Page:
-
-```typescript
-interface DiagramPage {
-    id: string;
-    name: string;
-
-    nodes: DiagramNode[];
-    edges: DiagramEdge[];
-
-    settings: PageSettings;
-}
-```
-
-Node:
-
-```typescript
-interface DiagramNode {
-    id: string;
-
-    library: string;
-    type: string;
-
-    position: {
-        x: number;
-        y: number;
-    };
-
-    size: {
-        width: number;
-        height: number;
-    };
-
-    rotation: number;
-
-    style: NodeStyle;
-
-    data: Record<string, unknown>;
-}
-```
-
-Edge:
-
-```typescript
-interface DiagramEdge {
-    id: string;
-
-    type: string;
-
-    source: Endpoint;
-    target: Endpoint;
-
-    waypoints: Point[];
-
-    style: EdgeStyle;
-
-    data: Record<string, unknown>;
-}
-```
-
-This allows the same editor engine to understand:
+Add `Ctrl/Cmd + K` as the scalable command entry point. It should search
+commands by name, show shortcuts, and execute actions such as:
 
 ```text
-Node
-Edge
-Position
-Size
-Selection
-Connection
+Add rectangle       Align center          Duplicate selection
+Fit selection       Toggle grid           Export PNG
+Add page            Auto layout           Open shortcuts
+Switch library      Reset connector       Open diagnostics
 ```
 
-while individual plugins understand:
+Custom shortcuts, conflict detection, and command remapping are P2 follow-up
+work, not prerequisites for the first palette.
+
+### Acceptance
+
+- A user can move, constrain, duplicate, rename, align, and route objects
+  without opening a properties panel for routine operations.
+- Continuous pointer movement produces one meaningful history entry.
+- Fit Selection, Fit Page, 100% zoom, and grid toggle are test-covered.
+- Escape cannot leave a half-created node, edge, or text editor behind.
+
+## v0.12 — Navigation and workspace QoL
+
+**Goal:** make medium and large diagrams and document collections manageable.
+
+### Outline/layers panel
+
+Provide an object outline that combines layer management, object finding, group
+navigation, and z-order control:
 
 ```text
-ERD Entity
-DFD Process
-Flowchart Decision
-UML Actor
+OUTLINE
+
+▼ Page 1
+  ▼ Group: Authentication
+      □ Login
+      □ Validate User
+      ◇ Valid?
+      ─ success
+      ─ failure
 ```
 
----
+Support click-to-select, double-click rename, hide/show, lock/unlock, drag
+reorder, search/filter, and group hierarchy expansion.
 
-# 6. Component-based frontend
+### Canvas navigation
 
-The React hierarchy could look approximately like:
+- Zoom to selected object and zoom presets
+- Minimap
+- Rulers
+- Drag-created guides from rulers
+- Custom guide deletion and locking
+- Background color quick control
+- Fullscreen editing and focus mode that hides panels
+- Presentation/preview mode
+- Persist panel state and preferred zoom behavior
+- Named canvas bookmarks/views as P2
+
+### Workspace and templates
+
+- Actual local document thumbnails
+- Favorite/pin documents
+- Sort by name, date, and diagram type
+- Filter by diagram type
+- Duplicate and rename from the home screen
+- Trash/recycle bin with restore
+- Drag `.wdiag` onto the home screen
+- Template browser
+- Save a page/document as a local template
+- Local user templates, categories, and favorites
+- Recent templates
+
+### Acceptance
+
+- A user can find and focus any labeled object without visually locating it on
+  the canvas.
+- A document with hundreds of objects remains navigable through the outline,
+  search, minimap, and zoom-to-object workflow.
+- Home-screen thumbnails, sorting, favorites, and trash survive reloads.
+
+## v0.13 — Styling system
+
+**Goal:** produce professional-looking diagrams without repetitive manual
+formatting.
+
+### Visual controls
+
+- Full color picker
+- Recent colors
+- Document-level palette
+- Stroke width
+- Opacity
+- Corner radius
+- Text size and font weight
+- Horizontal and vertical text alignment
+- Text wrapping
+- Automatic node height for wrapped text
+- Independent light/dark canvas themes
+
+### Reusable formatting
+
+- Format Painter
+- Copy style and paste style
+- Reset formatting
+- Reusable style presets
+- Apply style to all objects of the same type
+- Multi-selection style editing through the common-property inspector
+
+### Acceptance
+
+- Shared style properties can be edited for a selection without overwriting
+  unrelated values.
+- Wrapped text does not clip and node height updates predictably.
+- Copy/paste style and reset formatting are undoable and persist locally.
+
+## v0.14 — Connector and container upgrade
+
+**Goal:** reduce the number of steps needed to construct and maintain diagrams.
+
+### Connectors
+
+- Drag a connector into empty space to quick-create a shape.
+- Show a hover target preview while connecting.
+- Stronger endpoint snap indication.
+- Reverse connector direction.
+- Swap start/end markers.
+- Reset routing and reset all waypoints.
+- Double-click a segment to add a waypoint.
+- Double-click a waypoint to remove it.
+- Auto/manual routing toggle.
+- Parallel connector separation.
+- Self-loop connectors.
+- Connector hover highlights both endpoints.
+- Draggable connector labels.
+- Multiple labels as a P2 capability.
+- Label background/halo and position presets.
+- Line-jump style selector.
+- Route locking as a P2 capability.
+- Trace connected objects as a P2 capability.
+
+Quick-create should offer the shape library and search directly at the empty
+endpoint:
 
 ```text
-<App>
-│
-├── <HomeScreen />
-│
-└── <Editor>
-    │
-    ├── <TopBar />
-    │
-    ├── <ToolBar />
-    │
-    ├── <ShapeLibrary />
-    │
-    ├── <CanvasViewport>
-    │   │
-    │   ├── <SvgScene>
-    │   │   ├── <GridLayer />
-    │   │   ├── <EdgeLayer />
-    │   │   ├── <NodeLayer />
-    │   │   └── <OverlayLayer />
-    │   │
-    │   ├── <SelectionOverlay />
-    │   └── <TextEditorOverlay />
-    │
-    ├── <PropertiesPanel />
-    ├── <PageTabs />
-    ├── <StatusBar />
-    ├── <ContextMenu />
-    └── <DialogHost />
+Selected node ── drag connector ──► empty canvas
+                                  ├ Process
+                                  ├ Decision
+                                  ├ Rectangle
+                                  └ Search…
 ```
 
-Components should **not** contain the core diagram logic.
+The selected shape is created and connected in one undoable operation.
 
-For example:
+### Generic containers
+
+Add reusable containers, frames, tables, images, icons, notes, sticky notes,
+callouts, sections, headers, swimlane-like containers, hyperlinks, page links,
+and object metadata. Containers should optionally own their children so moving
+or resizing a container can move or auto-resize its contents.
+
+This generic behavior should also support UML boundaries, schemas, systems,
+swimlanes, and future architecture diagrams.
+
+### Acceptance
+
+- A connector can create and connect a new shape without returning to the
+  library.
+- Route reset, waypoint add/remove, marker swap, and label movement are
+  undoable.
+- Containers have explicit ownership semantics and cannot accidentally absorb
+  unrelated objects.
+
+## v0.15 — Local-first reliability
+
+**Goal:** make a no-cloud editor safe enough for serious work.
+
+### Local history and snapshots
+
+- Bounded local version snapshots
+- Manual checkpoints with user names
+- Restore a previous snapshot
+- Configurable snapshot limit
+- Combine continuous edits into one history entry
+
+Suggested defaults:
 
 ```text
-<EntityNode />
+Hourly snapshots: last 24 hours
+Daily snapshots:  last 7 days
+Manual checkpoints: user controlled
 ```
 
-should render an ERD entity.
+### Workspace backup
 
-It should not independently manage:
+Add a first-class home-screen backup/restore flow:
 
 ```text
-saving
-undo
-snapping
-routing
-document history
-file export
+Backup & Restore
+
+Export workspace backup
+Import workspace backup
+
+Documents: 27
+Storage: 18.4 MB
+Last backup: 8 days ago
 ```
 
-Those belong elsewhere.
+The initial backup can be a client-generated archive containing documents,
+templates, preferences, and thumbnails. Export all diagrams and restore the
+full workspace must be P0 for this release.
 
----
+### Browser storage and files
 
-# 7. Editor core
+- Storage usage details
+- Persistent-storage status and request flow
+- Browser quota warning before pressure causes failures
+- Backup reminder
+- File System Access API integration where supported:
+  - Open from disk
+  - Save
+  - Save As
+  - Remember a previously opened file handle
+- Harden `pagehide` and visibility lifecycle persistence.
 
-The core should be framework-independent where practical.
+### `.wdiag` evolution
+
+Keep old JSON `.wdiag` files importable. When assets are introduced, migrate
+the format toward a container such as:
 
 ```text
-Editor Core
-│
-├── DocumentManager
-├── SelectionManager
-├── CommandManager
-├── ToolManager
-├── ViewportManager
-├── ClipboardManager
-├── PluginManager
-├── EventBus
-├── ShortcutManager
-└── PersistenceManager
-```
-
-React observes this state and renders it.
-
-This prevents your actual application logic from becoming tightly coupled to React.
-
----
-
-# 8. Event-driven architecture
-
-The event system should connect independent subsystems.
-
-Example:
-
-```text
-Node Created
-     │
-     ▼
-Document Store
-     │
-     ├────────► Renderer
-     │
-     ├────────► Spatial Worker
-     │
-     ├────────► Autosave
-     │
-     └────────► Status UI
-```
-
-Example events:
-
-```text
-document:created
-document:opened
-document:changed
-document:saved
-
-page:created
-page:removed
-page:changed
-
-node:created
-node:moved
-node:resized
-node:updated
-node:removed
-
-edge:created
-edge:updated
-edge:removed
-
-selection:changed
-
-viewport:changed
-
-history:changed
-
-storage:saved
-storage:error
-
-worker:ready
-worker:error
-```
-
-However:
-
-> **Events should not be the source of truth.**
-
-The document/store remains authoritative.
-
-Events simply announce that something happened.
-
----
-
-# 9. Command-based editing
-
-All permanent modifications should go through commands.
-
-```typescript
-interface Command {
-    execute(): void;
-    undo(): void;
-    redo(): void;
-}
-```
-
-Examples:
-
-```text
-CreateNodeCommand
-DeleteNodeCommand
-MoveNodesCommand
-ResizeNodeCommand
-CreateEdgeCommand
-DeleteEdgeCommand
-UpdateNodeCommand
-ChangeStyleCommand
-GroupNodesCommand
-UngroupNodesCommand
-PasteCommand
-DuplicateCommand
-```
-
-Then:
-
-```text
-CommandManager
-│
-├── execute()
-├── undo()
-├── redo()
-│
-├── undoStack
-└── redoStack
-```
-
-This gives you reliable:
-
-```text
-Ctrl + Z
-Ctrl + Shift + Z
-```
-
-from the beginning.
-
----
-
-# 10. Dragging should not generate hundreds of commands
-
-A drag operation should work like this:
-
-```text
-Pointer Down
-     ↓
-Capture initial positions
-     ↓
-Drag Preview
-     ↓
-Drag Preview
-     ↓
-Drag Preview
-     ↓
-Pointer Up
-     ↓
-ONE MoveNodesCommand
-```
-
-Not:
-
-```text
-Move command
-Move command
-Move command
-Move command
-Move command
-...
-```
-
-Otherwise undo history becomes absurdly large.
-
-Live movement is temporary editor state.
-
-The final position becomes document state.
-
----
-
-# 11. Rust/WASM subsystem
-
-Rust should handle computational workloads rather than browser UI.
-
-```text
-Rust Engine
-│
-├── geometry/
-├── spatial/
-├── routing/
-├── snapping/
-├── layout/
-├── graph/
-├── validation/
-└── algorithms/
-```
-
-### Geometry
-
-```text
-rectangle intersections
-segment intersections
-point-in-shape
-bounding boxes
-transform calculations
-distances
-Bezier calculations
-```
-
-### Spatial
-
-```text
-R-tree
-spatial grid
-viewport queries
-nearby-node searches
-candidate selection
-```
-
-### Routing
-
-```text
-straight connectors
-orthogonal connectors
-waypoint calculation
-obstacle avoidance
-A* routing
-path simplification
-```
-
-### Layout
-
-Eventually:
-
-```text
-tree
-hierarchical
-DAG
-force layout
-ERD layout
-crossing minimization
-```
-
-### Validation
-
-```text
-ERD rules
-DFD rules
-UML rules
-connection restrictions
-diagram consistency
-```
-
----
-
-# 12. WASM should run inside a Web Worker
-
-Recommended execution model:
-
-```text
-MAIN THREAD                    WORKER
-
-React
-SVG
-Input
-Selection
-   │
-   │ request
-   ├────────────────────────► Rust/WASM
-   │                          │
-   │                          ├ geometry
-   │                          ├ R-tree
-   │                          ├ routing
-   │                          └ snapping
-   │
-   ◄───────────────────────── result
-   │
-SVG update
-```
-
-`wasm-bindgen` documents running WASM in Web Workers, making this architecture technically straightforward. ([Wasm Bindgen][3])
-
-This prevents large layout or geometry calculations from freezing the UI.
-
----
-
-# 13. Minimize JS ↔ WASM communication
-
-Avoid:
-
-```text
-JS → WASM
-JS → WASM
-JS → WASM
-JS → WASM
-...
-```
-
-for every individual object.
-
-Prefer batching:
-
-```text
-JS
- │
- │ 500 object updates
- ▼
-Worker
- │
- ▼
-WASM
- │
- │ process all
- ▼
-Worker
- │
- ▼
-JS
-```
-
-For very hot paths, use:
-
-```text
-TypedArray
-Float32Array
-Uint32Array
-```
-
-rather than repeatedly serializing deep JavaScript objects.
-
----
-
-# 14. Spatial indexing
-
-I would implement this architecture:
-
-```text
-Spatial Engine
-│
-├── R-tree
-│   ├── viewport culling
-│   ├── selection queries
-│   ├── node hit candidates
-│   └── routing obstacles
-│
-└── Spatial Grid
-    ├── snapping
-    ├── alignment guides
-    └── proximity search
-```
-
-Example:
-
-```text
-50,000 document objects
-        │
-        ▼
-     R-tree
-        │
-        ▼
-Viewport Query
-        │
-        ▼
-417 nearby objects
-        │
-        ▼
-SVG Renderer
-```
-
-This is much better than making React consider all 50,000 objects.
-
----
-
-# 15. Incremental indexes
-
-Never rebuild everything because one node moved.
-
-Instead:
-
-```text
-Node #829 moved
-     ↓
-remove(oldBounds)
-     ↓
-insert(newBounds)
-```
-
-For batch operations:
-
-```text
-Move 12 selected nodes
-        ↓
-Batch spatial update
-```
-
-The WASM worker can maintain its own spatial representation synchronized with the authoritative TypeScript document.
-
----
-
-# 16. SVG rendering architecture
-
-The scene should have layers:
-
-```xml
-<svg>
-    <defs />
-
-    <g id="grid" />
-
-    <g id="edges" />
-
-    <g id="nodes" />
-
-    <g id="labels" />
-
-    <g id="guides" />
-
-    <g id="selection" />
-</svg>
-```
-
-Conceptually:
-
-```text
-SVG Scene
-│
-├── Background
-├── Grid
-├── Edges
-├── Nodes
-├── Labels
-├── Selection
-├── Handles
-└── Guides
-```
-
-This also makes z-order easier to reason about.
-
----
-
-# 17. SVG virtualization
-
-Do not render every object merely because it exists.
-
-```text
-Document
-50,000 nodes
-
-        ↓
-
-Spatial query
-
-        ↓
-
-Viewport + overscan
-550 nodes
-
-        ↓
-
-React/SVG
-
-        ↓
-
-550 DOM representations
-```
-
-Use some overscan around the viewport:
-
-```text
-┌─────────────────────────────┐
-│       Render Region         │
-│                             │
-│   ┌─────────────────────┐   │
-│   │                     │   │
-│   │      Viewport       │   │
-│   │                     │   │
-│   └─────────────────────┘   │
-│                             │
-└─────────────────────────────┘
-```
-
-This prevents visible popping while panning.
-
----
-
-# 18. Text editing
-
-I would not edit complex text directly inside SVG.
-
-Use:
-
-```text
-SVG Node
-   ↓ double-click
-HTML textarea/content editor overlay
-   ↓ finish
-Update document
-   ↓
-SVG text rerender
-```
-
-HTML text controls provide a much better editing experience.
-
----
-
-# 19. Local-first storage
-
-IndexedDB should be the application's main database.
-
-It is intended for storing significant amounts of structured browser-side data and supports indexes and transactions, making it considerably more appropriate than `localStorage` for diagram documents. ([MDN Web Docs][4])
-
-Conceptually:
-
-```text
-IndexedDB
-│
-├── documents
-│
-├── preferences
-│
-├── recovery
-└── metadata
-```
-
-Document record:
-
-```text
-id
-name
-diagramType
-schemaVersion
-thumbnail
-createdAt
-updatedAt
-document
-```
-
----
-
-# 20. Autosaving
-
-Autosaving should occur automatically.
-
-```text
-User changes document
-       ↓
-Document marked DIRTY
-       ↓
-Debounce
-       ↓
-IndexedDB transaction
-       ↓
-Saved
-```
-
-For example, don't save on every pointer movement.
-
-Save after meaningful commands:
-
-```text
-Move complete
-Resize complete
-Text changed
-Node created
-Edge deleted
-Style changed
-```
-
-Use a short debounce so several commands can be grouped into one disk operation.
-
----
-
-# 21. Crash recovery
-
-Maintain a recovery mechanism separate from normal saves.
-
-```text
-Current Document
-      │
-      ├── normal autosave
-      │
-      └── recovery state
-```
-
-On startup:
-
-```text
-Was editor closed normally?
-       │
-       ├── Yes → open normally
-       │
-       └── No
-            ↓
-       Recovery available
-            ↓
-       Restore / Discard
-```
-
-This becomes important for a serious diagram editor.
-
----
-
-# 22. Request persistent browser storage
-
-Browser storage is physically limited, so “unlimited” should mean **no artificial application quota**, not infinite disk space.
-
-The application can use:
-
-```javascript
-navigator.storage.persist()
-```
-
-to request persistent storage. Browsers decide whether to grant the request, so it should be treated as protection rather than a guarantee. ([MDN Web Docs][5])
-
-You can also inspect:
-
-```javascript
-navigator.storage.estimate()
-```
-
-and display:
-
-```text
-Local storage
-
-Used:       218 MB
-Available:  ~4.1 GB
-```
-
-without imposing an artificial limit yourself.
-
----
-
-# 23. Native project file
-
-Give your application its own format.
-
-For example:
-
-```text
-my-project.wdiag
-```
-
-Initially it could simply contain JSON:
-
-```json
-{
-    "format": "webdiagram",
-    "schemaVersion": 1,
-    "document": {}
-}
-```
-
-Later it could become a ZIP container:
-
-```text
-project.wdiag
-│
+diagram.wdiag
 ├── document.json
 ├── metadata.json
-├── assets/
-│   ├── image1.webp
-│   └── image2.png
-└── thumbnail.webp
+├── thumbnail.webp
+└── assets/
 ```
 
-The version field is essential.
+Use explicit format versions and migrations rather than breaking existing
+documents.
 
-Future releases can run:
+### Acceptance
+
+- A user can export and restore the complete local workspace without a server.
+- Snapshot limits are bounded and visible.
+- Quota/storage failures produce actionable UI instead of silent data loss.
+- Existing JSON `.wdiag` files still open after the container migration work.
+
+## v0.16 — Semantic diagram upgrade
+
+**Goal:** make the built-in diagram modules more useful without leaking their
+rules into the generic editor.
+
+### ERD
+
+- Drag to reorder attributes
+- Keyboard row navigation: Enter next field, Tab next column, Shift+Tab previous
+- Paste multiple fields, for example:
+
+  ```text
+  id uuid PK
+  customer_id uuid FK
+  created_at timestamp
+  ```
+
+- Default value and description fields
+- Composite primary keys
+- Index definitions
+- Explicit FK reference targets
+- Referential actions: CASCADE, RESTRICT, SET NULL, NO ACTION
+- Auto-create a relationship from an FK
+- Auto-create an FK from a relationship
+- Relationship optionality validation
+- Duplicate table
+- Schema/container support
+- SQL import and SQL export
+
+### DFD
+
+- Process numbering (`1.0`, `2.0`, `3.0`)
+- Context, Level 0, Level 1, and Level 2 pages
+- Decompose a process into a new child DFD page
+- Parent-process to child-page linking
+- Balance checking
+- Input/output consistency
+- Data dictionary
+- Data-store numbering
+- External-entity consistency
+- Deeper validation for invalid source/target combinations, unlabeled flows,
+  processes without input/output, and isolated objects
+
+The primary decomposition workflow is:
 
 ```text
-v1
- ↓
-migration
- ↓
-v2
- ↓
-migration
- ↓
-v3
+Right-click Process 2.0
+        ↓
+Create child DFD
+        ↓
+New Page: Process 2.0
+        ↓
+Parent process links to that page
 ```
 
-instead of breaking old diagrams.
+### UML Use Case
 
----
+- Actor, use case, system boundary, package, and note shapes
+- Association, `«include»`, `«extend»`, and generalization relationships
+- Actor and use-case generalization
+- Automatic stereotype labels
+- Containment behavior and system-boundary auto-resize
+- Package containment
+- Validation for include/extend direction, actors inside boundaries, invalid
+  relationships, and disconnected use cases
 
-# 24. Import/export
+Selecting an `«include»` or `«extend»` relationship should configure the dashed
+style and stereotype automatically.
 
-Initial export targets:
+### Flowchart
+
+- Swimlanes, containers, subprocesses, and page-linked subprocesses
+- Decision quick labels: Yes/No, True/False, or custom
+- Automatic branch-label placement
+- Step numbering
+- Off-page links
+- Start/end validation
+- Unreachable-node detection
+- Flow-direction checking
+
+Creating a branch from a decision should offer automatic `Yes` and `No`
+labels.
+
+## v0.17 — Validation and diagnostics
+
+**Goal:** provide one discoverable place to find and repair semantic problems.
+
+Create a centralized diagnostics panel:
 
 ```text
-.wdiag
-JSON
-SVG
-PNG
-PDF
+DIAGNOSTICS
+────────────────────
+
+2 Errors
+5 Warnings
+
+ERD
+! customer_id references missing entity
+! Duplicate attribute "email"
+
+DFD
+! Data flow has no label
+
+UML
+! Actor placed inside system boundary
 ```
 
-Everything remains client-side.
+Required behavior:
 
-SVG export:
+- Click a diagnostic to locate/focus the problem object.
+- Double-click to select it.
+- Quick fixes where safe.
+- Ignore/suppress a selected warning.
+- Filter by severity, plugin, and page.
+- Validate the current page or whole document.
+- Show error/warning counts in the status bar.
+- Provide a beginner-friendly validation toggle.
+
+The plugin contract should support the equivalent of:
+
+```ts
+validate(document): Diagnostic[]
+quickFix(diagnostic): Command | null
+```
+
+## v0.18 — Layout and performance upgrade
+
+**Goal:** deepen the existing Rust/WASM engine and make large local documents
+predictable rather than replacing the current architecture.
+
+### Candidate engine work
+
+- Segment intersection
+- Exact hit testing
+- Snap scoring
+- Route simplification
+- Obstacle graph generation
+- Orthogonal routing
+- Graph ordering and crossing minimization
+- Layout compaction
+- Batched worker mutations
+- Incremental route recalculation
+- Incremental layout
+- Edge viewport virtualization
+- Lazy thumbnail generation
+- Progressive large-file loading
+- Memory-pressure warnings
+- Development performance HUD
+
+### Layout modes
+
+- Hierarchical
+- Tree
+- DAG
+- Compact
+- Grid
+- Radial
+- ERD-specific
+- Flowchart-specific
+
+Benchmark real editor workloads, not only isolated functions:
 
 ```text
-Diagram Model
-     ↓
-SVG Export Renderer
-     ↓
-diagram.svg
+1K objects   10K objects   25K objects   50K objects
 ```
 
-PNG:
-
-```text
-SVG
- ↓
-Canvas
- ↓
-PNG
-```
-
-PDF can be generated client-side as well.
-
-No server is necessary.
-
----
-
-# 25. PWA architecture
-
-The PWA has two storage concepts:
-
-```text
-Service Worker Cache
-       │
-       └── APPLICATION FILES
-           HTML
-           JS
-           CSS
-           WASM
-           fonts
-           icons
-
-IndexedDB
-       │
-       └── USER DATA
-           diagrams
-           settings
-           recovery
-```
-
-Keep those responsibilities separate.
-
----
-
-# 26. Offline behavior
-
-After the application has been loaded/installed:
-
-```text
-Internet
-   ✕
-   │
-   ▼
-Service Worker
-   │
-   ├── HTML ✓
-   ├── JS ✓
-   ├── CSS ✓
-   ├── WASM ✓
-   ├── Fonts ✓
-   └── Icons ✓
-        │
-        ▼
-Application starts
-        │
-        ▼
-IndexedDB
-        │
-        ▼
-Local diagrams
-```
-
-Service workers are specifically designed to support offline experiences and intercept application resource requests. ([MDN Web Docs][2])
-
----
-
-# 27. PWA installation
-
-Include:
-
-```text
-manifest.webmanifest
-icons
-name
-short_name
-theme_color
-background_color
-display: standalone
-start_url
-```
-
-The installed version should behave much more like:
-
-```text
-Web Diagram
-```
-
-than:
-
-```text
-Chrome → random browser tab
-```
-
-Service workers require a secure context in production, so deploy the app through HTTPS. `localhost` is treated specially for development. ([MDN Web Docs][6])
-
-GitHub Pages and Cloudflare Pages already provide HTTPS.
-
----
-
-# 28. PWA update strategy
-
-Do not silently reload while someone is editing.
-
-Instead:
-
-```text
-New version detected
-       ↓
-Download in background
-       ↓
-"Update available"
-       ↓
-Save current document
-       ↓
-User clicks Update
-       ↓
-Reload
-```
-
-That prevents losing local work because a new deployment occurred.
-
----
-
-# 29. Diagram plugin architecture
-
-This is one of the most important pieces.
-
-```typescript
-interface DiagramPlugin {
-    id: string;
-    name: string;
-
-    shapes: ShapeDefinition[];
-    connectors: ConnectorDefinition[];
-    tools: ToolDefinition[];
-    validators: ValidatorDefinition[];
-    propertySchemas: PropertySchema[];
-}
-```
-
-Then:
-
-```text
-PluginManager
-│
-├── General
-├── Flowchart
-├── ERD
-├── DFD
-└── UML Use Case
-```
-
-The core editor remains generic.
-
----
-
-# 30. General shape library
-
-Start with reusable primitives:
-
-```text
-Rectangle
-Rounded Rectangle
-Circle
-Ellipse
-Diamond
-Triangle
-Line
-Arrow
-Text
-Image
-Container
-```
-
-These become the foundation for everything else.
-
----
-
-# 31. ERD module
-
-Support proper ERD semantics rather than just boxes.
-
-```text
-Entity
-│
-├── Table name
-├── Attributes
-│   ├── Name
-│   ├── Data type
-│   ├── PK
-│   ├── FK
-│   ├── Unique
-│   └── Nullable
-│
-└── Relationships
-    ├── 1:1
-    ├── 1:N
-    └── N:M
-```
-
-Connector styles:
-
-```text
-Crow's Foot
-Chen
-Simple Cardinality
-```
-
-Eventually the Rust validator can detect:
-
-```text
-duplicate attributes
-invalid FK relationships
-missing references
-invalid cardinality
-```
-
----
-
-# 32. Flowchart module
-
-Initial nodes:
-
-```text
-Start / End
-Process
-Decision
-Input / Output
-Document
-Database
-Preparation
-Manual Input
-Subprocess
-Connector
-```
-
-Connections should support:
-
-```text
-arrows
-labels
-Yes / No
-orthogonal routing
-```
-
----
-
-# 33. DFD module
-
-Support:
-
-```text
-Process
-External Entity
-Data Store
-Data Flow
-```
-
-Potential validation:
-
-```text
-External Entity → Data Store
-```
-
-could warn:
-
-> Direct External Entity to Data Store flow is invalid. A Process should mediate the data flow.
-
-This is where the app can eventually become better than a generic drawing program.
-
----
-
-# 34. UML use case module
-
-Support:
-
-```text
-Actor
-Use Case
-System Boundary
-Package
-```
-
-Relationships:
-
-```text
-Association
-«include»
-«extend»
-Generalization
-```
-
-Properties should understand the actual relationship type instead of merely drawing arbitrary lines.
-
----
-
-# 35. Future modules
-
-Because of the plugin model, later additions can include:
+Measure load, initial render, pan/zoom, drag, selection, routing, autosave,
+worker latency, and memory consumption.
+
+### Acceptance
+
+- Normal editing and pan/zoom remain responsive on representative documents.
+- Large layout/routing work stays off the main thread.
+- Benchmarks identify regressions before they are shipped.
+- Incremental updates avoid rebuilding complete indexes for one moved object.
+
+## v0.19 — Accessibility and device support
+
+**Goal:** make editing reliable for keyboard, touch, pen, and assistive
+technology users.
+
+- Complete keyboard-only editing
+- Predictable focus order
+- Proper ARIA labels and roles
+- Focus-visible treatment
+- High-contrast mode
+- Reduced-motion mode
+- Color-blind-friendly palettes
+- Adjustable UI scaling
+- Optional larger touch handles
+- Pinch zoom
+- Two-finger pan
+- Long-press context menu
+- Touch-friendly inspector controls
+- Pen support as P2
+
+Test at minimum on Chrome, Edge, Firefox, Safari, Android tablet, and iPad.
+
+## v0.20 — Interoperability
+
+**Goal:** make local documents useful outside AperGlyph while keeping every
+operation client-side.
+
+### Import
+
+- Drag files directly into the editor
+- Safe SVG import
+- Image import
+- JSON debug import/export
+- Mermaid import/export
+- PlantUML import/export where applicable
+- draw.io interoperability as a deliberately bounded P2 project
+
+### Export
+
+- Copy selection as PNG
+- Copy selection as SVG
+- Export padding control
+- Width/height or DPI control
+- Export preview
+- Print
+- True vector PDF
+- Standalone SVG with embedded assets
+- ZIP/all-pages export
+
+## v0.21+ — Additional diagram plugins
+
+Use the existing plugin architecture and prioritize modules in this order:
 
 ```text
 UML Class
+    ↓
 UML Activity
-UML Sequence
+    ↓
 BPMN
-Network diagrams
-Mind maps
-Org charts
-Wireframes
-AWS
-Azure
-GCP
+    ↓
+UML Sequence
+    ↓
+Mind Map
+    ↓
+Org Chart
+    ↓
+Network Diagram
+    ↓
+Wireframe
+    ↓
+AWS / Azure / GCP architecture
 ```
 
-without rewriting the editor core.
-
----
-
-# 36. Main editor tools
-
-The generic tool system should support:
-
-```text
-Select
-Pan
-Text
-Shape
-Connector
-Hand
-Zoom
-Comment placeholder for future use
-```
-
-Tool interface:
-
-```typescript
-interface EditorTool {
-    activate(): void;
-    deactivate(): void;
-
-    pointerDown(): void;
-    pointerMove(): void;
-    pointerUp(): void;
-
-    keyDown(): void;
-}
-```
-
----
-
-# 37. Core editing features
-
-For the first complete version, target:
-
-* Move
-* Resize
-* Rotate where applicable
-* Multi-selection
-* Marquee selection
-* Copy
-* Paste
-* Duplicate
-* Delete
-* Group
-* Ungroup
-* Lock
-* Align
-* Distribute
-* Bring forward
-* Send backward
-* Bring to front
-* Send to back
-* Snap to grid
-* Snap to objects
-* Alignment guides
-* Undo/redo
-* Keyboard shortcuts
-* Context menus
-* Zoom
-* Pan
-* Fit selection
-* Fit page
-
----
-
-# 38. Pages
-
-A document should support:
-
-```text
-Document
-│
-├── Page 1
-├── Page 2
-├── Page 3
-└── ...
-```
-
-Pages can have independent:
-
-```text
-dimensions
-background
-grid
-nodes
-edges
-```
-
-This gives it a more Lucidchart-like project model.
-
----
-
-# 39. Infinite canvas
-
-Internally use world coordinates:
-
-```text
--∞                      +∞
-           0,0
-            +
-```
-
-The viewport maps:
-
-```text
-World Coordinate
-      ↓
-Camera Transform
-      ↓
-Screen Coordinate
-```
-
-Keep:
-
-```typescript
-interface Viewport {
-    x: number;
-    y: number;
-    zoom: number;
-}
-```
-
-separate from document objects.
-
----
-
-# 40. Temporary editor state
-
-Do not save everything.
-
-Separate:
-
-```text
-DOCUMENT STATE
-──────────────
-nodes
-edges
-pages
-styles
-diagram data
-
-
-EDITOR STATE
-────────────
-hover
-selection
-active tool
-drag state
-open menu
-active panel
-pointer position
-temporary guides
-```
-
-This becomes especially important for performance.
-
----
-
-# 41. Performance architecture
-
-The performance pipeline should eventually look like:
-
-```text
-Pointer Event
-      │
-      ▼
-requestAnimationFrame
-      │
-      ▼
-Worker Query
-      │
-      ▼
-Rust/WASM
-├── spatial search
-├── snapping
-└── geometry
-      │
-      ▼
-Result
-      │
-      ▼
-Update temporary state
-      │
-      ▼
-SVG transform
-```
-
-Rather than repeatedly recalculating the complete React tree.
-
----
-
-# 42. Performance targets
-
-Use measurable targets rather than saying “fast.”
-
-A reasonable engineering target would be:
-
-| Scenario                | Target                     |
-| ----------------------- | -------------------------- |
-| Normal editing          | 60 FPS                     |
-| Pan/zoom                | ~60 FPS                    |
-| Dragging                | No obvious frame drops     |
-| Input response          | <50 ms perceived           |
-| Main-thread long tasks  | Avoid >50 ms               |
-| Autosave                | No visible UI interruption |
-| 1,000 objects           | Effortless                 |
-| 10,000 objects          | Smooth with virtualization |
-| 50,000 objects          | Stress-test target         |
-| Large layout operations | Worker only                |
-
-Do not promise that 50,000 complex ERD entities will behave identically on a cheap phone and a desktop PC.
-
-Use benchmarks.
-
----
-
-# 43. Future renderer compatibility
-
-SVG should be the initial renderer.
-
-But define:
-
-```typescript
-interface Renderer {
-    render(scene: Scene): void;
-}
-```
-
-so the architecture could eventually support:
-
-```text
-Diagram Model
-     │
-     ├──── SVG Renderer
-     │
-     └──── Canvas/WebGL Renderer
-```
-
-without changing the actual document format.
-
-`OffscreenCanvas` can also run rendering in workers if you eventually introduce Canvas rendering for extremely large diagrams. ([MDN Web Docs][7])
-
-That is future scope, not something I would implement now.
-
----
-
-# 44. Recommended repository structure
-
-I'd use a monorepo-like structure:
-
-```text
-web-diagram/
-│
-├── apps/
-│   └── web/
-│       ├── src/
-│       ├── public/
-│       └── vite.config.ts
-│
-├── packages/
-│   │
-│   ├── core/
-│   │   ├── document/
-│   │   ├── commands/
-│   │   ├── events/
-│   │   ├── tools/
-│   │   └── selection/
-│   │
-│   ├── ui/
-│   │
-│   ├── renderer-svg/
-│   │
-│   ├── persistence/
-│   │   └── indexeddb/
-│   │
-│   ├── diagrams/
-│   │   ├── general/
-│   │   ├── erd/
-│   │   ├── flowchart/
-│   │   ├── dfd/
-│   │   └── use-case/
-│   │
-│   └── file-format/
-│
-├── crates/
-│   └── diagram-engine/
-│       ├── src/
-│       │   ├── geometry/
-│       │   ├── spatial/
-│       │   ├── routing/
-│       │   ├── snapping/
-│       │   ├── graph/
-│       │   ├── layout/
-│       │   └── validation/
-│       └── Cargo.toml
-│
-├── tests/
-│
-├── package.json
-├── pnpm-workspace.yaml
-└── README.md
-```
-
-This gives you clean boundaries without turning the project into microservice cosplay.
-
----
-
-# 45. Important event flow: creating a node
-
-```text
-User drags Entity onto canvas
-             │
-             ▼
-        Shape Tool
-             │
-             ▼
-     CreateNodeCommand
-             │
-             ▼
-       Document Store
-             │
-       ┌─────┼─────┐
-       │     │     │
-       ▼     ▼     ▼
-    Render  Event WASM Worker
-             │
-             ▼
-          Autosave
-             │
-             ▼
-          IndexedDB
-```
-
----
-
-# 46. Important event flow: moving a node
-
-```text
-Pointer Down
-     │
-     ▼
-Drag Session
-     │
-     ├────────────► WASM Spatial Query
-     │                    │
-     │                    ▼
-     │              Snap candidates
-     │                    │
-     ◄────────────────────┘
-     │
-Preview position
-     │
-Pointer Up
-     │
-     ▼
-MoveNodesCommand
-     │
-     ▼
-Document update
-     │
-     ├────► Undo history
-     ├────► Worker spatial update
-     ├────► SVG
-     └────► Autosave
-```
-
----
-
-# 47. Important event flow: opening a document
-
-```text
-IndexedDB
-    │
-    ▼
-Load document
-    │
-    ▼
-Check schema version
-    │
-    ▼
-Run migrations
-    │
-    ▼
-Document Store
-    │
-    ├────► React
-    │
-    └────► WASM Worker
-                │
-                ▼
-          Build spatial index
-                │
-                ▼
-              Ready
-```
-
----
-
-# 48. Testing strategy
-
-You will need several kinds of tests.
-
-### TypeScript unit tests
-
-Test:
-
-```text
-commands
-document migrations
-selection
-serialization
-plugin loading
-event handling
-```
-
-### Rust unit tests
-
-Test:
-
-```text
-geometry
-spatial index
-routing
-intersection
-snapping
-graph algorithms
-validation
-```
-
-### Integration tests
-
-Test:
-
-```text
-TypeScript ↔ Worker
-Worker ↔ WASM
-Document ↔ IndexedDB
-Document ↔ Export
-Import ↔ Export round trips
-```
-
-### Playwright tests
-
-Test actual browser workflows:
-
-```text
-create document
-create node
-connect nodes
-undo
-redo
-save
-reload
-recover document
-export
-import
-install/offline behavior
-```
-
----
-
-# 49. Performance benchmark suite
-
-Create dedicated synthetic documents:
-
-```text
-benchmark-100.json
-benchmark-1000.json
-benchmark-10000.json
-benchmark-50000.json
-```
-
-Measure:
-
-```text
-document load
-initial render
-pan FPS
-zoom FPS
-drag FPS
-selection query
-R-tree search
-connector routing
-autosave
-memory consumption
-```
-
-This prevents performance from degrading unnoticed as features accumulate.
-
----
-
-# 50. Security
-
-Even a serverless application needs security controls.
-
-Particularly for imported files.
-
-Do not trust:
-
-```text
-SVG
-JSON
-.wdiag
-images
-```
-
-Validate everything.
-
-For imported SVG:
-
-```text
-remove scripts
-remove event handlers
-reject dangerous external references
-sanitize URLs
-```
-
-Your `.wdiag` parser should:
-
-```text
-validate schema
-limit nesting
-validate object counts
-validate strings
-validate numeric ranges
-```
-
-Rust memory safety does not make malicious document contents harmless.
-
----
-
-# 51. Privacy philosophy
-
-Since there is no backend:
-
-```text
-Your diagrams stay on your device.
-```
-
-can genuinely be a major product feature.
-
-By default:
-
-```text
-No account
-No upload
-No analytics required
-No cloud storage
-No remote processing
-```
-
-The application can even work after losing connectivity.
-
-That is a good differentiator.
-
----
-
-# 52. Development phases
-
-I would build it in this order.
-
-### Phase 1: Foundation
-
-Implement:
-
-```text
-React/Vite project
-TypeScript strict mode
-basic application shell
-routing
-theme system
-workspace packages
-Rust crate
-WASM build pipeline
-worker initialization
-```
-
-Acceptance:
-
-```text
-Browser starts app
-Worker starts
-WASM responds to test request
-```
-
----
-
-### Phase 2: Document engine
-
-Implement:
-
-```text
-document schema
-pages
-nodes
-edges
-IDs
-schema version
-command manager
-undo/redo
-event bus
-```
-
-No fancy UI yet.
-
-Acceptance:
-
-```text
-Create → modify → undo → redo → serialize
-```
-
-works correctly.
-
----
-
-### Phase 3: Canvas engine
-
-Implement:
-
-```text
-SVG viewport
-pan
-zoom
-grid
-coordinate transformations
-selection
-multi-selection
-drag
-resize
-```
-
-Acceptance:
-
-Smooth manipulation of basic rectangles.
-
----
-
-### Phase 4: Local-first persistence
-
-Implement:
-
-```text
-IndexedDB
-autosave
-open recent documents
-delete document
-duplicate document
-crash recovery
-storage estimation
-persistent-storage request
-```
-
-Acceptance:
-
-Reload browser and continue exactly where you stopped.
-
----
-
-### Phase 5: Spatial WASM engine
-
-Implement:
-
-```text
-bounding boxes
-R-tree
-viewport querying
-proximity querying
-worker synchronization
-```
-
-Then integrate SVG virtualization.
-
-Acceptance:
-
-Large diagrams don't require rendering the entire document.
-
----
-
-### Phase 6: Snapping and alignment
-
-Implement:
-
-```text
-grid snapping
-object snapping
-center guides
-edge guides
-equal spacing guides
-```
-
-WASM handles candidate discovery.
-
----
-
-### Phase 7: Connector engine
-
-Implement:
-
-```text
-ports
-straight edges
-orthogonal edges
-arrowheads
-edge labels
-waypoints
-reconnection
-routing
-```
-
-Acceptance:
-
-Connectors behave like professional diagramming software rather than decorative SVG lines.
-
----
-
-### Phase 8: General + Flowchart
-
-Implement reusable shape system and the first complete diagram library.
-
-This proves the plugin architecture before implementing more specialized standards.
-
----
-
-### Phase 9: ERD
-
-Implement:
-
-```text
-entities
-attributes
-types
-PK/FK
-Crow's Foot relationships
-cardinality
-ERD properties
-validation
-```
-
-This should be treated as a semantic editor, not merely drawing boxes.
-
----
-
-### Phase 10: DFD
-
-Implement DFD symbols, connections, and validation rules.
-
----
-
-### Phase 11: UML use case
-
-Implement:
-
-```text
-Actor
-Use Case
-System Boundary
-Association
-Include
-Extend
-Generalization
-```
-
----
-
-### Phase 12: File system
-
-Implement:
-
-```text
-.wdiag
-JSON
-import
-export
-SVG
-PNG
-PDF
-```
-
-Add schema migrations.
-
----
-
-### Phase 13: PWA
-
-Implement:
-
-```text
-manifest
-service worker
-asset precaching
-WASM caching
-install support
-offline launch
-update notification
-icons
-standalone mode
-```
-
-After installation, the editor should remain usable without connectivity.
-
----
-
-### Phase 14: Professional editing tools
-
-Implement:
-
-```text
-grouping
-layers/z-order
-align
-distribute
-duplicate
-clipboard
-keyboard shortcuts
-context menus
-property editing
-style presets
-page management
-```
-
-This is where it starts feeling much closer to Lucidchart.
-
----
-
-### Phase 15: Performance hardening
-
-Test:
-
-```text
-1K
-10K
-50K
-```
-
-objects.
-
-Profile:
-
-```text
-DOM count
-React renders
-worker latency
-WASM calls
-memory
-IndexedDB serialization
-routing
-spatial queries
-```
-
-Optimize based on measured bottlenecks.
-
----
-
-### Phase 16: Release hardening
-
-Finish:
-
-```text
-accessibility
-error recovery
-file corruption handling
-browser testing
-mobile/tablet behavior
-documentation
-licensing audit
-keyboard help
-onboarding
-templates
-```
-
----
-
-# 53. First public release scope
-
-I would define **Version 1.0** as:
-
-```text
-Web Diagram 1.0
-
-✓ Fully local
-✓ PWA
-✓ Offline
-✓ No account
-
-✓ General diagrams
-✓ Flowcharts
-✓ ERDs
-✓ DFDs
-✓ UML Use Case
-
-✓ Multiple pages
-✓ Unlimited local diagrams
-✓ Local autosave
-✓ Undo/redo
-
-✓ SVG renderer
-✓ WASM spatial engine
-✓ WASM routing engine
-
-✓ R-tree viewport virtualization
-✓ Grid
-✓ Snapping
-✓ Alignment guides
-
-✓ Grouping
-✓ Layers
-✓ Styles
-✓ Connector labels
-
-✓ .wdiag import/export
-✓ SVG
-✓ PNG
-✓ PDF
-
-✗ Accounts
-✗ Cloud save
-✗ Collaboration
-✗ Comments
-✗ Shared links
-✗ Server
-```
-
-That's already a substantial application.
-
----
-
-# 54. Things I would explicitly avoid
-
-Do **not**:
-
-```text
-Use SVG as the document database.
-
-Put business logic inside React components.
-
-Make separate editor engines for ERD/DFD/Flowchart/UML.
-
-Send every mouse movement to undo history.
-
-Save every pointer movement to IndexedDB.
-
-Render the entire diagram regardless of viewport.
-
-Manipulate the DOM from Rust/WASM.
-
-Cross the JS/WASM boundary thousands of times per frame.
-
-Run heavy layout calculations on the main thread.
-
-Make the service worker responsible for document persistence.
-
-Store diagrams in localStorage.
-
-Require internet access for fonts or icons.
-
-Depend on external CDNs for runtime functionality.
-```
-
-Those decisions would work against the architecture you're trying to build.
-
----
-
-# 55. Final architecture
-
-The resulting system is essentially:
-
-```text
-                         WEB DIAGRAM
-                              │
-                React + TypeScript PWA
-                              │
-             ┌────────────────┼────────────────┐
-             │                │                │
-          Components       Editor Core     Local Storage
-             │                │                │
-          SVG UI          Commands          IndexedDB
-             │            Events               │
-             │            Plugins          Autosave
-             │                │             Recovery
-             └────────┬───────┘
-                      │
-                 Web Worker
-                      │
-                  Rust/WASM
-                      │
-         ┌────────────┼────────────┐
-         │            │            │
-      Geometry      Spatial      Routing
-                      │
-                   R-tree
-                      │
-                   Snapping
-                      │
-                    Layout
-
-              PWA Service Worker
-                      │
-                Offline Assets
-                      │
-         HTML / JS / CSS / WASM
-```
-
-The key design decision I'd lock in now, Sensei, is:
-
-> **TypeScript owns the document and application state. Rust/WASM owns computation. SVG owns presentation. IndexedDB owns persistence. The service worker owns offline delivery.**
-
-Keeping those five responsibilities separate will give you a much cleaner system than trying to turn WASM into the whole application.
-
-It also preserves your original goal: the finished editor can be deployed as **nothing more than static files over HTTPS**, while still behaving much more like an installed desktop diagramming application than a conventional website.
-
-[1]: https://wasm-bindgen.github.io/wasm-bindgen/?utm_source=chatgpt.com "Introduction - The `wasm-bindgen` Guide"
-[2]: https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API?utm_source=chatgpt.com "Service Worker API - Web APIs | MDN"
-[3]: https://wasm-bindgen.github.io/wasm-bindgen/examples/wasm-in-web-worker.html?utm_source=chatgpt.com "web-sys: Wasm in Web Worker - The `wasm-bindgen` Guide"
-[4]: https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API?utm_source=chatgpt.com "IndexedDB API - Web APIs | MDN"
-[5]: https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/persist?utm_source=chatgpt.com "StorageManager: persist() method - Web APIs | MDN"
-[6]: https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers?utm_source=chatgpt.com "Using Service Workers - Web APIs | MDN"
-[7]: https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas?utm_source=chatgpt.com "OffscreenCanvas - Web APIs | MDN"
+UML Class is the first priority because its attributes, relationships, and
+containers overlap with the existing ERD machinery.
+
+The following remain local-only extension ideas unless a future project
+decision explicitly changes the product boundary:
+
+- Custom local plugin loading
+- Third-party stencil packs
+- Local theme/stencil sharing
+- Advanced vector-path editor
+- Freehand drawing
+- Presentation transitions and animation
+
+## v1.0 — Stable release candidate
+
+Version 1.0 is about reliability and a coherent supported surface, not another
+large feature dump.
+
+### Release gates
+
+- No obvious dead controls or unfinished primary workflows
+- No known data-loss bugs
+- Reliable autosave, recovery, snapshot, and workspace restore behavior
+- Migration tests and corrupted-file handling
+- Stable `.wdiag` specification and migration documentation
+- Complete keyboard workflow and accessibility pass
+- Tablet usability pass
+- Browser compatibility pass
+- Stable General, Flowchart, ERD, DFD, and UML Use Case modules
+- Reliable SVG, PNG, PDF, print, and `.wdiag` workflows
+- Verified performance targets
+- Complete user/developer documentation and licensing information
+
+### Performance targets
+
+| Scenario | Target |
+| --- | --- |
+| Normal editing | 60 FPS where practical |
+| Pan/zoom | Approximately 60 FPS |
+| Dragging | No obvious frame drops |
+| Input response | Less than 50 ms perceived |
+| Main-thread long tasks | Avoid work over 50 ms |
+| 1,000 objects | Effortless normal editing |
+| 10,000 objects | Smooth with virtualization/incremental work |
+| 50,000 objects | Stress-test target with documented limits |
+| Large layout operations | Worker-only |
+
+## Detailed deferred QoL backlog
+
+The release sections contain the committed sequence. The following backlog is
+the source pool for future P1/P2 planning and should not be mistaken for work
+already scheduled in a release.
+
+### Editing and selection
+
+- Repeat transforms, same-style selection, invert selection, connected-object
+  expansion, group isolation, nested-group breadcrumbs
+- Whole-selection lock/unlock, flip, reset rotation, coordinate/size rounding
+- Shape replacement preserving connections
+- Match width/height/size and smart repeated duplication
+- Smaller handles, movement/rotation/resize tooltips, selection count
+- Common-property multi-selection editor
+
+### Canvas and navigation
+
+- Zoom presets, minimap, rulers, ruler guides, named views/bookmarks
+- Guide deletion/locking, dot/line/no-grid modes, quick background control
+- Fullscreen, focus, presentation/preview modes
+- Persist panel and preferred zoom state
+
+### Shapes and libraries
+
+- Favorites and recently used shapes
+- Fuzzy search, aliases, tags, and keyboard-only insertion
+- Persist collapsed sections
+- Show/hide libraries and pin categories
+- Hover previews
+- Default styles per shape type
+- User-created presets
+- Local stencil libraries
+- Safe SVG shape import
+- Replace selected shape from the library
+
+### Connectors
+
+- Lock manual routes, trace connected objects, multiple labels
+- Label halos/backgrounds and position presets
+- Line-jump styles
+- Parallel-edge separation, self-loops, endpoint hover highlighting
+- Reverse direction and marker swapping
+- Auto/manual routing mode
+
+### Styling
+
+- Full picker, recent colors, document palette
+- Stroke width, opacity, radius, text size/weight/alignment/wrapping
+- Format painter, style copy/paste, reset, reusable presets
+- Apply styles to same object type
+- UI theme independent from canvas theme
+
+### Pages, workspace, and templates
+
+- Page thumbnails and drag-to-reorder tabs
+- Orientation presets: A4, Letter, 16:9, custom
+- Fixed-page/infinite-canvas modes
+- Page search and off-page links
+- Duplicate page shortcut
+- Workspace folders/categories
+- Bulk `.wdiag` import
+- Storage usage and persistent-storage status
+- Backup reminders
+- Template favorites, recent templates, and categories
+
+### History, import, export, and validation
+
+- History panel with chronological command labels
+- Named checkpoints and checkpoint restore
+- Copy-selection image/vector workflows
+- Export preview, DPI/size controls, padding, print, vector PDF
+- Safe SVG/image import, JSON debug tools, interop formats
+- Dedicated diagnostics, click-to-focus, counts, quick fixes, suppression,
+  page/document validation
+
+### Accessibility, UI, and help
+
+- High contrast, reduced motion, color-blind palettes, UI scaling
+- Larger touch controls and pen support
+- Light theme and system theme
+- Persistent hint dismissal
+- Toasts for save/export/import failures
+- Undo toast after deletion
+- Searchable settings and shortcut reference
+- Restore UI defaults
+- First-run onboarding and interactive tutorial
+- Contextual help and “What’s new” after upgrades
+
+## Post-1.0 optional cloud layer
+
+Cloud functionality is deliberately outside the path to 1.0 and must remain
+optional. If it is ever introduced, it may provide accounts, synchronization,
+shared links, comments, multiplayer, and server-side version sync, but the
+local/offline editor and local file formats must continue to work independently.
