@@ -110,7 +110,9 @@ test.describe('diagram editing workflow', () => {
     await page.locator('.outline-node-row').first().getByTitle('Show object').click();
     await expect(page.locator('[data-node-id]')).toHaveCount(2);
     await page.locator('.outline-node-row').first().click();
-    await page.getByTitle('Fit selection').click();
+    await page.keyboard.press('Control+k');
+    await page.getByLabel('Search commands').fill('Fit selection');
+    await page.keyboard.press('Enter');
     await expect(page.locator('.canvas-minimap')).toBeVisible();
     await page.locator('.canvas-ruler-top').click({ position: { x: 220, y: 10 } });
     await expect(page.locator('.canvas-guide')).toHaveCount(1);
