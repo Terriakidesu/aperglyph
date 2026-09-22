@@ -1,10 +1,11 @@
-import { ChevronDown, Circle, Database, Diamond, MousePointer2, RectangleHorizontal, Search, Square, Star, Table2, Type, Workflow } from 'lucide-react';
+import { ChevronDown, Circle, Database, Diamond, RectangleHorizontal, Search, Square, Star, Table2, Type, Workflow } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { pluginManager } from '../plugins';
 import type { ShapeDefinition, ShapeIconId } from '../plugins';
 import { createNode } from '../core/document';
 import { SHAPE_DRAG_MIME, serializeShapeDrop } from '../core/shapeTransfer';
 import { useEditorStore } from '../store/editorStore';
+import { LeftDockHeader, type LeftPanelId } from './DockHeader';
 
 const FAVORITES_KEY = 'aperglyph.shape-library.favorites';
 const RECENT_KEY = 'aperglyph.shape-library.recent';
@@ -24,7 +25,7 @@ const iconMap: Record<ShapeIconId, typeof Square> = {
 type LibraryFilter = 'all' | 'favorites' | 'recent';
 type LibraryScope = 'all' | string;
 
-export function ShapeLibrary() {
+export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse }: { activePanel?: LeftPanelId; onPanelChange?: (panel: LeftPanelId) => void; onCollapse?: () => void }) {
   const document = useEditorStore((state) => state.document);
   const viewport = useEditorStore((state) => state.viewport);
   const create = useEditorStore((state) => state.createNode);
@@ -73,7 +74,7 @@ export function ShapeLibrary() {
   };
 
   return <aside className="shape-library">
-    <div className="panel-title-row shape-library-heading"><div><span className="panel-kicker">Library</span><h2>Shapes</h2></div>{countVisible && <span className="library-count">{visibleCount}</span>}</div>
+    <LeftDockHeader activePanel={activePanel} onChange={onPanelChange ?? (() => undefined)} onCollapse={onCollapse ?? (() => undefined)} badge={countVisible ? <span className="library-count">{visibleCount}</span> : undefined} />
     <div className="library-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search shapes" aria-label="Search shapes" /></div>
     <div className="library-filters" role="tablist" aria-label="Shape library filters">
       {(['all', 'favorites', 'recent'] as LibraryFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} className={filter === value ? 'active' : ''} onClick={() => { setFilter(value); writeLibraryFilter(value); }}>{value === 'all' ? 'All' : value === 'favorites' ? 'Favorites' : 'Recent'}</button>)}
@@ -92,7 +93,6 @@ export function ShapeLibrary() {
       })}
       {plugins.every((plugin) => plugin.shapes.every((shape) => !matches(shape, plugin.id))) && <div className="library-empty"><Search size={15} /><span>No shapes match this filter.</span></div>}
     </div>
-    <div className="library-footnote"><MousePointer2 size={14} /><span>Click to add at the viewport center<br />or drag a shape onto the canvas.</span></div>
   </aside>;
 }
 

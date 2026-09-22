@@ -10,6 +10,7 @@ export interface EditorEventMap {
   'interaction:cancel': undefined;
   'ui:shortcuts': undefined;
   'ui:diagnostics': undefined;
+  'ui:toggle-properties': undefined;
   'diagnostics:changed': { enabled: boolean };
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };

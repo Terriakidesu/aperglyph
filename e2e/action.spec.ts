@@ -132,7 +132,8 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.canvas-minimap')).toBeVisible();
     await page.locator('.canvas-ruler-top').click({ position: { x: 220, y: 10 } });
     await expect(page.locator('.canvas-guide')).toHaveCount(1);
-    await page.getByLabel('Focus mode').click();
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByRole('button', { name: 'Focus mode', exact: true }).click();
     await expect(page.locator('.outline-panel')).toBeHidden();
     await page.keyboard.press('Escape');
     await expect(page.locator('.outline-panel')).toBeVisible();
@@ -381,8 +382,8 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'Data flow diagram See information in motion 3 elements · 2 flows' }).click();
     await page.locator('.canvas-node').filter({ hasText: 'Manage order' }).click();
     await page.getByLabel('Label').fill('');
-    await expect(page.getByLabel('Open diagnostics')).toContainText('Diagnostics');
-    await page.getByLabel('Open diagnostics').click();
+    await expect(page.locator('.diagnostics-button')).toContainText('Diagnostics');
+    await page.locator('.diagnostics-button').click();
     await expect(page.locator('.diagnostics-panel')).toBeVisible();
     await expect(page.locator('.diagnostic-row')).toContainText('missing a name');
     await page.locator('.diagnostic-main').first().click();
@@ -395,7 +396,7 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'Create child DFD page' }).click();
     await expect(page.locator('.page-tab')).toHaveCount(2);
     await expect(page.locator('.page-tab').last()).toContainText('Manage order');
-    await page.getByLabel('Open diagnostics').click();
+    await page.locator('.diagnostics-button').click();
     await expect(page.locator('.diagnostics-panel')).toBeVisible();
     await expect(page.locator('.diagnostic-row')).toHaveCount(2);
     await page.getByTitle('Undo (⌘Z)').click();
@@ -467,7 +468,7 @@ test.describe('diagram editing workflow', () => {
 
   test('customizes the view, library scope, and inspector layout', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
-    await expect(page.getByText('Nothing selected')).toBeVisible();
+    await expect(page.getByText('Page settings · nothing selected')).toBeVisible();
     await expect(page.getByLabel('Grid size')).toBeVisible();
 
     await page.getByRole('button', { name: 'View', exact: true }).click();
@@ -478,6 +479,19 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'View', exact: true }).click();
     await page.getByLabel('Shape library category').selectOption('erd');
     await expect(page.getByTitle('Drag Entity onto the canvas')).toBeVisible();
+
+    await page.getByTitle('Collapse left panel').click();
+    await expect(page.locator('.shape-library')).toBeHidden();
+    await page.getByLabel('Open workspace panel').click();
+    await expect(page.locator('.shape-library')).toBeVisible();
+    await page.getByTitle('Collapse properties panel').click();
+    await expect(page.locator('.properties-panel')).toBeHidden();
+    await page.getByLabel('Open properties panel').click();
+    await expect(page.locator('.properties-panel')).toBeVisible();
+    await page.getByLabel('More editor actions').click();
+    await page.getByRole('button', { name: 'Inspect document', exact: true }).click();
+    await expect(page.locator('.inspect-drawer')).toBeVisible();
+    await page.getByLabel('Close inspector').click();
 
     const separator = page.getByRole('separator', { name: 'Resize right panel' });
     const separatorBox = await separator.boundingBox();
@@ -493,7 +507,8 @@ test.describe('diagram editing workflow', () => {
   test('creates and lists a named local snapshot', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
-    await page.getByRole('button', { name: 'History' }).click();
+    await page.getByRole('button', { name: 'More editor actions' }).click();
+    await page.getByRole('button', { name: 'History', exact: true }).click();
     await expect(page.getByText('Local snapshots')).toBeVisible();
     page.once('dialog', (dialog) => void dialog.accept('Milestone'));
     await page.getByRole('button', { name: '+ Create named checkpoint' }).click();

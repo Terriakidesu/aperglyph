@@ -1,4 +1,4 @@
-import { ListTree, Maximize2, Minimize2, MonitorPlay, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Shapes } from 'lucide-react';
+import { PanelLeftOpen, PanelRightOpen } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
@@ -50,8 +50,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const page = getActivePage(document, activePageId);
   const [leftOpen, setLeftOpen] = useState(() => readStoredBoolean('aperglyph.editor.left-open', true));
   const [rightOpen, setRightOpen] = useState(() => readStoredBoolean('aperglyph.editor.right-open', true));
-  const [leftWidth, setLeftWidth] = useState(() => readStoredNumber('aperglyph.editor.left-width', 224));
-  const [rightWidth, setRightWidth] = useState(() => readStoredNumber('aperglyph.editor.right-width', 232));
+  const [leftWidth, setLeftWidth] = useState(() => readStoredNumber('aperglyph.editor.left-width', 228, 'left'));
+  const [rightWidth, setRightWidth] = useState(() => readStoredNumber('aperglyph.editor.right-width', 288, 'right'));
   const [leftPanel, setLeftPanel] = useState<'shapes' | 'outline'>(() => readStoredPanel());
   const [viewPreferences, setViewPreferences] = useState<ViewPreferences>(() => readViewPreferences());
   const [focusMode, setFocusMode] = useState(false);
@@ -176,8 +176,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       const resize = panelResizeRef.current;
       if (!resize) return;
       const delta = event.clientX - resize.startX;
-      if (resize.side === 'left') setLeftWidth(clampPanelWidth(resize.startWidth + delta));
-      else setRightWidth(clampPanelWidth(resize.startWidth - delta));
+      if (resize.side === 'left') setLeftWidth(clampPanelWidth(resize.startWidth + delta, 'left'));
+      else setRightWidth(clampPanelWidth(resize.startWidth - delta, 'right'));
     };
     const end = () => {
       if (!panelResizeRef.current) return;
@@ -277,23 +277,24 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));
     const unsubscribeDiagnostics = editorEvents.on('ui:diagnostics', () => setShowDiagnostics(true));
+    const unsubscribeProperties = editorEvents.on('ui:toggle-properties', () => setRightOpen((open) => !open));
     const unsubscribeSettings = editorEvents.on('diagnostics:changed', ({ enabled }) => setValidationEnabled(enabled));
-    return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribeSettings(); };
+    return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribeProperties(); unsubscribeSettings(); };
   }, []);
 
   const workspaceStyle = { '--left-panel-width': `${leftWidth}px`, '--right-panel-width': `${rightWidth}px` } as CSSProperties;
   return <main className={`editor-shell ${focusMode ? 'focus-mode' : ''} ${presentationMode ? 'presentation-mode' : ''}`}>
-     <EditorTopBar onExit={onExit} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} fullscreen={fullscreen} focusMode={focusMode} />
+     <EditorTopBar onExit={onExit} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} onTogglePresentation={() => setPresentationMode((value) => !value)} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />
     <div className="editor-workspace" style={workspaceStyle}>
       <EditorToolbar />
-      {leftOpen && (leftPanel === 'outline' ? <OutlinePanel /> : <ShapeLibrary />)}
+      {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
       {leftOpen && <PanelResizeHandle side="left" onPointerDown={(event) => beginPanelResize('left', event)} />}
        <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} /><PageTabs /><StatusBar /></section>
       {rightOpen && <PanelResizeHandle side="right" onPointerDown={(event) => beginPanelResize('right', event)} />}
        {rightOpen && <PropertiesPanel />}
-      <div className="workspace-toggles workspace-toggles-left"><button onClick={() => setLeftOpen((open) => !open)} title="Toggle left panel" aria-label="Toggle left panel">{leftOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button><button onClick={() => { setLeftPanel('outline'); setLeftOpen(true); }} title="Show outline" aria-label="Show outline"><ListTree size={14} /></button><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} title="Show shapes" aria-label="Show shapes"><Shapes size={14} /></button></div>
-      <div className="workspace-toggles workspace-toggles-right"><button onClick={() => setRightOpen((open) => !open)} title="Toggle properties panel" aria-label="Toggle properties panel">{rightOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}</button><button onClick={() => setFocusMode((value) => !value)} title={focusMode ? 'Exit focus mode' : 'Focus mode'} aria-label={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={14} /></button><button onClick={() => setPresentationMode((value) => !value)} title={presentationMode ? 'Exit presentation mode' : 'Presentation mode'} aria-label={presentationMode ? 'Exit presentation mode' : 'Presentation mode'}><MonitorPlay size={14} /></button><button onClick={() => void toggleFullscreen()} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></div>
-     </div>
+       {!leftOpen && <DockReopenButton side="left" onClick={() => setLeftOpen(true)} />}
+       {!rightOpen && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
+      </div>
       {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
      {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
@@ -329,19 +330,19 @@ function readStoredPanel(): 'shapes' | 'outline' {
   }
 }
 
-function readStoredNumber(key: string, fallback: number): number {
+function readStoredNumber(key: string, fallback: number, side: 'left' | 'right'): number {
   try {
     const stored = globalThis.localStorage?.getItem(key);
     if (stored === null || stored === undefined || stored.trim() === '') return fallback;
     const value = Number(stored);
-    return Number.isFinite(value) ? clampPanelWidth(value) : fallback;
+    return Number.isFinite(value) ? clampPanelWidth(value, side) : fallback;
   } catch {
     return fallback;
   }
 }
 
-function clampPanelWidth(value: number): number {
-  return Math.min(380, Math.max(180, Math.round(value)));
+function clampPanelWidth(value: number, side: 'left' | 'right' = 'left'): number {
+  return side === 'right' ? Math.min(400, Math.max(220, Math.round(value))) : Math.min(360, Math.max(180, Math.round(value)));
 }
 
 function readViewPreferences(): ViewPreferences {
@@ -362,4 +363,9 @@ function readViewPreferences(): ViewPreferences {
 
 function PanelResizeHandle({ side, onPointerDown }: { side: 'left' | 'right'; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void }) {
   return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" aria-label={`Resize ${side} panel`} aria-orientation="vertical" onPointerDown={onPointerDown} />;
+}
+
+function DockReopenButton({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
+  const left = side === 'left';
+  return <button className={`dock-reopen dock-reopen-${side}`} title={`Open ${left ? 'workspace' : 'properties'} panel`} aria-label={`Open ${left ? 'workspace' : 'properties'} panel`} onClick={onClick}>{left ? <PanelLeftOpen size={15} /> : <PanelRightOpen size={15} />}</button>;
 }

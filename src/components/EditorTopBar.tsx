@@ -1,5 +1,6 @@
-import { AlertTriangle, CloudOff, Download, Eye, History, Maximize2, MoreHorizontal, Redo2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Eye, History, Maximize2, MoreHorizontal, Redo2, Undo2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { editorEvents } from '../core/events';
 import { copySelectionPng, copySelectionSvg, deleteDocumentSnapshot, downloadMermaid, downloadPdf, downloadPng, downloadPlantUml, downloadProject, downloadSql, downloadSvg, getSnapshotLimit, listDocumentSnapshots, loadDocumentSnapshot, normalizeSnapshotLimit, printDocument, pruneDocumentSnapshots, saveDocumentSnapshot, setSnapshotLimit } from '../persistence';
 import type { DocumentSnapshot } from '../persistence';
 import { useEditorStore } from '../store/editorStore';
@@ -18,8 +19,10 @@ interface EditorTopBarProps {
   onZoom100: () => void;
   onToggleFocus: () => void;
   onToggleFullscreen: () => void;
+  onTogglePresentation: () => void;
   fullscreen: boolean;
   focusMode: boolean;
+  presentationMode: boolean;
 }
 
 type ExportScale = 1 | 2 | 4;
@@ -32,7 +35,7 @@ export interface ViewPreferences {
   connectionHints: boolean;
 }
 
-export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, fullscreen, focusMode }: EditorTopBarProps) {
+export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, onTogglePresentation, fullscreen, focusMode, presentationMode }: EditorTopBarProps) {
   const document = useEditorStore((state) => state.document);
   const isDirty = useEditorStore((state) => state.isDirty);
   const canUndo = useEditorStore((state) => state.commandManager.canUndo);
@@ -51,6 +54,7 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
   const [snapshots, setSnapshots] = useState<DocumentSnapshot[]>([]);
   const [snapshotLimit, setSnapshotLimitState] = useState(getSnapshotLimit);
   const [viewOpen, setViewOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const selectionIds = selectedIds.length > 0 ? selectedIds : undefined;
   const inspectDocument = () => { void navigator.clipboard?.writeText(JSON.stringify(document, null, 2)); };
   const closeExport = () => setExportOpen(false);
@@ -93,14 +97,27 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
   return <>
     <header className="editor-topbar">
       <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title"><strong>{document.name}</strong><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div></div>
-      <div className="topbar-center"><div className="mode-switch"><button className={!inspectOpen ? 'mode-switch-active' : ''} onClick={() => setInspectOpen(false)} aria-pressed={!inspectOpen}>Design</button><button className={inspectOpen ? 'mode-switch-active' : ''} onClick={() => setInspectOpen(true)} aria-pressed={inspectOpen}>Inspect</button></div></div>
-         <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 size={17} /></button></div><span className="topbar-divider" /><div className="view-menu-wrap"><button className={`secondary-button topbar-view ${viewOpen ? 'active' : ''}`} onClick={() => setViewOpen((open) => !open)} title="Canvas view"><Eye size={14} /> View</button>{viewOpen && <ViewMenu view={view} gridVisible={gridVisible} onViewChange={onViewChange} onToggleGrid={onToggleGrid} onFitPage={onFitPage} onFitSelection={onFitSelection} onZoom100={onZoom100} onToggleFocus={onToggleFocus} onToggleFullscreen={onToggleFullscreen} fullscreen={fullscreen} focusMode={focusMode} />}</div><div className="snapshot-wrap"><button className="secondary-button topbar-history" onClick={() => setSnapshotsOpen((open) => !open)} title="Local snapshots"><History size={14} /> History</button>{snapshotsOpen && <SnapshotMenu snapshots={snapshots} snapshotLimit={snapshotLimit} onLimitChange={(value) => void changeSnapshotLimit(value)} onCheckpoint={() => void createCheckpoint()} onRestore={(snapshot) => void restoreSnapshot(snapshot)} onDelete={(snapshot) => void removeSnapshot(snapshot)} />}</div>{onDiagnostics && <button className={`secondary-button diagnostics-button ${diagnosticCount > 0 ? 'has-diagnostics' : ''}`} onClick={onDiagnostics} title={diagnosticCount > 0 ? `Open diagnostics · ${diagnosticCount} issues` : 'No active diagnostics'}><AlertTriangle size={14} /> <span className="diagnostics-label">Diagnostics</span>{diagnosticCount > 0 && <span>{diagnosticCount}</span>}</button>}<span className="sync-status"><CloudOff size={15} /> Device only</span><div className="topbar-export-wrap"><button className="secondary-button topbar-export" onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export</button>{exportOpen && <ExportMenu document={document} activePageId={activePageId} selectionIds={selectionIds} scale={exportScale} padding={exportPadding} transparent={transparent} outlineOnly={outlineOnly} setScale={setExportScale} setPadding={setExportPadding} setTransparent={setTransparent} setOutlineOnly={setOutlineOnly} close={closeExport} />}</div><button className="icon-button" title="Export options" onClick={() => setExportOpen((open) => !open)}><MoreHorizontal size={18} /></button></div>
+         <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 size={17} /></button></div><span className="topbar-divider" />
+        {onDiagnostics && <button className={`secondary-button diagnostics-button ${diagnosticCount > 0 ? 'has-diagnostics' : ''}`} onClick={onDiagnostics} title={diagnosticCount > 0 ? `Open diagnostics · ${diagnosticCount} issues` : 'No active diagnostics'} aria-label="Open diagnostics">{diagnosticCount > 0 ? <><AlertTriangle size={14} /><span className="diagnostics-label">Diagnostics</span><span>{diagnosticCount}</span></> : <CheckCircle2 size={14} />}</button>}
+        <div className="view-menu-wrap"><button className={`secondary-button topbar-view ${viewOpen ? 'active' : ''}`} onClick={() => setViewOpen((open) => !open)} title="Canvas view"><Eye size={14} /> View</button>{viewOpen && <ViewMenu view={view} gridVisible={gridVisible} onViewChange={onViewChange} onToggleGrid={onToggleGrid} onFitPage={onFitPage} onFitSelection={onFitSelection} onZoom100={onZoom100} onToggleFocus={onToggleFocus} onToggleFullscreen={onToggleFullscreen} onTogglePresentation={onTogglePresentation} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />}</div>
+        <div className="topbar-export-wrap"><button className="secondary-button topbar-export" onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export</button>{exportOpen && <ExportMenu document={document} activePageId={activePageId} selectionIds={selectionIds} scale={exportScale} padding={exportPadding} transparent={transparent} outlineOnly={outlineOnly} setScale={setExportScale} setPadding={setExportPadding} setTransparent={setTransparent} setOutlineOnly={setOutlineOnly} close={closeExport} />}</div>
+        <div className="topbar-more-wrap"><button className={`icon-button ${moreOpen ? 'active' : ''}`} title="More editor actions" aria-label="More editor actions" onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={18} /></button>{moreOpen && <MoreMenu onInspect={() => { setInspectOpen(true); setMoreOpen(false); }} onHistory={() => { setMoreOpen(false); setSnapshotsOpen(true); }} onShortcuts={() => { setMoreOpen(false); editorEvents.emit('ui:shortcuts', undefined); }} />}{snapshotsOpen && <SnapshotMenu snapshots={snapshots} snapshotLimit={snapshotLimit} onLimitChange={(value) => void changeSnapshotLimit(value)} onCheckpoint={() => void createCheckpoint()} onRestore={(snapshot) => void restoreSnapshot(snapshot)} onDelete={(snapshot) => void removeSnapshot(snapshot)} />}</div>
+      </div>
     </header>
     {inspectOpen && <div className="inspect-drawer"><div className="inspect-heading"><strong>Document inspector</strong><div><button className="secondary-button" onClick={inspectDocument}>Copy JSON</button><button className="icon-button" onClick={() => setInspectOpen(false)} aria-label="Close inspector"><X size={15} /></button></div></div><pre>{JSON.stringify(document, null, 2)}</pre></div>}
   </>;
 }
 
-function ViewMenu({ view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, fullscreen, focusMode }: { view: ViewPreferences; gridVisible: boolean; onViewChange: (changes: Partial<ViewPreferences>) => void; onToggleGrid: () => void; onFitPage: () => void; onFitSelection: () => void; onZoom100: () => void; onToggleFocus: () => void; onToggleFullscreen: () => void; fullscreen: boolean; focusMode: boolean }) {
+function MoreMenu({ onInspect, onHistory, onShortcuts }: { onInspect: () => void; onHistory: () => void; onShortcuts: () => void }) {
+  return <div className="topbar-menu more-menu" onPointerDown={(event) => event.stopPropagation()}>
+    <strong>More editor actions</strong>
+    <button onClick={onHistory}><History size={13} /> History</button>
+    <button onClick={onInspect}>Inspect document</button>
+    <button onClick={onShortcuts}>Keyboard shortcuts</button>
+  </div>;
+}
+
+function ViewMenu({ view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, onTogglePresentation, fullscreen, focusMode, presentationMode }: { view: ViewPreferences; gridVisible: boolean; onViewChange: (changes: Partial<ViewPreferences>) => void; onToggleGrid: () => void; onFitPage: () => void; onFitSelection: () => void; onZoom100: () => void; onToggleFocus: () => void; onToggleFullscreen: () => void; onTogglePresentation: () => void; fullscreen: boolean; focusMode: boolean; presentationMode: boolean }) {
   return <div className="topbar-menu view-menu" onPointerDown={(event) => event.stopPropagation()}>
     <strong>Canvas view</strong>
     <ViewToggle label="Grid" value={gridVisible} onClick={onToggleGrid} />
@@ -115,6 +132,7 @@ function ViewMenu({ view, gridVisible, onViewChange, onToggleGrid, onFitPage, on
     <button onClick={onZoom100}>100% zoom</button>
     <div className="view-menu-divider" />
     <button onClick={onToggleFocus}>{focusMode ? 'Exit focus mode' : 'Focus mode'}</button>
+    <button onClick={onTogglePresentation}>{presentationMode ? 'Exit presentation' : 'Presentation'}</button>
     <button onClick={onToggleFullscreen}><Maximize2 size={13} /> {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}</button>
   </div>;
 }

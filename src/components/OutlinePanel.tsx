@@ -3,10 +3,11 @@ import { useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import type { DiagramEdge, DiagramNode } from '../core/types';
 import { getActivePage, useEditorStore } from '../store/editorStore';
+import { LeftDockHeader, type LeftPanelId } from './DockHeader';
 
 const OUTLINE_EXPANSION_KEY = 'aperglyph.outline.expanded';
 
-export function OutlinePanel() {
+export function OutlinePanel({ activePanel = 'outline', onPanelChange, onCollapse }: { activePanel?: LeftPanelId; onPanelChange?: (panel: LeftPanelId) => void; onCollapse?: () => void }) {
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
   const selectedIds = useEditorStore((state) => state.selectedIds);
@@ -183,7 +184,7 @@ export function OutlinePanel() {
   const anyObjectMatches = nodes.some((node) => matches(`${nodeLabel(node)} ${node.type} ${node.id}`)) || (page?.edges ?? []).some((edge) => matches(`${edgeLabel(edge)} ${edge.id} ${edge.type}`));
 
   return <aside className="outline-panel">
-    <div className="panel-title-row"><div><span className="panel-kicker">Workspace</span><h2>Outline</h2></div><span className="outline-count">{page?.nodes.length ?? 0}</span></div>
+    <LeftDockHeader activePanel={activePanel} onChange={onPanelChange ?? (() => undefined)} onCollapse={onCollapse ?? (() => undefined)} badge={<span className="outline-count">{page?.nodes.length ?? 0}</span>} />
     <div className="outline-search"><Search size={14} /><input aria-label="Search outline" placeholder="Find objects…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
     <div className="outline-scroll">
       <div className="outline-page-row" onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(event, undefined, 'root')}><span className="outline-tree-stem" /><span className="outline-page-dot" /><strong>{page?.name ?? 'Page'}</strong><small>{page?.nodes.length ?? 0} objects</small></div>
