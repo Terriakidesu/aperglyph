@@ -44,7 +44,7 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => readGroups());
   const plugins = useSyncExternalStore(pluginManager.subscribe, pluginManager.getSnapshot, pluginManager.getSnapshot);
   const normalizedSearch = search.trim().toLowerCase();
-  const shapeKey = (libraryId: string, shape: ShapeDefinition) => `${libraryId}:${shape.type}`;
+  const shapeKey = (libraryId: string, shape: ShapeDefinition) => `${libraryId}:${shape.id}`;
   const isFavorite = (libraryId: string, shape: ShapeDefinition) => favorites.includes(shapeKey(libraryId, shape));
   const matches = (shape: ShapeDefinition, libraryId: string) => {
     if (libraryScope !== 'all' && libraryScope !== libraryId) return false;
@@ -92,9 +92,9 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
          const shapes = plugin.shapes.filter((shape) => matches(shape, plugin.id));
          if (shapes.length === 0) return null;
          const categories = groupShapes(shapes, plugin.id === 'general' ? 'Basic' : plugin.name);
-         return <div key={plugin.id} className="library-plugin-group">{categories.map(([category, categoryShapes]) => {
-           const groupId = `${plugin.id}:${category}`;
-           const open = openGroups[groupId] ?? true;
+          return <div key={plugin.id} className="library-plugin-group">{categories.map(([category, categoryShapes], categoryIndex) => {
+            const groupId = `${plugin.id}:${category}`;
+            const open = openGroups[groupId] ?? categoryIndex === 0;
            return <ShapeGroup key={groupId} title={categories.length === 1 ? `${plugin.name} shapes` : category} shapes={categoryShapes} open={open} onToggle={() => {
              const next = { ...openGroups, [groupId]: !open };
              setOpenGroups(next);

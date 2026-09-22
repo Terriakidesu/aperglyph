@@ -31,6 +31,8 @@ export interface ShapeDefinition {
   semanticRole?: string;
   /** Diagram notation or family represented by this shape. */
   notation?: string;
+  /** Optional notation choices for semantic shapes that share one type. */
+  notationOptions?: Array<{ value: string; label: string }>;
   /** Alternate terms users commonly use when searching for this shape. */
   aliases?: string[];
   tags?: string[];

@@ -10,6 +10,8 @@ and releases use [Semantic Versioning](https://semver.org/).
 ### Added
 - Added searchable shape metadata with aliases, semantic roles, notation tags, categories, and category-aware common-first library groups.
 - Added shared silhouette primitives for common polygons, documents, storage symbols, clouds, packages, folded notes, and flowchart operations across canvas, previews, hit testing, and SVG export.
+- Expanded the General, Flowchart, ERD, DFD, and UML use-case libraries with common-first symbols, aliases, semantic roles, relationship presets, and notation-aware metadata.
+- Added metadata-driven Yourdon/DeMarco and Gane/Sarson DFD shape variants without changing process, external-entity, or data-store semantic node types.
 - Added free-space-aware automatic self-loop side selection and explicit crossing priorities so selected or prioritized connectors remain visually continuous.
 - Added Auto/Simple/Manual orthogonal modes, hard/soft route constraints, draggable segment handles, minimum-segment normalization, and optional rounded orthogonal corners shared by canvas and SVG export.
 - Added sparse rectilinear visibility-graph routing with deterministic parallel lanes, bend/crossing/overlap/proximity costs, soft connector awareness, and previous-route stability preferences.
@@ -40,6 +42,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Fixed a stack overflow when changing a straight or curved connector to orthogonal routing while route-stability scoring inspected its diagonal path.
+- Kept inline text editing reliable after selection renders expand the shape library and inspector workload.
 - Prevented rotated explicit ports from introducing diagonal first segments and penalized immediate route reversals during search.
 
 ## [0.13.0] - 2026-09-22

@@ -7,6 +7,20 @@ describe('diagram plugin registry', () => {
     expect(pluginManager.get('flowchart').shapes.map((shape) => shape.type)).toContain('decision');
   });
 
+  it('exposes common-first shape metadata and notation presets', () => {
+    const general = pluginManager.get('general');
+    const flowchart = pluginManager.get('flowchart');
+    const erd = pluginManager.get('erd');
+    const dfd = pluginManager.get('dfd');
+    const useCase = pluginManager.get('use-case');
+    expect(general.shapes.find((shape) => shape.id === 'cloud')).toMatchObject({ category: 'Basic', aliases: expect.arrayContaining(['network']) });
+    expect(flowchart.shapes.find((shape) => shape.id === 'multiple-document')).toMatchObject({ category: 'Data', renderer: 'multiple-document' });
+    expect(erd.shapes.find((shape) => shape.id === 'associative-entity')).toMatchObject({ type: 'entity', semanticRole: 'associative-entity' });
+    expect(dfd.shapes.find((shape) => shape.type === 'process')).toMatchObject({ semanticRole: 'process', notation: 'yourdon-demarco', notationOptions: expect.arrayContaining([{ value: 'gane-sarson', label: 'Gane / Sarson' }]) });
+    expect(erd.connectors.find((connector) => connector.id === 'many-to-many')).toMatchObject({ routing: 'orthogonal', defaultStyle: { startMarker: 'crowfoot', endMarker: 'crowfoot' } });
+    expect(useCase.connectors.map((connector) => connector.id)).toEqual(expect.arrayContaining(['include', 'extend', 'generalization', 'comment']));
+  });
+
   it('falls back to the general plugin for unknown types', () => {
     expect(pluginManager.get('future-standard').id).toBe('general');
   });

@@ -121,4 +121,17 @@ describe('native file helpers', () => {
     expect(svg).toContain('>Field</text>');
     expect(svg).not.toContain('>Data type</text>');
   });
+
+  it('exports shared common silhouettes and metadata-driven Gane-Sarson DFD variants', () => {
+    const documentNode = createNode('document', { x: 0, y: 0 }, { library: 'flowchart', data: { label: 'Report' } });
+    const packageNode = createNode('package', { x: 220, y: 0 }, { library: 'use-case', data: { label: 'Billing' } });
+    const process = createNode('process', { x: 0, y: 160 }, { library: 'dfd', size: { width: 140, height: 84 }, data: { label: 'Validate', number: '1.0', notation: 'gane-sarson' } });
+    const store = createNode('store', { x: 220, y: 160 }, { library: 'dfd', size: { width: 160, height: 64 }, data: { label: 'Orders', notation: 'gane-sarson' } });
+    const svg = documentToSvg([documentNode, packageNode, process, store], [], '#10131c', 600, 400);
+    expect(svg).toContain('>Report</text>');
+    expect(svg).toContain('>Billing</text>');
+    expect(svg).toContain('>Validate</text>');
+    expect(svg).toContain('>1.0</text>');
+    expect(svg).toContain('M 18 0 H 160 V 64 H 18 Z');
+  });
 });
