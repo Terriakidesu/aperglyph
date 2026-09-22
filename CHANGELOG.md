@@ -38,6 +38,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fixed a stack overflow when changing a straight or curved connector to orthogonal routing while route-stability scoring inspected its diagonal path.
 - Prevented rotated explicit ports from introducing diagonal first segments and penalized immediate route reversals during search.
 
 ## [0.13.0] - 2026-09-22

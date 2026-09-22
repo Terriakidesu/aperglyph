@@ -623,6 +623,21 @@ function segmentsCross(leftStart: Point, leftEnd: Point, rightStart: Point, righ
 }
 
 function axisSegmentDistance(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): number {
+  const leftHorizontal = almostEqual(leftStart.y, leftEnd.y);
+  const leftVertical = almostEqual(leftStart.x, leftEnd.x);
+  const rightHorizontal = almostEqual(rightStart.y, rightEnd.y);
+  const rightVertical = almostEqual(rightStart.x, rightEnd.x);
+  // Existing straight/curved routes can be diagonal. They are soft
+  // references only; never recurse forever trying to classify two
+  // non-orthogonal segments as perpendicular.
+  if ((!leftHorizontal && !leftVertical) || (!rightHorizontal && !rightVertical)) {
+    return Math.min(
+      distanceBetween(leftStart, rightStart),
+      distanceBetween(leftStart, rightEnd),
+      distanceBetween(leftEnd, rightStart),
+      distanceBetween(leftEnd, rightEnd),
+    );
+  }
   if (almostEqual(leftStart.y, leftEnd.y) && almostEqual(rightStart.y, rightEnd.y)) {
     if (Math.max(Math.min(leftEnd.x, leftStart.x), Math.min(rightEnd.x, rightStart.x)) <= Math.min(Math.max(leftEnd.x, leftStart.x), Math.max(rightEnd.x, rightStart.x))) return Math.abs(leftStart.y - rightStart.y);
     return Math.min(Math.abs(leftStart.x - rightEnd.x), Math.abs(rightStart.x - leftEnd.x));

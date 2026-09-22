@@ -108,6 +108,15 @@ describe('connector routing', () => {
     expect(next).toEqual(previous);
   });
 
+  it('handles diagonal existing routes when an edge changes to orthogonal routing', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 180 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal' });
+    expect(() => edgeRoute(edge, source, target, [source, target], {
+      otherRoutes: [[{ x: 100, y: 50 }, { x: 240, y: 140 }]],
+    })).not.toThrow();
+  });
+
   it('honors hard route constraints and simple routing mode', () => {
     const source = createNode('rectangle', { x: 0, y: 0 });
     const target = createNode('rectangle', { x: 300, y: 180 });
