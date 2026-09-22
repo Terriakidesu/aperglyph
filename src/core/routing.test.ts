@@ -29,6 +29,36 @@ describe('connector routing', () => {
     expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
   });
 
+  it('keeps ERD field connectors on their rows after resizing', () => {
+    const source = createNode('entity', { x: 0, y: 0 }, {
+      size: { width: 200, height: 300 },
+      data: { label: 'users', fields: [
+        { id: 'id', name: 'id', type: 'uuid', primaryKey: true, foreignKey: false, unique: false, nullable: false },
+        { id: 'email', name: 'email', type: 'text', primaryKey: false, foreignKey: false, unique: false, nullable: false },
+        { id: 'created', name: 'created', type: 'date', primaryKey: false, foreignKey: false, unique: false, nullable: false },
+      ] },
+    });
+    const target = createNode('rectangle', { x: 400, y: 0 });
+    const edge = createEdge({ nodeId: source.id, port: 'right', anchorId: 'field-1-right', offset: 0.8 }, { nodeId: target.id, port: 'left' });
+    const route = edgeRoute(edge, source, target);
+    expect(route[0].x).toBe(200);
+    expect(route[0].y).toBeCloseTo(34 + (300 - 34) * 0.5);
+  });
+
+  it('derives field anchors for older ERD relationship metadata', () => {
+    const source = createNode('entity', { x: 0, y: 0 }, {
+      size: { width: 200, height: 300 },
+      data: { label: 'users', fields: [
+        { id: 'id', name: 'id', type: 'uuid', primaryKey: true, foreignKey: false, unique: false, nullable: false },
+        { id: 'account', name: 'account_id', type: 'uuid', primaryKey: false, foreignKey: true, unique: false, nullable: false },
+      ] },
+    });
+    const target = createNode('rectangle', { x: 400, y: 0 });
+    const edge = createEdge({ nodeId: source.id, port: 'right', offset: 0.85 }, { nodeId: target.id, port: 'left' }, { data: { sourceFieldId: 'account' } });
+    const route = edgeRoute(edge, source, target);
+    expect(route[0].y).toBeCloseTo(34 + (300 - 34) * 0.75);
+  });
+
   it('routes orthogonal connectors through axis-aligned bends', () => {
     const source = createNode('rectangle', { x: 0, y: 0 });
     const target = createNode('rectangle', { x: 300, y: 180 });

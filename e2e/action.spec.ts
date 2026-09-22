@@ -56,6 +56,23 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('[data-node-id]')).toHaveCount(2);
   });
 
+  test('makes grouped objects visible on the canvas', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const shape = page.getByTitle('Drag Rectangle onto the canvas');
+    await shape.click();
+    await shape.click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Control+g');
+    await expect(page.locator('.group-boundary')).toHaveCount(1);
+    await expect(page.locator('.group-boundary-label')).toHaveText('Group · 2 objects');
+    await expect(page.locator('.contextual-group-status')).toBeVisible();
+
+    await page.keyboard.press('Control+Shift+g');
+    await expect(page.locator('.group-boundary')).toHaveCount(0);
+  });
+
   test('drops shapes from the library onto the canvas', async ({ page }) => {
     await page.locator('.template-card').first().click();
     const canvas = page.locator('svg.diagram-canvas');

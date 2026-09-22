@@ -414,6 +414,7 @@ function validateEndpoint(value: unknown, path: string, nodeIds: Set<string>, er
   if (hasPoint) validatePoint(value.point, `${path}.point`, errors);
   if (value.offset !== undefined) finiteInRange(value.offset, `${path}.offset`, 0, 1, errors);
   if (value.port !== undefined) isBoundedString(value.port, `${path}.port`, 1, 32, errors);
+  if (value.anchorId !== undefined) isBoundedString(value.anchorId, `${path}.anchorId`, 1, 128, errors);
 }
 
 function validatePoint(value: unknown, path: string, errors: string[]): void {

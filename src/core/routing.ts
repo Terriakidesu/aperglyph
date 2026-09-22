@@ -1,4 +1,6 @@
 import { nodeCenter, nodeConnectionPoint } from './geometry';
+import { connectionAnchorPoints, entityFieldAnchors } from './anchors';
+import { normalizeEntityFields } from './erd';
 import type { DiagramEdge, DiagramNode, Endpoint, Point } from './types';
 
 const ROUTE_PADDING = 18;
@@ -44,10 +46,12 @@ export function parallelEdgeOffset(edge: DiagramEdge, edges: DiagramEdge[]): num
  * taking a dogleg through a nearby shape.
  */
 export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: DiagramNode, obstacles: DiagramNode[] = []): Point[] {
-  const start = resolveEndpointPoint(edge.source, source, edge.target.point ?? (target ? nodeCenter(target) : undefined));
-  const end = resolveEndpointPoint(edge.target, target, edge.source.point ?? (source ? nodeCenter(source) : undefined));
+  const sourceEndpoint = semanticFieldEndpoint(edge, edge.source, source, 'source');
+  const targetEndpoint = semanticFieldEndpoint(edge, edge.target, target, 'target');
+  const start = resolveEndpointPoint(sourceEndpoint, source, targetEndpoint.point ?? (target ? nodeCenter(target) : undefined));
+  const end = resolveEndpointPoint(targetEndpoint, target, sourceEndpoint.point ?? (source ? nodeCenter(source) : undefined));
   if (!start || !end) return [];
-  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, edge.source.port);
+  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, sourceEndpoint.port);
   const routing = edgeRouting(edge);
   if (routing !== 'orthogonal') return routing === 'straight' && Number.isFinite(edge.data?.parallelOffset) && Number(edge.data?.parallelOffset) !== 0
     ? parallelRoute(start, end, Number(edge.data?.parallelOffset))
@@ -98,10 +102,28 @@ export function resolveEndpointPoint(endpoint: Endpoint, node?: DiagramNode, tow
   // An attached endpoint is authoritative even if an older document also
   // contains a stale free-point value. Otherwise the stale point can leave a
   // visible gap between the connector notation and the node boundary.
-  if (node && endpoint.nodeId) return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
+  if (node && endpoint.nodeId) {
+    const anchor = endpoint.anchorId
+      ? connectionAnchorPoints(node, node.type === 'entity' ? entityFieldAnchors : undefined).find((candidate) => candidate.anchor.id === endpoint.anchorId)
+      : undefined;
+    if (anchor) return anchor.point;
+    return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
+  }
   if (endpoint.point) return { ...endpoint.point };
   if (!node) return null;
   return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
+}
+
+/** Add a field anchor to older ERD edges that persisted only field metadata. */
+function semanticFieldEndpoint(edge: DiagramEdge, endpoint: Endpoint, node: DiagramNode | undefined, side: 'source' | 'target'): Endpoint {
+  if (!node || node.type !== 'entity' || endpoint.anchorId) return endpoint;
+  const fieldKey = side === 'source' ? 'sourceFieldId' : 'targetFieldId';
+  const fieldId = typeof edge.data?.[fieldKey] === 'string' ? edge.data[fieldKey] as string : undefined;
+  if (!fieldId) return endpoint;
+  const index = normalizeEntityFields(node.data.fields).findIndex((field) => field.id === fieldId);
+  if (index < 0) return endpoint;
+  const port = endpoint.port === 'left' || endpoint.port === 'right' ? endpoint.port : side === 'source' ? 'right' : 'left';
+  return { ...endpoint, anchorId: `field-${index}-${port}` };
 }
 
 export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = []): string {

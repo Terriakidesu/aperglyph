@@ -47,6 +47,12 @@ export const ERD_HEADER_HEIGHT = 34;
 export const ERD_COLUMN_HEADER_HEIGHT = 21;
 export const ERD_ROW_HEIGHT = 27;
 
+export interface EntityLayoutMetrics {
+  fieldTop: number;
+  rowHeight: number;
+  fieldCount: number;
+}
+
 export const entityVariantOptions: Array<{ value: EntityVariant; label: string }> = [
   { value: 'key-field-type', label: 'Key · Field · Data type' },
   { value: 'key-field', label: 'Key · Field' },
@@ -63,6 +69,22 @@ export function normalizeEntityVariant(value: unknown): EntityVariant {
 
 export function entityAutoHeight(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): number {
   return ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0) + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
+}
+
+/**
+ * Keep a manually resized entity table filled instead of leaving unused space
+ * below its fixed-height rows. Natural-sized entities retain the established
+ * 27px row height; extra height is distributed evenly across their fields.
+ */
+export function entityLayoutMetrics(fields: unknown, height: number, columnHeaders = false): EntityLayoutMetrics {
+  const fieldCount = Math.max(1, normalizeEntityFields(fields).length);
+  const fieldTop = ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
+  const availableHeight = Math.max(0, height - fieldTop);
+  return {
+    fieldTop,
+    rowHeight: Math.max(ERD_ROW_HEIGHT, availableHeight / fieldCount),
+    fieldCount,
+  };
 }
 
 export function entityColumns(variant: unknown, width: number): EntityColumn[] {
@@ -87,10 +109,10 @@ export function entityFieldValue(field: EntityField, column: EntityColumnId): st
   return field.nullable ? 'NULL' : 'NOT NULL';
 }
 
-export function entityFieldPortOffset(fields: unknown, index: number, columnHeaders = false): number {
-  const fieldTop = ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
-  const height = entityAutoHeight(fields, 'key-field-type', columnHeaders);
-  return (fieldTop + index * ERD_ROW_HEIGHT + ERD_ROW_HEIGHT / 2) / Math.max(1, height);
+export function entityFieldPortOffset(fields: unknown, index: number, columnHeaders = false, nodeHeight?: number): number {
+  const height = nodeHeight ?? entityAutoHeight(fields, 'key-field-type', columnHeaders);
+  const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, columnHeaders);
+  return (fieldTop + index * rowHeight + rowHeight / 2) / Math.max(1, height);
 }
 
 function columnsForVariant(value: unknown): EntityColumnId[] {
@@ -229,8 +251,8 @@ export function relationshipForForeignKey(page: DiagramDocument['pages'][number]
   const sourceFieldIds = relatedFields.map((candidate) => candidate.id);
   const targetFieldIds = relatedTargetFields.length > 0 ? relatedTargetFields.map((candidate) => candidate.id) : targetField ? [targetField.id] : [];
   return createEdge(
-    { nodeId: source.id, port: 'right', offset: entityFieldPortOffset(fields, fields.indexOf(field)) },
-    { nodeId: target.id, port: 'left', offset: targetField ? entityFieldPortOffset(targetFields, targetFields.indexOf(targetField)) : undefined },
+    { nodeId: source.id, port: 'right', anchorId: `field-${fields.indexOf(field)}-right`, offset: entityFieldPortOffset(fields, fields.indexOf(field), source.data.columnHeaders === true, source.size.height) },
+    { nodeId: target.id, port: 'left', ...(targetField ? { anchorId: `field-${targetFields.indexOf(targetField)}-left` } : {}), ...(targetField ? { offset: entityFieldPortOffset(targetFields, targetFields.indexOf(targetField), target.data.columnHeaders === true, target.size.height) } : {}) },
     {
       type: 'orthogonal',
       style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-bar' : 'bar', endMarker: 'bar-crowfoot' },

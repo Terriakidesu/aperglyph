@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode } from './document';
-import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, normalizeEntityFields, parseEntityFields, parseErdSql, exportErdSql, validateErd } from './erd';
+import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, entityLayoutMetrics, normalizeEntityFields, parseEntityFields, parseErdSql, exportErdSql, validateErd } from './erd';
 
 describe('ERD semantic model', () => {
   it('normalizes legacy compact attributes', () => {
@@ -32,6 +32,18 @@ describe('ERD semantic model', () => {
     expect(entityFieldValue(field, 'type')).toBe('uuid');
     expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(74.5 / 88);
     expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(109);
+  });
+
+  it('distributes extra resized height across field rows and anchors', () => {
+    const metrics = entityLayoutMetrics(['id · uuid', 'name · varchar', 'created · date'], 300);
+    expect(metrics.fieldTop).toBe(34);
+    expect(metrics.rowHeight).toBeCloseTo(266 / 3);
+    expect(metrics.fieldTop + metrics.rowHeight * metrics.fieldCount).toBeCloseTo(300);
+    expect(entityFieldPortOffset(['id · uuid', 'name · varchar', 'created · date'], 1, false, 300)).toBeCloseTo((34 + metrics.rowHeight * 1.5) / 300);
+
+    const headings = entityLayoutMetrics(['id · uuid'], 150, true);
+    expect(headings.fieldTop).toBe(55);
+    expect(headings.rowHeight).toBe(95);
   });
 
   it('parses pasted attributes with compact flags', () => {

@@ -9,6 +9,7 @@ interface ContextualToolbarProps {
   x: number;
   y: number;
   nodes?: DiagramNode[];
+  grouped?: boolean;
   edge?: DiagramEdge;
   document: DiagramDocument;
   onDuplicate: () => void;
@@ -29,7 +30,7 @@ interface ContextualToolbarProps {
   onResetEdge?: () => void;
 }
 
-export function ContextualToolbar({ kind, x, y, nodes = [], edge, document, onDuplicate, onDelete, onToggleLock, onToggleHidden, onFormatPainter, onFill, onAlign, onDistribute, onGroup, onUngroup, onZOrder, onEdgeRouting, onReverse, onSwapMarkers, onAddWaypoint, onResetEdge }: ContextualToolbarProps) {
+export function ContextualToolbar({ kind, x, y, nodes = [], grouped = false, edge, document, onDuplicate, onDelete, onToggleLock, onToggleHidden, onFormatPainter, onFill, onAlign, onDistribute, onGroup, onUngroup, onZOrder, onEdgeRouting, onReverse, onSwapMarkers, onAddWaypoint, onResetEdge }: ContextualToolbarProps) {
   const [menu, setMenu] = useState<'align' | 'distribute' | 'layer' | 'fill' | null>(null);
   const closeMenu = () => setMenu(null);
   return <div className={`contextual-toolbar contextual-toolbar-${kind}`} style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
@@ -43,7 +44,7 @@ export function ContextualToolbar({ kind, x, y, nodes = [], edge, document, onDu
     </> : kind === 'selection' ? <>
       <ToolbarMenu label="Align" open={menu === 'align'} onToggle={() => setMenu(menu === 'align' ? null : 'align')}><div className="contextual-menu-grid">{(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const).map((alignment) => <button key={alignment} onClick={() => { onAlign?.(alignment); closeMenu(); }}>{alignment}</button>)}</div></ToolbarMenu>
       <ToolbarMenu label="Distribute" open={menu === 'distribute'} onToggle={() => setMenu(menu === 'distribute' ? null : 'distribute')}><button onClick={() => { onDistribute?.('horizontal'); closeMenu(); }}>Horizontal</button><button onClick={() => { onDistribute?.('vertical'); closeMenu(); }}>Vertical</button></ToolbarMenu>
-      <button onClick={onGroup} title="Group selection"><Group size={13} /> Group</button><button onClick={onUngroup} title="Ungroup selection">Ungroup</button>
+      {grouped ? <span className="contextual-group-status" title="These objects are grouped"><Group size={13} /> Grouped</span> : <button onClick={onGroup} title="Group selection"><Group size={13} /> Group</button>}<button onClick={onUngroup} title="Ungroup selection">Ungroup</button>
       <ToolbarMenu label="Layer" open={menu === 'layer'} onToggle={() => setMenu(menu === 'layer' ? null : 'layer')}><button onClick={() => { onZOrder?.('front'); closeMenu(); }}>Bring to front</button><button onClick={() => { onZOrder?.('forward'); closeMenu(); }}>Bring forward</button><button onClick={() => { onZOrder?.('backward'); closeMenu(); }}>Send backward</button><button onClick={() => { onZOrder?.('back'); closeMenu(); }}>Send to back</button></ToolbarMenu>
       <button onClick={onToggleLock} title="Lock or unlock selection"><Lock size={13} /> Lock</button><button onClick={onDuplicate} title="Duplicate selection"><Copy size={13} /></button><button className="contextual-danger" onClick={onDelete} title="Delete selection"><Trash2 size={13} /></button>
     </> : <>

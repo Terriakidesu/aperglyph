@@ -25,7 +25,7 @@ export const entityFieldAnchors: ShapeAnchorResolver = (node) => {
     { id: 'bottom', port: 'bottom' },
   ];
   fields.forEach((_, index) => {
-    const offset = entityFieldPortOffset(fields, index, columnHeaders);
+    const offset = entityFieldPortOffset(fields, index, columnHeaders, node.size.height);
     anchors.push({ id: `field-${index}-left`, port: 'left', offset });
     anchors.push({ id: `field-${index}-right`, port: 'right', offset });
   });

@@ -776,6 +776,7 @@ function isEndpoint(value: unknown): value is DiagramEdge['source'] {
   return isRecord(value)
     && (typeof value.nodeId === 'string' || isPoint(value.point))
     && (value.port === undefined || typeof value.port === 'string')
+    && (value.anchorId === undefined || typeof value.anchorId === 'string')
     && (value.offset === undefined || (typeof value.offset === 'number' && Number.isFinite(value.offset) && value.offset >= 0 && value.offset <= 1))
     && (value.point === undefined || isPoint(value.point));
 }
@@ -805,6 +806,7 @@ function mergeEndpoint(current: DiagramEdge['source'], patch: DiagramEdge['sourc
     return {
       nodeId: patch.nodeId,
       ...(patch.port === undefined ? {} : { port: patch.port }),
+      ...(patch.anchorId === undefined ? {} : { anchorId: patch.anchorId }),
       ...(patch.offset === undefined ? {} : { offset: patch.offset }),
     };
   }
@@ -868,8 +870,8 @@ export class ResetEdgeCommand implements DocumentCommand {
       page.edges = page.edges.map((edge) => edge.id !== this.edgeId ? edge : {
         ...edge,
         type: relationship || this.diagramType === 'dfd' ? 'orthogonal' : 'straight',
-        source: { ...edge.source, port: undefined, offset: undefined },
-        target: { ...edge.target, port: undefined, offset: undefined },
+        source: { ...edge.source, port: undefined, anchorId: undefined, offset: undefined },
+        target: { ...edge.target, port: undefined, anchorId: undefined, offset: undefined },
         waypoints: [],
         style: {
           ...edge.style,

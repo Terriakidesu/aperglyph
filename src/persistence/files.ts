@@ -1,6 +1,6 @@
 import { createDocument, createNode, parseProject, serializeProject } from '../core/document';
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
-import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, entityColumns, entityFieldValue, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
+import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
 import { nodeTextLayout } from '../core/text';
@@ -359,9 +359,8 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
          const rowFill = outlineOnly ? outlineFill(typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill) : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
          const stripeFill = outlineOnly ? '#ffffff' : typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
          const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
-     const headerHeight = ERD_HEADER_HEIGHT;
-     const rowHeight = ERD_ROW_HEIGHT;
-     const fieldTop = headerHeight + (showColumnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0);
+      const headerHeight = ERD_HEADER_HEIGHT;
+      const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
      const columnHeaders = showColumnHeaders
        ? `<g><rect y="${headerHeight}" width="${width}" height="${ERD_COLUMN_HEADER_HEIGHT}" fill="${escapeXml(headerFill)}" opacity="0.42"/><line x1="0" y1="${fieldTop}" x2="${width}" y2="${fieldTop}" stroke="${stroke}" stroke-opacity="0.55"/>${columns.map((column) => `<text x="${column.id === 'key' ? column.x + column.width / 2 : column.x + 7}" y="${headerHeight + 15}" fill="${textColor}" font-family="monospace" font-size="9" font-weight="600"${column.id === 'key' ? ' text-anchor="middle"' : ''}>${escapeXml(column.label)}</text>`).join('')}</g>`
        : '';
@@ -373,7 +372,7 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
          const isKey = column.id === 'key';
          const className = isKey ? ' font-weight="600" font-size="9" text-anchor="middle"' : column.id === 'field' ? ` font-size="10"${field.primaryKey ? ' text-decoration="underline"' : ''}${field.foreignKey ? ' font-style="italic"' : ''}` : ' fill-opacity="0.68" font-size="9"';
          const x = isKey ? column.x + column.width / 2 : column.x + 7;
-         return `<text x="${x}" y="${rowY + 18}" fill="${textColor}" font-family="monospace"${className}>${escapeXml(value)}</text>`;
+          return `<text x="${x}" y="${rowY + rowHeight / 2 + 4}" fill="${textColor}" font-family="monospace"${className}>${escapeXml(value)}</text>`;
        }).join('');
        const dividers = columns.slice(0, -1).map((column) => `<line x1="${column.x + column.width}" y1="${rowY}" x2="${column.x + column.width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>`).join('');
        return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/>${dividers}${values}</g>`;

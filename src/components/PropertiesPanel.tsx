@@ -302,8 +302,8 @@ function EdgePropertiesPanel({ edge, nodes, diagramType, document }: { edge: Dia
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
   const plugin = pluginManager.get(diagramType);
   const patch = (changes: EdgePatch, action = 'Update connector') => updateEdge(edge.id, changes, action);
-  const updateSource = (changes: Partial<DiagramEdge['source']>, action = 'Edit source connection') => patch({ source: { ...edge.source, ...changes }, ...(Object.prototype.hasOwnProperty.call(changes, 'nodeId') && changes.nodeId !== edge.source.nodeId ? { waypoints: [] } : {}) }, action);
-  const updateTarget = (changes: Partial<DiagramEdge['target']>, action = 'Edit target connection') => patch({ target: { ...edge.target, ...changes }, ...(Object.prototype.hasOwnProperty.call(changes, 'nodeId') && changes.nodeId !== edge.target.nodeId ? { waypoints: [] } : {}) }, action);
+  const updateSource = (changes: Partial<DiagramEdge['source']>, action = 'Edit source connection') => patch({ source: { ...edge.source, ...changes, ...((Object.prototype.hasOwnProperty.call(changes, 'nodeId') || Object.prototype.hasOwnProperty.call(changes, 'port')) && !Object.prototype.hasOwnProperty.call(changes, 'anchorId') ? { anchorId: undefined } : {}) }, ...(Object.prototype.hasOwnProperty.call(changes, 'nodeId') && changes.nodeId !== edge.source.nodeId ? { waypoints: [] } : {}) }, action);
+  const updateTarget = (changes: Partial<DiagramEdge['target']>, action = 'Edit target connection') => patch({ target: { ...edge.target, ...changes, ...((Object.prototype.hasOwnProperty.call(changes, 'nodeId') || Object.prototype.hasOwnProperty.call(changes, 'port')) && !Object.prototype.hasOwnProperty.call(changes, 'anchorId') ? { anchorId: undefined } : {}) }, ...(Object.prototype.hasOwnProperty.call(changes, 'nodeId') && changes.nodeId !== edge.target.nodeId ? { waypoints: [] } : {}) }, action);
   const sourceNode = nodes.find((node) => node.id === edge.source.nodeId);
   const targetNode = nodes.find((node) => node.id === edge.target.nodeId);
   const label = typeof edge.data.label === 'string' ? edge.data.label : '';

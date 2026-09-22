@@ -81,8 +81,8 @@ export function parseErdSql(sql: string, name = 'Imported SQL schema'): DiagramD
     const firstSource = sourceFields.find((field) => field.id === sourceFieldIds[0]);
     const firstTarget = targetFields.find((field) => field.id === targetFieldIds[0]);
     page.edges.push(createEdge(
-      { nodeId: source.id, port: 'right' },
-      { nodeId: target.id, port: 'left' },
+      { nodeId: source.id, port: 'right', ...(firstSource ? { anchorId: `field-${sourceFields.indexOf(firstSource)}-right` } : {}) },
+      { nodeId: target.id, port: 'left', ...(firstTarget ? { anchorId: `field-${targetFields.indexOf(firstTarget)}-left` } : {}) },
       {
         type: 'orthogonal',
         style: { startMarker: firstSource?.nullable ? 'circle-bar' : 'bar', endMarker: 'bar-crowfoot' },

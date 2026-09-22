@@ -73,6 +73,8 @@ export interface Endpoint {
   /** Attached node. Omit this for a free-standing canvas endpoint. */
   nodeId?: string;
   port?: string;
+  /** Optional stable shape-anchor identity, such as an ERD field row. */
+  anchorId?: string;
   /** Normalized position along a cardinal node port (0 = top/left, 1 = bottom/right). */
   offset?: number;
   /** World-space location used when the endpoint is not attached to a node. */

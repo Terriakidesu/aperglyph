@@ -24,7 +24,7 @@ import { ContextualToolbar } from './ContextualToolbar';
 interface CanvasSize { width: number; height: number }
 interface WorldBounds { x: number; y: number; width: number; height: number }
 interface Marquee { start: Point; current: Point }
-interface ConnectorAnchor { nodeId: string; port?: ConnectionPort; offset?: number }
+interface ConnectorAnchor { nodeId: string; port?: ConnectionPort; anchorId?: string; offset?: number }
 type ResizeHandle = 'nw' | 'ne' | 'se' | 'sw';
 interface ContextMenuState { x: number; y: number; target: { kind: 'canvas' | 'node' | 'edge'; id?: string } }
 interface TextEditState { kind: 'node' | 'edge'; id: string; value: string }
@@ -119,6 +119,10 @@ function distanceBetween(left: Point, right: Point): number {
 }
 
 function endpointPoint(endpoint: Endpoint, node: DiagramNode | undefined, toward?: Point): Point | undefined {
+  if (node && endpoint.anchorId) {
+    const anchor = shapeConnectionAnchorPoints(node).find((candidate) => candidate.anchor.id === endpoint.anchorId);
+    if (anchor) return anchor.point;
+  }
   if (node) return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
   return endpoint.point;
 }
@@ -192,6 +196,21 @@ function rotatePoint(point: Point, center: Point, degrees: number): Point {
   return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
 }
 
+function rotatedNodeBounds(node: DiagramNode): WorldBounds {
+  const center = nodeCenter(node);
+  const corners = [
+    node.position,
+    { x: node.position.x + node.size.width, y: node.position.y },
+    { x: node.position.x + node.size.width, y: node.position.y + node.size.height },
+    { x: node.position.x, y: node.position.y + node.size.height },
+  ].map((point) => rotatePoint(point, center, node.rotation));
+  const minX = Math.min(...corners.map((point) => point.x));
+  const minY = Math.min(...corners.map((point) => point.y));
+  const maxX = Math.max(...corners.map((point) => point.x));
+  const maxY = Math.max(...corners.map((point) => point.y));
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 function shapeConnectionAnchorPoints(node: DiagramNode): ResolvedConnectionAnchor[] {
   return resolveConnectionAnchorPoints(node, pluginManager.getShape(node.library, node.type)?.anchors);
 }
@@ -214,7 +233,7 @@ function nearestConnectionAnchor(nodes: DiagramNode[], point: Point, excludedNod
 
 function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Point, nodes: DiagramNode[], sourceNodeId: string, snappingEnabled = true, maxDistance = ENDPOINT_SNAP_DISTANCE): ConnectorAnchor | null {
   const nearest = snappingEnabled ? nearestConnectionAnchor(nodes, point, sourceNodeId, maxDistance) : null;
-  if (nearest) return nearest.anchor;
+  if (nearest) return { nodeId: nearest.anchor.nodeId, port: nearest.anchor.port, anchorId: nearest.anchor.id, ...(nearest.anchor.offset === undefined ? {} : { offset: nearest.anchor.offset }) };
   const element = globalThis.document.elementFromPoint(event.clientX, event.clientY);
   const portElement = element?.closest?.('[data-connection-port]');
   const nodeElement = element?.closest?.('[data-node-id]');
@@ -230,7 +249,8 @@ function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Po
   const offset = explicitOffset !== undefined && Number.isFinite(explicitOffset)
     ? explicitOffset
     : explicitPort ? undefined : connectionOffset(node, point, port);
-  return { nodeId, port, ...(offset === undefined ? {} : { offset }) };
+  const anchorId = portElement?.getAttribute('data-port') ?? undefined;
+  return { nodeId, port, ...(anchorId ? { anchorId } : {}), ...(offset === undefined ? {} : { offset }) };
 }
 
 interface CanvasViewportProps {
@@ -651,6 +671,10 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       : selectedEdgeItems.length === 1
         ? 'edge'
         : null;
+  const toolbarSelectionIsGrouped = toolbarKind === 'selection'
+    && selectedNodeItems.length > 1
+    && Boolean(selectedNodeItems[0]?.groupId)
+    && selectedNodeItems.every((node) => node.groupId === selectedNodeItems[0]?.groupId);
   const toolbarEdge = toolbarKind === 'edge' ? selectedEdgeItems[0] : undefined;
   const toolbarPoint = (() => {
     if (!toolbarKind || !page) return null;
@@ -740,8 +764,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (!sourceNode || !targetNode) return null;
     const sourcePort = sourceAnchor.port ?? nearestConnectionPort(sourceNode, nodeCenter(targetNode));
     const targetPort = targetAnchor.port ?? nearestConnectionPort(targetNode, nodeCenter(sourceNode));
-    const source = { nodeId: sourceNode.id, port: sourcePort, ...(sourceAnchor.offset === undefined ? {} : { offset: sourceAnchor.offset }) };
-    const target = { nodeId: targetNode.id, port: targetPort, ...(targetAnchor.offset === undefined ? {} : { offset: targetAnchor.offset }) };
+    const source = { nodeId: sourceNode.id, port: sourcePort, ...(sourceAnchor.anchorId ? { anchorId: sourceAnchor.anchorId } : {}), ...(sourceAnchor.offset === undefined ? {} : { offset: sourceAnchor.offset }) };
+    const target = { nodeId: targetNode.id, port: targetPort, ...(targetAnchor.anchorId ? { anchorId: targetAnchor.anchorId } : {}), ...(targetAnchor.offset === undefined ? {} : { offset: targetAnchor.offset }) };
     const branchCount = document.diagramType === 'flowchart' && sourceNode.type === 'decision'
       ? page.edges.filter((edge) => edge.source.nodeId === sourceNode.id).length
       : -1;
@@ -851,7 +875,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
-  const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => {
+  const beginNodeInteraction = (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number, anchorId?: string) => {
     event.preventDefault();
     event.stopPropagation();
     dismissCanvasHint();
@@ -876,7 +900,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
 
     if (port !== undefined && (activeTool === 'select' || activeTool === 'connector')) {
-      const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
+      const anchor = { nodeId: node.id, port, ...(anchorId ? { anchorId } : {}), ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
       if (activeTool === 'connector' && connectorStart) {
         createConnection(connectorStart, anchor);
         setConnectorStart(null);
@@ -903,7 +927,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
 
     if (activeTool === 'connector') {
       if (!port && page && !getSnapSettings(page.settings).ports) return;
-      const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
+      const anchor = { nodeId: node.id, port, ...(anchorId ? { anchorId } : {}), ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
       if (!connectorStart) {
         setConnectorStart(anchor);
       } else {
@@ -1077,7 +1101,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     // do not apply that exclusion while an existing endpoint is being edited.
     const nearest = snappingEnabled ? nearestConnectionAnchor(page.nodes, point, undefined, maxDistance) : null;
     if (nearest) {
-      const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor: nearest.anchor, point: nearest.point };
+      const anchor = { nodeId: nearest.anchor.nodeId, port: nearest.anchor.port, anchorId: nearest.anchor.id, ...(nearest.anchor.offset === undefined ? {} : { offset: nearest.anchor.offset }) };
+      const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor, point: nearest.point };
       endpointPreviewRef.current = preview;
       setEndpointPreview(preview);
       return;
@@ -1309,6 +1334,23 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     const moved = dragPreview[node.id] ? { ...node, position: dragPreview[node.id] } : node;
     return [node.id, resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved] as const;
   })), [dragPreview, page?.nodes, resizePreview]);
+  const groupBounds = (() => {
+    const groups = new Map<string, DiagramNode[]>();
+    nodeMap.forEach((node) => {
+      if (node.hidden || !node.groupId) return;
+      const members = groups.get(node.groupId) ?? [];
+      members.push(node);
+      groups.set(node.groupId, members);
+    });
+    return [...groups.entries()].map(([id, members]) => {
+      const bounds = members.map(rotatedNodeBounds);
+      const minX = Math.min(...bounds.map((value) => value.x)) - 14;
+      const minY = Math.min(...bounds.map((value) => value.y)) - 14;
+      const maxX = Math.max(...bounds.map((value) => value.x + value.width)) + 14;
+      const maxY = Math.max(...bounds.map((value) => value.y + value.height)) + 14;
+      return { id, members, bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY }, selected: members.every((node) => selectedIds.includes(node.id)) };
+    });
+  })();
   const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
   const connectionTarget = connectorDragPreview?.target
     ? { nodeId: connectorDragPreview.target.anchor.nodeId, point: connectorDragPreview.target.point }
@@ -1403,12 +1445,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
           <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : canvasBackground} />
           {shapePreviewNode && <g className="shape-drop-preview" transform={`translate(${shapePreviewNode.position.x} ${shapePreviewNode.position.y})`} pointerEvents="none"><NodeGraphic node={shapePreviewNode} diagramType={document.diagramType} /></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
-          {view.guides && <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
+           {view.guides && <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
             ? <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guide.position} y1={guideWorld.top} x2={guide.position} y2={guideWorld.bottom} onPointerDown={(event) => beginGuideDrag(event, 'vertical', guide)} onDoubleClick={() => removeGuide(guide.id)} />
             : <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guideWorld.left} y1={guide.position} x2={guideWorld.right} y2={guide.position} onPointerDown={(event) => beginGuideDrag(event, 'horizontal', guide)} onDoubleClick={() => removeGuide(guide.id)} />)}{guidePreview && (guidePreview.orientation === 'vertical'
-            ? <line className="canvas-guide preview" x1={guidePreview.position} y1={guideWorld.top} x2={guidePreview.position} y2={guideWorld.bottom} />
-             : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>}
-         <g className="edge-layer">{renderedEdges.map((edge) => {
+             ? <line className="canvas-guide preview" x1={guidePreview.position} y1={guideWorld.top} x2={guidePreview.position} y2={guideWorld.bottom} />
+              : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>}
+          {groupBounds.length > 0 && <g className="group-bounds-layer">{groupBounds.map((group) => { const label = `Group · ${group.members.length} objects`; return <g key={group.id} className={group.selected ? 'group-boundary selected' : 'group-boundary'}><rect className="group-boundary-outline" x={group.bounds.x} y={group.bounds.y} width={group.bounds.width} height={group.bounds.height} rx="10" /><rect className="group-boundary-label-bg" x={group.bounds.x + 8} y={group.bounds.y - 18} width={Math.max(104, label.length * 5.7 + 14)} height="16" rx="4" /><text className="group-boundary-label" x={group.bounds.x + 15} y={group.bounds.y - 7}>{label}</text></g>; })}</g>}
+          <g className="edge-layer">{renderedEdges.map((edge) => {
           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
             ? (() => { const next = previewEdge.waypoints.slice(); if (waypointPreview.index < next.length) next[waypointPreview.index] = waypointPreview.point; else next.splice(Math.min(waypointPreview.index, next.length), 0, waypointPreview.point); return next; })()
@@ -1434,7 +1477,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       </g>
     </svg>
        {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
-       {toolbarKind && toolbarPoint && !contextMenu && !textEdit && !quickCreate && <ContextualToolbar kind={toolbarKind} x={toolbarPoint.x} y={toolbarPoint.y} nodes={selectedNodeItems} edge={toolbarEdge} document={document} onDuplicate={() => duplicateSelection()} onDelete={deleteSelection} onToggleLock={toggleSelectedLock} onToggleHidden={toolbarKind === 'node' ? toggleSelectedHidden : undefined} onFormatPainter={toolbarKind === 'node' ? activateFormatPainter : undefined} onFill={toolbarKind === 'node' || toolbarKind === 'selection' ? applySelectedFill : undefined} onAlign={toolbarKind === 'selection' ? alignSelection : undefined} onDistribute={toolbarKind === 'selection' ? distributeSelection : undefined} onGroup={toolbarKind === 'selection' ? groupSelection : undefined} onUngroup={toolbarKind === 'selection' ? ungroupSelection : undefined} onZOrder={toolbarKind !== 'edge' ? setZOrder : undefined} onEdgeRouting={toolbarKind === 'edge' ? changeEdgeRouting : undefined} onReverse={toolbarEdge ? () => reverseContextEdge(toolbarEdge.id) : undefined} onSwapMarkers={toolbarEdge ? () => swapContextMarkers(toolbarEdge.id) : undefined} onAddWaypoint={toolbarEdge ? () => addContextWaypoint(toolbarEdge.id) : undefined} onResetEdge={toolbarEdge ? () => resetEdge(toolbarEdge.id) : undefined} />}
+       {toolbarKind && toolbarPoint && !contextMenu && !textEdit && !quickCreate && <ContextualToolbar kind={toolbarKind} x={toolbarPoint.x} y={toolbarPoint.y} nodes={selectedNodeItems} grouped={toolbarSelectionIsGrouped} edge={toolbarEdge} document={document} onDuplicate={() => duplicateSelection()} onDelete={deleteSelection} onToggleLock={toggleSelectedLock} onToggleHidden={toolbarKind === 'node' ? toggleSelectedHidden : undefined} onFormatPainter={toolbarKind === 'node' ? activateFormatPainter : undefined} onFill={toolbarKind === 'node' || toolbarKind === 'selection' ? applySelectedFill : undefined} onAlign={toolbarKind === 'selection' ? alignSelection : undefined} onDistribute={toolbarKind === 'selection' ? distributeSelection : undefined} onGroup={toolbarKind === 'selection' ? groupSelection : undefined} onUngroup={toolbarKind === 'selection' ? ungroupSelection : undefined} onZOrder={toolbarKind !== 'edge' ? setZOrder : undefined} onEdgeRouting={toolbarKind === 'edge' ? changeEdgeRouting : undefined} onReverse={toolbarEdge ? () => reverseContextEdge(toolbarEdge.id) : undefined} onSwapMarkers={toolbarEdge ? () => swapContextMarkers(toolbarEdge.id) : undefined} onAddWaypoint={toolbarEdge ? () => addContextWaypoint(toolbarEdge.id) : undefined} onResetEdge={toolbarEdge ? () => resetEdge(toolbarEdge.id) : undefined} />}
         {contextMenu && <div className="canvas-context-menu" style={{ left: Math.min(contextMenu.x, Math.max(8, size.width - 218)), top: Math.min(contextMenu.y, Math.max(8, size.height - 360)) }} onPointerDown={(event) => event.stopPropagation()}>
        {contextMenu.target.kind === 'canvas' && <><button onClick={() => { pasteClipboard(); setContextMenu(null); }}>Paste</button><button onClick={() => { selectAll(); setContextMenu(null); }}>Select all</button><button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button><div className="context-menu-divider" /><button onClick={() => { editorEvents.emit('viewport:fit', { scope: 'page' }); setContextMenu(null); }}>Fit page</button><button onClick={() => { useEditorStore.getState().updateViewport({ zoom: 1 }); setContextMenu(null); }}>100% zoom</button></>}
        {contextMenu.target.kind === 'node' && contextMenu.target.id && <><button onClick={() => beginTextEdit('node', contextMenu.target.id!)}>Edit text</button><div className="context-menu-divider" /><button onClick={() => { void copySelection(); setContextMenu(null); }}>Copy</button><button onClick={() => { cutSelection(); setContextMenu(null); }}>Cut</button><button onClick={duplicateContextTarget}>Duplicate</button><div className="context-menu-divider" /><button onClick={() => { setZOrder('forward'); setContextMenu(null); }}>Bring forward</button><button onClick={() => { setZOrder('backward'); setContextMenu(null); }}>Send backward</button><button onClick={() => { setZOrder('front'); setContextMenu(null); }}>Bring to front</button><button onClick={() => { setZOrder('back'); setContextMenu(null); }}>Send to back</button><div className="context-menu-divider" /><button onClick={() => { toggleSelectedLock(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => { toggleSelectedHidden(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.hidden ? 'Show' : 'Hide'}</button><button onClick={() => { selectConnected(contextMenu.target.id!); setContextMenu(null); }}>Select connected</button><button onClick={() => { selectSameType(contextMenu.target.id!); setContextMenu(null); }}>Select same type</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
@@ -1605,6 +1648,7 @@ function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker
 function sameEndpoint(left: Endpoint, right: Endpoint): boolean {
   return left.nodeId === right.nodeId
     && left.port === right.port
+    && left.anchorId === right.anchorId
     && left.offset === right.offset
     && left.point?.x === right.point?.x
     && left.point?.y === right.point?.y;
@@ -1614,7 +1658,7 @@ function shapeIconForQuickCreate(icon: string) {
   return <span aria-hidden="true">{icon === 'diamond' ? '◇' : icon === 'circle' ? '○' : icon === 'line' ? '—' : icon === 'database' || icon === 'table' ? '▤' : '□'}</span>;
 }
 
-function NodeView({ node, position, selected, connectorStart, connectorTarget, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; connectorTarget: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
+function NodeView({ node, position, selected, connectorStart, connectorTarget, showPorts, diagramType, onPointerDown, onResizePointerDown, onDoubleClick }: { node: DiagramNode; position: Point; selected: boolean; connectorStart: boolean; connectorTarget: boolean; showPorts: boolean; diagramType: string; onPointerDown: (event: ReactPointerEvent<SVGElement>, node: DiagramNode, port?: ConnectionPort, offset?: number, anchorId?: string) => void; onResizePointerDown: (event: ReactPointerEvent<SVGRectElement>, node: DiagramNode, handle: ResizeHandle) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, node: DiagramNode) => void }) {
   const width = node.size.width;
   const height = node.size.height;
   const ports = shapeConnectionAnchorPoints(node).map(({ anchor, localPoint }) => ({
@@ -1633,7 +1677,7 @@ function NodeView({ node, position, selected, connectorStart, connectorTarget, s
   ];
   return <g className={`canvas-node ${node.container ? 'container-node' : ''} ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''} ${connectorTarget ? 'connector-target' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
     <NodeGraphic node={node} diagramType={diagramType} />
-     {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset); }} />)}</g>}
+      {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset, port.id); }} />)}</g>}
      {selected && <g className="node-handles" pointerEvents="all"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" pointerEvents="none" />{resizeHandles.map((handle) => <rect key={handle.id} className="handle" x={handle.x} y={handle.y} width="8" height="8" style={{ cursor: handle.cursor }} onPointerDown={(event) => onResizePointerDown(event, node, handle.id)} />)}</g>}
   </g>;
 }
