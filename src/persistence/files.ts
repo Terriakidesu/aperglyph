@@ -2,7 +2,7 @@ import { createDocument, createNode, parseProject, serializeProject } from '../c
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
 import { pluginManager } from '../plugins';
@@ -224,7 +224,9 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
       const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
       return {
         id: edge.id,
-        points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes),
+        points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
+          lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
+        }),
       };
     });
   const routeJumps = calculateRouteJumps(routeEntries);
@@ -233,7 +235,9 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
     const offset = parallelEdgeOffset(edge, edges);
     const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
-    const route = edgeRoute(routedEdge, source, target, nodes);
+    const route = edgeRoute(routedEdge, source, target, nodes, {
+      lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
+    });
     if (route.length < 2) return '';
     const start = route[0];
     const end = route.at(-1) ?? start;

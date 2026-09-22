@@ -8,6 +8,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added sparse rectilinear visibility-graph routing with deterministic parallel lanes, bend/crossing/overlap/proximity costs, soft connector awareness, and previous-route stability preferences.
 - Added authoritative orthogonal port directions, separate node-clearance and port-stub geometry, terminal marker clearance, and persisted route intent/constraint metadata.
 - Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.
 - Added a reproducible `npm run build:wasm` pipeline and automatic WASM generation before development and production builds.

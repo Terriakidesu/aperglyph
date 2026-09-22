@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, NODE_CLEARANCE, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, NODE_CLEARANCE, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -84,6 +84,28 @@ describe('connector routing', () => {
     expect(portDirection('east')).toBe('east');
     expect(portDirection('center')).toBeUndefined();
     expect(NODE_CLEARANCE).not.toBe(PORT_STUB_LENGTH);
+  });
+
+  it('assigns deterministic lanes to parallel orthogonal connectors', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    const first = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal' });
+    const second = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal' });
+    const lane = parallelRoutingLane(second, [second, first]);
+    expect(lane).toMatchObject({ count: 2, spacing: 16 });
+    expect([0, 1]).toContain(lane?.index);
+    expect(parallelRoutingLane(second, [first, second])).toEqual(lane);
+    const route = edgeRoute(second, source, target, [source, target], { lane });
+    expect(route.some((point) => point.y !== route[0].y)).toBe(true);
+  });
+
+  it('uses the previous route as a stability preference when it remains clear', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 180 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal' });
+    const previous = edgeRoute(edge, source, target, [source, target]);
+    const next = edgeRoute(edge, source, target, [source, target], { previousRoute: previous });
+    expect(next).toEqual(previous);
   });
 
   it('routes around an intervening node instead of crossing its bounds', () => {

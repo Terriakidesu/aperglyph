@@ -9,7 +9,7 @@ import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, Size, Viewport } from '../core/types';
@@ -324,6 +324,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
   const spatialReadyRef = useRef(false);
   const spatialQueryRef = useRef(0);
+  const routeCacheRef = useRef(new Map<string, Point[]>());
 
   useEffect(() => {
     if (view.connectionHints && !previousHintsPreference.current) setShowCanvasHint(true);
@@ -1370,13 +1371,29 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     : endpointPreview?.anchor.nodeId
       ? { nodeId: endpointPreview.anchor.nodeId, point: endpointPreview.point }
       : null;
-  const routeEntries = useMemo(() => renderedEdges.map((edge) => {
-    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
-    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
-    const parallelOffset = parallelEdgeOffset(edge, page?.edges ?? renderedEdges);
-    const routedEdge = parallelOffset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset } };
-    return { id: edge.id, points: edgeRoute(routedEdge, source, target, [...nodeMap.values()]) };
-  }), [nodeMap, page?.edges, renderedEdges]);
+  const routeEntries = useMemo(() => {
+    const routes: Array<{ id: string; points: Point[] }> = [];
+    renderedEdges.forEach((edge) => {
+      const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+      const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+      const parallelOffset = parallelEdgeOffset(edge, page?.edges ?? renderedEdges);
+      const routedEdge = parallelOffset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset } };
+      routes.push({
+        id: edge.id,
+        points: edgeRoute(routedEdge, source, target, [...nodeMap.values()], {
+          previousRoute: routeCacheRef.current.get(edge.id),
+          otherRoutes: routes.map((route) => route.points),
+          lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, page?.edges ?? renderedEdges) : undefined,
+        }),
+      });
+    });
+    return routes;
+  }, [nodeMap, page?.edges, renderedEdges]);
+  useEffect(() => {
+    const currentIds = new Set(routeEntries.map((entry) => entry.id));
+    routeEntries.forEach((entry) => routeCacheRef.current.set(entry.id, entry.points));
+    routeCacheRef.current.forEach((_route, id) => { if (!currentIds.has(id)) routeCacheRef.current.delete(id); });
+  }, [routeEntries]);
   const edgeRoutes = useMemo(() => new Map(routeEntries.map((entry) => [entry.id, entry.points])), [routeEntries]);
   const edgeJumps = useMemo(() => calculateRouteJumps(routeEntries.filter((entry) => renderedEdges.some((edge) => edge.id === entry.id && edgeRouting(edge) === 'orthogonal'))), [renderedEdges, routeEntries]);
   const editBox = useMemo(() => {
@@ -1477,7 +1494,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
          {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
          <g className="edge-marker-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
-            return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} markerFill={canvasBackground} />;
+              return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={endpointPreview?.edgeId === edge.id ? undefined : edgeRoutes.get(edge.id)} markerFill={canvasBackground} />;
          })}</g>
          <g className="edge-endpoint-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
@@ -1536,8 +1553,8 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
   </g>;
 }
 
-function EdgeMarkersView({ edge, source, target, obstacles, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; markerFill: string }) {
-  const route = edgeRoute(edge, source, target, obstacles);
+function EdgeMarkersView({ edge, source, target, obstacles, route: providedRoute, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; markerFill: string }) {
+  const route = providedRoute ?? edgeRoute(edge, source, target, obstacles);
   if (route.length < 2) return null;
   const start = route[0];
   const end = route[route.length - 1];

@@ -17,6 +17,15 @@ export interface RoutingEndpoint {
 export interface RouteOptions {
   nodeClearance?: number;
   portStubLength?: number;
+  previousRoute?: Point[];
+  otherRoutes?: ReadonlyArray<Point[]>;
+  lane?: RoutingLane;
+}
+
+export interface RoutingLane {
+  index: number;
+  count: number;
+  spacing?: number;
 }
 
 export interface RouteJump {
@@ -51,6 +60,21 @@ export function parallelEdgeOffset(edge: DiagramEdge, edges: DiagramEdge[]): num
   return (index - (parallel.length - 1) / 2) * 20;
 }
 
+/** Deterministic orthogonal lane assignment for parallel connectors. */
+export function parallelRoutingLane(edge: DiagramEdge, edges: DiagramEdge[]): RoutingLane | undefined {
+  const sourceId = edge.source.nodeId;
+  const targetId = edge.target.nodeId;
+  if (!sourceId || !targetId || sourceId === targetId) return undefined;
+  const parallel = edges.filter((candidate) => {
+    const candidateSource = candidate.source.nodeId;
+    const candidateTarget = candidate.target.nodeId;
+    return (candidateSource === sourceId && candidateTarget === targetId) || (candidateSource === targetId && candidateTarget === sourceId);
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  if (parallel.length < 2) return undefined;
+  const index = parallel.findIndex((candidate) => candidate.id === edge.id);
+  return { index: edge.routing?.lane ?? index, count: parallel.length, spacing: 16 };
+}
+
 /**
  * Returns the rendered connector route. Orthogonal routes use a small
  * visibility-grid search so bends stay outside node rectangles instead of
@@ -83,7 +107,7 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
 
   let current = startExit;
   for (const destination of [...edge.waypoints, endEntry]) {
-    appendRoute(route, routeBetween(current, destination, rectangles));
+    appendRoute(route, routeBetween(current, destination, rectangles, options));
     current = destination;
   }
   appendPoint(route, end);
@@ -265,7 +289,8 @@ function normalizeDirection(direction: Point): Point {
 }
 
 interface Rect { left: number; right: number; top: number; bottom: number }
-interface SearchState { i: number; j: number; direction: number; key: string }
+interface GraphPoint extends Point { index: number }
+interface SearchState { point: number; direction: number; key: string }
 
 function legacyOrthogonalRoute(start: Point, end: Point, waypoints: Point[]): Point[] {
   const points = [start, ...waypoints, end];
@@ -279,37 +304,44 @@ function legacyOrthogonalRoute(start: Point, end: Point, waypoints: Point[]): Po
   }, [points[0]]);
 }
 
-function routeBetween(from: Point, to: Point, obstacles: Rect[]): Point[] {
+function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteOptions): Point[] {
   if (samePoint(from, to)) return [from];
-  if (sameAxis(from, to) && clearSegment(from, to, obstacles)) return [from, to];
+  const laneRoute = options.lane ? explicitLaneRoute(from, to, obstacles, options.lane) : null;
+  if (laneRoute) return laneRoute;
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0)) return [from, to];
 
-  const xs = uniqueSorted([from.x, to.x, ...obstacles.flatMap((rect) => [rect.left, rect.right])]);
-  const ys = uniqueSorted([from.y, to.y, ...obstacles.flatMap((rect) => [rect.top, rect.bottom])]);
-  const start = { i: indexOf(xs, from.x), j: indexOf(ys, from.y) };
-  const goal = { i: indexOf(xs, to.x), j: indexOf(ys, to.y) };
-  const open: SearchState[] = [{ ...start, direction: -1, key: stateKey(start.i, start.j, -1) }];
+  const points = visibilityGraphPoints(from, to, obstacles, options.lane);
+  const graph = buildVisibilityGraph(points, obstacles);
+  const start = points.findIndex((point) => samePoint(point, from));
+  const goal = points.findIndex((point) => samePoint(point, to));
+  if (start < 0 || goal < 0) return fallbackOrthogonalRoute(from, to, obstacles);
+  const open: SearchState[] = [{ point: start, direction: -1, key: stateKey(start, -1) }];
   const states = new Map<string, SearchState>(open.map((state) => [state.key, state]));
   const scores = new Map<string, number>([[open[0].key, 0]]);
   const parents = new Map<string, string>();
-  const maxStates = Math.max(2000, xs.length * ys.length * 4);
+  const maxStates = Math.max(2000, points.length * 4);
 
   while (open.length > 0 && states.size <= maxStates) {
     let bestIndex = 0;
     let bestScore = Number.POSITIVE_INFINITY;
     open.forEach((state, index) => {
-      const score = (scores.get(state.key) ?? Number.POSITIVE_INFINITY) + Math.abs(xs[state.i] - to.x) + Math.abs(ys[state.j] - to.y);
+      const point = points[state.point];
+      const score = (scores.get(state.key) ?? Number.POSITIVE_INFINITY) + Math.abs(point.x - to.x) + Math.abs(point.y - to.y);
       if (score < bestScore) { bestScore = score; bestIndex = index; }
     });
     const current = open.splice(bestIndex, 1)[0];
-    if (current.i === goal.i && current.j === goal.j) return reconstructRoute(current.key, states, parents, xs, ys);
+    if (current.point === goal) return reconstructRoute(current.key, states, parents, points);
 
-    for (const neighbor of neighbors(current, xs.length, ys.length)) {
-      const fromPoint = { x: xs[current.i], y: ys[current.j] };
-      const toPoint = { x: xs[neighbor.i], y: ys[neighbor.j] };
-      if (blockedPoint(toPoint, obstacles) && !(neighbor.i === goal.i && neighbor.j === goal.j)) continue;
-      if (!clearSegment(fromPoint, toPoint, obstacles)) continue;
-      const cost = (scores.get(current.key) ?? 0) + Math.abs(toPoint.x - fromPoint.x) + Math.abs(toPoint.y - fromPoint.y) + (current.direction >= 0 && current.direction !== neighbor.direction ? 24 : 0);
-      const key = stateKey(neighbor.i, neighbor.j, neighbor.direction);
+    for (const neighbor of graph[current.point]) {
+      const fromPoint = points[current.point];
+      const toPoint = points[neighbor.point];
+      const length = Math.abs(toPoint.x - fromPoint.x) + Math.abs(toPoint.y - fromPoint.y);
+      const cost = (scores.get(current.key) ?? 0)
+        + length
+        + (current.direction >= 0 && current.direction !== neighbor.direction ? 32 : 0)
+        + routeSegmentPenalty(fromPoint, toPoint, options)
+        + routeChangePenalty(fromPoint, toPoint, options.previousRoute);
+      const key = stateKey(neighbor.point, neighbor.direction);
       if (cost >= (scores.get(key) ?? Number.POSITIVE_INFINITY)) continue;
       const next = { ...neighbor, key };
       states.set(key, next);
@@ -322,25 +354,167 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[]): Point[] {
   return fallbackOrthogonalRoute(from, to, obstacles);
 }
 
-function neighbors(state: SearchState, width: number, height: number): SearchState[] {
-  return [
-    { i: state.i - 1, j: state.j, direction: 0, key: '' },
-    { i: state.i + 1, j: state.j, direction: 1, key: '' },
-    { i: state.i, j: state.j - 1, direction: 2, key: '' },
-    { i: state.i, j: state.j + 1, direction: 3, key: '' },
-  ].filter((neighbor) => neighbor.i >= 0 && neighbor.i < width && neighbor.j >= 0 && neighbor.j < height);
+function explicitLaneRoute(from: Point, to: Point, obstacles: Rect[], lane: RoutingLane): Point[] | null {
+  if (lane.count < 2 || !sameAxis(from, to)) return null;
+  const offset = (lane.index - (lane.count - 1) / 2) * (lane.spacing ?? 16);
+  if (Math.abs(offset) < EPSILON) return null;
+  const first = almostEqual(from.y, to.y)
+    ? { x: from.x, y: from.y + offset }
+    : { x: from.x + offset, y: from.y };
+  const second = almostEqual(from.y, to.y)
+    ? { x: to.x, y: to.y + offset }
+    : { x: to.x + offset, y: to.y };
+  if (!clearSegment(from, first, obstacles) || !clearSegment(first, second, obstacles) || !clearSegment(second, to, obstacles)) return null;
+  return [from, first, second, to];
 }
 
-function reconstructRoute(key: string, states: Map<string, SearchState>, parents: Map<string, string>, xs: number[], ys: number[]): Point[] {
-  const points: Point[] = [];
+interface GraphNeighbor { point: number; direction: number }
+
+function visibilityGraphPoints(from: Point, to: Point, obstacles: Rect[], lane?: RoutingLane): GraphPoint[] {
+  const points: GraphPoint[] = [];
+  const add = (point: Point) => {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || blockedPoint(point, obstacles)) return;
+    if (points.some((candidate) => samePoint(candidate, point))) return;
+    points.push({ ...point, index: points.length });
+  };
+  add(from);
+  add(to);
+  obstacles.forEach((rect) => {
+    add({ x: rect.left, y: rect.top });
+    add({ x: rect.right, y: rect.top });
+    add({ x: rect.right, y: rect.bottom });
+    add({ x: rect.left, y: rect.bottom });
+  });
+
+  // Add only projections onto obstacle boundaries, rather than every X × Y
+  // intersection. This keeps useful corridor gates while avoiding irrelevant
+  // Cartesian-grid states as diagrams grow.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const seeds = points.slice();
+    obstacles.forEach((rect) => seeds.forEach((seed) => {
+      add({ x: rect.left, y: seed.y });
+      add({ x: rect.right, y: seed.y });
+      add({ x: seed.x, y: rect.top });
+      add({ x: seed.x, y: rect.bottom });
+    }));
+  }
+
+  if (lane && lane.count > 1) {
+    const spacing = lane.spacing ?? 16;
+    const offset = (lane.index - (lane.count - 1) / 2) * spacing;
+    if (almostEqual(from.y, to.y)) {
+      add({ x: from.x, y: from.y + offset });
+      add({ x: to.x, y: to.y + offset });
+    } else if (almostEqual(from.x, to.x)) {
+      add({ x: from.x + offset, y: from.y });
+      add({ x: to.x + offset, y: to.y });
+    }
+  }
+  return points;
+}
+
+function buildVisibilityGraph(points: GraphPoint[], obstacles: Rect[]): GraphNeighbor[][] {
+  const graph: GraphNeighbor[][] = points.map(() => []);
+  points.forEach((point, pointIndex) => {
+    const candidates = points
+      .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+      .filter(({ candidate }) => sameAxis(point, candidate) && !samePoint(point, candidate))
+      .filter(({ candidate }) => clearSegment(point, candidate, obstacles));
+    const directions = new Map<number, { candidateIndex: number; distance: number }>();
+    candidates.forEach(({ candidate, candidateIndex }) => {
+      const direction = candidate.x > point.x ? 1 : candidate.x < point.x ? 0 : candidate.y > point.y ? 3 : 2;
+      const distance = Math.abs(candidate.x - point.x) + Math.abs(candidate.y - point.y);
+      const current = directions.get(direction);
+      if (!current || distance < current.distance) directions.set(direction, { candidateIndex, distance });
+    });
+    directions.forEach(({ candidateIndex }) => {
+      const candidate = points[candidateIndex];
+      const direction = candidate.x > point.x ? 1 : candidate.x < point.x ? 0 : candidate.y > point.y ? 3 : 2;
+      graph[pointIndex].push({ point: candidateIndex, direction });
+    });
+  });
+  return graph;
+}
+
+function reconstructRoute(key: string, states: Map<string, SearchState>, parents: Map<string, string>, graphPoints: Point[]): Point[] {
+  const route: Point[] = [];
   let current: string | undefined = key;
   while (current) {
     const state = states.get(current);
     if (!state) break;
-    points.push({ x: xs[state.i], y: ys[state.j] });
+    route.push({ x: graphPoints[state.point].x, y: graphPoints[state.point].y });
     current = parents.get(current);
   }
-  return points.reverse();
+  return route.reverse();
+}
+
+function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): number {
+  const routes = options.otherRoutes ?? [];
+  let penalty = 0;
+  routes.forEach((route) => {
+    for (let index = 0; index < route.length - 1; index += 1) {
+      const existingStart = route[index];
+      const existingEnd = route[index + 1];
+      if (segmentsOverlap(from, to, existingStart, existingEnd)) penalty += 140;
+      else if (segmentsCross(from, to, existingStart, existingEnd)) penalty += 90;
+      else if (axisSegmentDistance(from, to, existingStart, existingEnd) <= 8) penalty += 10;
+    }
+  });
+  return penalty;
+}
+
+function routeChangePenalty(from: Point, to: Point, previousRoute?: Point[]): number {
+  if (!previousRoute || previousRoute.length < 2) return 0;
+  const matchesPrevious = previousRoute.slice(0, -1).some((previousStart, index) => {
+    const previousEnd = previousRoute[index + 1];
+    return segmentsOverlap(from, to, previousStart, previousEnd) || axisSegmentDistance(from, to, previousStart, previousEnd) <= 2;
+  });
+  return matchesPrevious ? 0 : 12;
+}
+
+function segmentsOverlap(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): boolean {
+  if (almostEqual(leftStart.y, leftEnd.y) && almostEqual(rightStart.y, rightEnd.y) && almostEqual(leftStart.y, rightStart.y)) {
+    return Math.min(leftEnd.x, leftStart.x) < Math.max(rightEnd.x, rightStart.x) - EPSILON
+      && Math.max(leftEnd.x, leftStart.x) > Math.min(rightEnd.x, rightStart.x) + EPSILON;
+  }
+  if (almostEqual(leftStart.x, leftEnd.x) && almostEqual(rightStart.x, rightEnd.x) && almostEqual(leftStart.x, rightStart.x)) {
+    return Math.min(leftEnd.y, leftStart.y) < Math.max(rightEnd.y, rightStart.y) - EPSILON
+      && Math.max(leftEnd.y, leftStart.y) > Math.min(rightEnd.y, rightStart.y) + EPSILON;
+  }
+  return false;
+}
+
+function segmentsCross(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): boolean {
+  const leftHorizontal = almostEqual(leftStart.y, leftEnd.y);
+  const rightHorizontal = almostEqual(rightStart.y, rightEnd.y);
+  if (leftHorizontal === rightHorizontal) return false;
+  const horizontalStart = leftHorizontal ? leftStart : rightStart;
+  const horizontalEnd = leftHorizontal ? leftEnd : rightEnd;
+  const verticalStart = leftHorizontal ? rightStart : leftStart;
+  const verticalEnd = leftHorizontal ? rightEnd : leftEnd;
+  return strictlyBetween(verticalStart.x, horizontalStart.x, horizontalEnd.x, 0)
+    && strictlyBetween(horizontalStart.y, verticalStart.y, verticalEnd.y, 0);
+}
+
+function axisSegmentDistance(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): number {
+  if (almostEqual(leftStart.y, leftEnd.y) && almostEqual(rightStart.y, rightEnd.y)) {
+    if (Math.max(Math.min(leftEnd.x, leftStart.x), Math.min(rightEnd.x, rightStart.x)) <= Math.min(Math.max(leftEnd.x, leftStart.x), Math.max(rightEnd.x, rightStart.x))) return Math.abs(leftStart.y - rightStart.y);
+    return Math.min(Math.abs(leftStart.x - rightEnd.x), Math.abs(rightStart.x - leftEnd.x));
+  }
+  if (almostEqual(leftStart.x, leftEnd.x) && almostEqual(rightStart.x, rightEnd.x)) {
+    if (Math.max(Math.min(leftEnd.y, leftStart.y), Math.min(rightEnd.y, rightStart.y)) <= Math.min(Math.max(leftEnd.y, leftStart.y), Math.max(rightEnd.y, rightStart.y))) return Math.abs(leftStart.x - rightStart.x);
+    return Math.min(Math.abs(leftStart.y - rightEnd.y), Math.abs(rightStart.y - leftEnd.y));
+  }
+  if (almostEqual(leftStart.y, leftEnd.y)) {
+    const horizontal = leftStart;
+    const vertical = rightStart;
+    const horizontalRange = [Math.min(leftStart.x, leftEnd.x), Math.max(leftStart.x, leftEnd.x)];
+    const verticalRange = [Math.min(rightStart.y, rightEnd.y), Math.max(rightStart.y, rightEnd.y)];
+    const xDistance = vertical.x < horizontalRange[0] ? horizontalRange[0] - vertical.x : vertical.x > horizontalRange[1] ? vertical.x - horizontalRange[1] : 0;
+    const yDistance = horizontal.y < verticalRange[0] ? verticalRange[0] - horizontal.y : horizontal.y > verticalRange[1] ? horizontal.y - verticalRange[1] : 0;
+    return Math.hypot(xDistance, yDistance);
+  }
+  return axisSegmentDistance(rightStart, rightEnd, leftStart, leftEnd);
 }
 
 function fallbackOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Point[] {
@@ -464,13 +638,8 @@ function uniqueSorted(values: number[]): number[] {
   return values.sort((left, right) => left - right).filter((value, index, all) => index === 0 || !almostEqual(value, all[index - 1]));
 }
 
-function indexOf(values: number[], value: number): number {
-  const index = values.findIndex((candidate) => almostEqual(candidate, value));
-  return index >= 0 ? index : values.push(value) - 1;
-}
-
-function stateKey(i: number, j: number, direction: number): string {
-  return `${i}:${j}:${direction}`;
+function stateKey(point: number, direction: number): string {
+  return `${point}:${direction}`;
 }
 
 function sameAxis(left: Point, right: Point): boolean {
