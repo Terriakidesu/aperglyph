@@ -1,4 +1,4 @@
-import { ChevronDown, Circle, Database, Diamond, RectangleHorizontal, Search, Square, Star, Table2, Type, Workflow } from 'lucide-react';
+import { ArrowRight, ChevronDown, Circle, Cloud, Database, Diamond, Hexagon, Package, Pentagon, RectangleHorizontal, Search, Square, Star, Table2, Triangle, Type, Workflow } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { pluginManager } from '../plugins';
 import type { ShapeDefinition, ShapeIconId } from '../plugins';
@@ -20,6 +20,13 @@ const iconMap: Record<ShapeIconId, typeof Square> = {
   database: Database,
   table: Table2,
   workflow: Workflow,
+  cloud: Cloud,
+  triangle: Triangle,
+  hexagon: Hexagon,
+  pentagon: Pentagon,
+  package: Package,
+  arrow: ArrowRight,
+  data: Database,
 };
 
 type LibraryFilter = 'all' | 'favorites' | 'recent';
@@ -41,7 +48,7 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
   const isFavorite = (libraryId: string, shape: ShapeDefinition) => favorites.includes(shapeKey(libraryId, shape));
   const matches = (shape: ShapeDefinition, libraryId: string) => {
     if (libraryScope !== 'all' && libraryScope !== libraryId) return false;
-    if (normalizedSearch && !`${shape.label} ${shape.tags?.join(' ') ?? ''}`.toLowerCase().includes(normalizedSearch)) return false;
+    if (normalizedSearch && ![shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(normalizedSearch)) return false;
     const key = shapeKey(libraryId, shape);
     if (filter === 'favorites') return favorites.includes(key);
     if (filter === 'recent') return recent.includes(key);
@@ -81,19 +88,34 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
     </div>
     <label className="library-scope"><span>Library</span><select aria-label="Shape library category" value={libraryScope} onChange={(event) => { setLibraryScope(event.target.value); writeLibraryScope(event.target.value); }}><option value="all">All libraries</option>{plugins.map((plugin) => <option key={plugin.id} value={plugin.id}>{plugin.name}</option>)}</select></label>
     <div className="library-scroll">
-      {plugins.map((plugin) => {
-        const shapes = plugin.shapes.filter((shape) => matches(shape, plugin.id));
-        if (shapes.length === 0) return null;
-        const open = openGroups[plugin.id] ?? true;
-         return <ShapeGroup key={plugin.id} title={plugin.id === 'general' ? 'Basic shapes' : `${plugin.name} shapes`} shapes={shapes} open={open} onToggle={() => {
-          const next = { ...openGroups, [plugin.id]: !open };
-          setOpenGroups(next);
-          writeGroups(next);
-         }} onAdd={(shape) => addShape(shape, plugin.id)} libraryId={plugin.id} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} isRecent={(shape) => recent.includes(shapeKey(plugin.id, shape))} />;
-      })}
+       {plugins.map((plugin) => {
+         const shapes = plugin.shapes.filter((shape) => matches(shape, plugin.id));
+         if (shapes.length === 0) return null;
+         const categories = groupShapes(shapes, plugin.id === 'general' ? 'Basic' : plugin.name);
+         return <div key={plugin.id} className="library-plugin-group">{categories.map(([category, categoryShapes]) => {
+           const groupId = `${plugin.id}:${category}`;
+           const open = openGroups[groupId] ?? true;
+           return <ShapeGroup key={groupId} title={categories.length === 1 ? `${plugin.name} shapes` : category} shapes={categoryShapes} open={open} onToggle={() => {
+             const next = { ...openGroups, [groupId]: !open };
+             setOpenGroups(next);
+             writeGroups(next);
+           }} onAdd={(shape) => addShape(shape, plugin.id)} libraryId={plugin.id} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} isRecent={(shape) => recent.includes(shapeKey(plugin.id, shape))} />;
+         })}</div>;
+       })}
       {plugins.every((plugin) => plugin.shapes.every((shape) => !matches(shape, plugin.id))) && <div className="library-empty"><Search size={15} /><span>No shapes match this filter.</span></div>}
     </div>
   </aside>;
+}
+
+function groupShapes(shapes: ShapeDefinition[], fallback: string): Array<[string, ShapeDefinition[]]> {
+  const groups = new Map<string, ShapeDefinition[]>();
+  shapes.forEach((shape) => {
+    const category = shape.category?.trim() || fallback;
+    const list = groups.get(category) ?? [];
+    list.push(shape);
+    groups.set(category, list);
+  });
+  return [...groups.entries()];
 }
 
 function ShapeGroup({ title, shapes, open, onToggle, onAdd, libraryId, isFavorite, onToggleFavorite, isRecent }: { title: string; shapes: ShapeDefinition[]; open: boolean; onToggle: () => void; onAdd: (shape: ShapeDefinition) => void; libraryId: string; isFavorite: (libraryId: string, shape: ShapeDefinition) => boolean; onToggleFavorite: (libraryId: string, shape: ShapeDefinition) => void; isRecent: (shape: ShapeDefinition) => boolean }) {

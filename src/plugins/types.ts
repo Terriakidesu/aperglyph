@@ -3,7 +3,7 @@ import type { ConnectionPort } from '../core/geometry';
 import type { DiagramNode } from '../core/types';
 import type { DocumentCommand } from '../core/commands';
 
-export type ShapeIconId = 'square' | 'rounded-rectangle' | 'circle' | 'diamond' | 'text' | 'line' | 'database' | 'table' | 'workflow';
+export type ShapeIconId = 'square' | 'rounded-rectangle' | 'circle' | 'diamond' | 'text' | 'line' | 'database' | 'table' | 'workflow' | 'cloud' | 'triangle' | 'hexagon' | 'pentagon' | 'package' | 'arrow' | 'data';
 
 /** A stable connection point exposed by a shape definition. */
 export interface ShapeAnchor {
@@ -27,7 +27,15 @@ export interface ShapeDefinition {
   defaultSize?: Size;
   defaultStyle?: Partial<NodeStyle>;
   defaultData?: Record<string, unknown>;
+  /** Stable semantic role used by validators, notation variants, and search. */
+  semanticRole?: string;
+  /** Diagram notation or family represented by this shape. */
+  notation?: string;
+  /** Alternate terms users commonly use when searching for this shape. */
+  aliases?: string[];
   tags?: string[];
+  /** Sidebar subsection, such as Basic, Data, or Annotations. */
+  category?: string;
   /** Reuses a renderer already supplied by the canvas/exporter. */
   renderer?: string;
   /** Controls connector intersection math for this shape. */
