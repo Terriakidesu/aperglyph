@@ -1,10 +1,13 @@
-import { parseProject, serializeProject } from '../core/document';
-import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, entityColumns, entityFieldValue, normalizeEntityFields } from '../core/erd';
+import { createDocument, createNode, parseProject, serializeProject } from '../core/document';
+import { exportDiagramText, parseDiagramText } from '../core/interoperability';
+import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, ERD_ROW_HEIGHT, entityColumns, entityFieldValue, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
 import { pluginManager } from '../plugins';
+
+const MAX_IMPORTED_FILE_BYTES = 10 * 1024 * 1024;
 
 export interface ExportOptions {
   pageId?: string;
@@ -14,10 +17,23 @@ export interface ExportOptions {
   transparent?: boolean;
   outlineOnly?: boolean;
   scale?: 1 | 2 | 4;
+  padding?: number;
 }
 
 export function downloadProject(document: DiagramDocument): void {
   downloadBlob(new Blob([serializeProject(document)], { type: 'application/json' }), `${safeFilename(document.name)}.wdiag`);
+}
+
+export function downloadMermaid(document: DiagramDocument, pageId = document.pages[0]?.id): void {
+  downloadBlob(new Blob([exportDiagramText(document, 'mermaid', pageId)], { type: 'text/plain' }), `${safeFilename(document.name)}.mmd`);
+}
+
+export function downloadPlantUml(document: DiagramDocument, pageId = document.pages[0]?.id): void {
+  downloadBlob(new Blob([exportDiagramText(document, 'plantuml', pageId)], { type: 'text/plain' }), `${safeFilename(document.name)}.puml`);
+}
+
+export function downloadSql(document: DiagramDocument, pageId = document.pages[0]?.id): void {
+  downloadBlob(new Blob([exportErdSql(document, pageId)], { type: 'text/sql' }), `${safeFilename(document.name)}.sql`);
 }
 
 export function downloadSvg(document: DiagramDocument, pageId = document.pages[0]?.id, options: Omit<ExportOptions, 'pageId' | 'scale'> = {}): void {
@@ -32,7 +48,7 @@ export function downloadSvg(document: DiagramDocument, pageId = document.pages[0
 
 function downloadSvgPage(document: DiagramDocument, page: DiagramDocument['pages'][number], options: Omit<ExportOptions, 'pageId' | 'scale'>, suffix = ''): void {
   const scene = exportScene(page, options.selectionIds);
-  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
   const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { ...options, viewBox: bounds });
   downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safeFilename(document.name)}${suffix}.svg`);
 }
@@ -42,7 +58,7 @@ export async function downloadPng(document: DiagramDocument, options: ExportOpti
   const scale = options.scale ?? 2;
   for (const [index, page] of pages.entries()) {
     const scene = exportScene(page, options.selectionIds);
-    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
     const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
     const suffix = pages.length > 1 ? `-${index + 1}-${safeFilename(page.name)}` : '';
@@ -56,7 +72,7 @@ export async function downloadPdf(document: DiagramDocument, options: ExportOpti
   const pages = options.pageId ? document.pages.filter((page) => page.id === options.pageId) : document.pages;
   for (const page of pages) {
     const scene = exportScene(page, options.selectionIds);
-    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
     const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * (options.scale ?? 2)), Math.round(bounds.height * (options.scale ?? 2)));
     const image = await pdf.embedPng(await png.arrayBuffer());
@@ -74,7 +90,7 @@ export function printDocument(document: DiagramDocument, options: ExportOptions 
   const page = document.pages.find((candidate) => candidate.id === (options.pageId ?? document.pages[0]?.id)) ?? document.pages[0];
   if (!page) return;
   const scene = exportScene(page, options.selectionIds);
-  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
   const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: false, outlineOnly: options.outlineOnly ?? true, viewBox: bounds });
   const printWindow = globalThis.window?.open('', '_blank');
   if (!printWindow) {
@@ -88,8 +104,113 @@ export function printDocument(document: DiagramDocument, options: ExportOptions 
   printWindow.print();
 }
 
+export async function copySelectionSvg(document: DiagramDocument, pageId: string, selectionIds: string[]): Promise<boolean> {
+  if (!globalThis.navigator?.clipboard?.write || typeof globalThis.ClipboardItem === 'undefined') return false;
+  const page = document.pages.find((candidate) => candidate.id === pageId) ?? document.pages[0];
+  if (!page) return false;
+  const scene = exportScene(page, selectionIds);
+  const bounds = contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, 16);
+  const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { viewBox: bounds });
+  await globalThis.navigator.clipboard.write([new ClipboardItem({ 'image/svg+xml': new Blob([svg], { type: 'image/svg+xml' }), 'text/plain': new Blob([svg], { type: 'text/plain' }) })]);
+  return true;
+}
+
+export async function copySelectionPng(document: DiagramDocument, pageId: string, selectionIds: string[], scale: 1 | 2 | 4 = 2): Promise<boolean> {
+  if (!globalThis.navigator?.clipboard?.write || typeof globalThis.ClipboardItem === 'undefined') return false;
+  const page = document.pages.find((candidate) => candidate.id === pageId) ?? document.pages[0];
+  if (!page) return false;
+  const scene = exportScene(page, selectionIds);
+  const bounds = contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, 16);
+  const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { viewBox: bounds });
+  const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
+  await globalThis.navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+  return true;
+}
+
 export function readProjectFile(file: File): Promise<DiagramDocument> {
   return file.text().then(parseProject);
+}
+
+export function readDiagramFile(file: File): Promise<DiagramDocument> {
+  if (file.size > MAX_IMPORTED_FILE_BYTES) return Promise.reject(new Error('This imported file is too large to open safely.'));
+  const name = file.name.toLowerCase();
+  const mimeType = file.type.split(';', 1)[0].trim().toLowerCase();
+  if (name.endsWith('.mmd') || name.endsWith('.mermaid')) return file.text().then((text) => parseDiagramText(text, 'mermaid'));
+  if (name.endsWith('.puml') || name.endsWith('.plantuml')) return file.text().then((text) => parseDiagramText(text, 'plantuml'));
+  if (name.endsWith('.sql')) return file.text().then((text) => parseErdSql(text, file.name.replace(/\.sql$/i, '') || 'Imported SQL schema'));
+  if (name.endsWith('.svg') || mimeType === 'image/svg+xml') return file.text().then((text) => createImageDocument(file.name, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sanitizeSvg(text))}`));
+  if (mimeType.startsWith('image/') && !mimeType.includes('svg')) return file.arrayBuffer().then((buffer) => createImageDocument(file.name, `data:${mimeType};base64,${bytesToBase64(new Uint8Array(buffer))}`));
+  return readProjectFile(file);
+}
+
+export function sanitizeSvg(value: string): string {
+  if (value.length > 10 * 1024 * 1024) throw new Error('This SVG is too large to import safely.');
+  const withoutUnsafeBlocks = value
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\?xml[\s\S]*?\?>/gi, '')
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
+    .replace(/<\s*(?:script|foreignObject|iframe|object|embed|audio|video|link|animate|animateMotion|animateTransform|set)\b[\s\S]*?<\s*\/\s*(?:script|foreignObject|iframe|object|embed|audio|video|link|animate|animateMotion|animateTransform|set)\s*>/gi, '')
+    .replace(/<\s*(?:script|foreignObject|iframe|object|embed|audio|video|link|animate|animateMotion|animateTransform|set)\b[^>]*\/\s*>/gi, '')
+    .replace(/<\s*style\b[\s\S]*?<\s*\/\s*style\s*>/gi, '');
+  const svgCandidate = withoutUnsafeBlocks.replace(/^\uFEFF/, '').trim();
+  if (!/^<\s*svg(?:\s|>)/i.test(svgCandidate) || (!/<\s*\/\s*svg\s*>\s*$/i.test(svgCandidate) && !/^<\s*svg\b[\s\S]*\/\s*>\s*$/i.test(svgCandidate))) throw new Error('This file does not contain a valid SVG image.');
+
+  // Prefer the browser's XML parser so quoted `>` characters and namespaces
+  // are handled correctly. The fallback keeps imports testable in workers and
+  // non-DOM environments.
+  const Parser = globalThis.DOMParser;
+  const Serializer = globalThis.XMLSerializer;
+  if (Parser && Serializer) {
+    const parsed = new Parser().parseFromString(withoutUnsafeBlocks, 'image/svg+xml');
+    if (parsed.querySelector('parsererror') || parsed.documentElement?.nodeName.toLowerCase() !== 'svg') throw new Error('This file does not contain a valid SVG image.');
+    parsed.querySelectorAll('script,foreignObject,iframe,object,embed,audio,video,link,style,animate,animateMotion,animateTransform,set').forEach((element) => element.remove());
+    parsed.querySelectorAll('*').forEach((element) => {
+      [...element.attributes].forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const value = attribute.value.trim();
+        if (name.startsWith('on') || (name === 'href' || name === 'xlink:href' || name === 'src') && !safeSvgReference(value) || name === 'style' && unsafeSvgStyle(value)) element.removeAttribute(attribute.name);
+      });
+    });
+    return new Serializer().serializeToString(parsed.documentElement);
+  }
+
+  return withoutUnsafeBlocks.replace(/<[^>]*>/g, (tag) => tag.replace(/\s+([A-Za-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g, (attribute, name: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, bare: string | undefined) => {
+    const lower = name.toLowerCase();
+    const attributeValue = (doubleQuoted ?? singleQuoted ?? bare ?? '').trim();
+    if (lower.startsWith('on') || ((lower === 'href' || lower === 'xlink:href' || lower === 'src') && !safeSvgReference(attributeValue)) || (lower === 'style' && unsafeSvgStyle(attributeValue))) return '';
+    return attribute;
+  }));
+}
+
+function safeSvgReference(value: string): boolean {
+  if (value.startsWith('#')) return true;
+  return /^data:image\/(?:png|jpeg|gif|webp|bmp|avif);/i.test(value);
+}
+
+function unsafeSvgStyle(value: string): boolean {
+  return /(?:url\s*\(|@import|expression\s*\(|javascript:|vbscript:)/i.test(value);
+}
+
+function createImageDocument(name: string, src: string): DiagramDocument {
+  const document = createDocument(name, 'general');
+  document.pages[0].name = 'Imported image';
+  document.pages[0].nodes.push(createNode('image', { x: 0, y: 0 }, { size: { width: 420, height: 300 }, data: { label: name, src }, style: { fill: 'transparent', stroke: 'transparent', radius: 0 } }));
+  return document;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  if (typeof globalThis.btoa === 'function') return globalThis.btoa(binary);
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let output = '';
+  for (let index = 0; index < bytes.length; index += 3) {
+    const a = bytes[index];
+    const b = bytes[index + 1] ?? 0;
+    const c = bytes[index + 2] ?? 0;
+    output += alphabet[a >> 2] + alphabet[((a & 3) << 4) | (b >> 4)] + (index + 1 < bytes.length ? alphabet[((b & 15) << 2) | (c >> 6)] : '=') + (index + 2 < bytes.length ? alphabet[c & 63] : '=');
+  }
+  return output;
 }
 
 export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], background: string, width: number, height: number, options: { transparent?: boolean; outlineOnly?: boolean; viewBox?: { x: number; y: number; width: number; height: number } } = {}): string {
@@ -221,6 +342,11 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
   const radius = node.style.radius;
   const renderer = shapeRenderer(node);
   const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})`;
+  if (renderer === 'image') {
+    const source = typeof node.data.src === 'string' && node.data.src.startsWith('data:image/') ? node.data.src : '';
+    const labelMarkup = source ? '' : svgTextMarkup(node, rawLabel, width, height, textColor);
+    return `<g transform="${transform}"><rect width="${width}" height="${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${source ? `<image href="${escapeXml(source)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>` : labelMarkup}</g>`;
+  }
   if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
@@ -290,8 +416,7 @@ function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selec
   return { nodes, edges };
 }
 
-function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number): { x: number; y: number; width: number; height: number } {
-  const padding = 32;
+function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number, padding = 32): { x: number; y: number; width: number; height: number } {
   const points = [
     ...nodes.flatMap((node) => [node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height }]),
     ...edges.flatMap((edge) => [edge.source.point, edge.target.point].filter((point): point is Point => Boolean(point))),

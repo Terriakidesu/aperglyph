@@ -1,13 +1,16 @@
 import { ListTree, Maximize2, Minimize2, MonitorPlay, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Shapes } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
+import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { createNode as buildNode } from '../core/document';
 import { editorEvents } from '../core/events';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import { saveLocalTemplate } from '../persistence';
+import { readDiagramFile, saveLocalTemplate } from '../persistence';
 import { CanvasViewport } from './CanvasViewport';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { EditorToolbar } from './EditorToolbar';
-import { EditorTopBar } from './EditorTopBar';
+import { EditorTopBar, type ViewPreferences } from './EditorTopBar';
 import { PageTabs } from './PageTabs';
 import { PropertiesPanel } from './PropertiesPanel';
 import { OutlinePanel } from './OutlinePanel';
@@ -15,6 +18,9 @@ import { ShapeLibrary } from './ShapeLibrary';
 import { StatusBar } from './StatusBar';
 
 interface EditorScreenProps { onExit: () => void }
+
+const VIEW_PREFERENCES_KEY = 'aperglyph.editor.view';
+const DEFAULT_VIEW_PREFERENCES: ViewPreferences = { rulers: true, guides: true, minimap: true, showPorts: false, connectionHints: true };
 
 export function EditorScreen({ onExit }: EditorScreenProps) {
   const activeTool = useEditorStore((state) => state.activeTool);
@@ -44,15 +50,21 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const page = getActivePage(document, activePageId);
   const [leftOpen, setLeftOpen] = useState(() => readStoredBoolean('aperglyph.editor.left-open', true));
   const [rightOpen, setRightOpen] = useState(() => readStoredBoolean('aperglyph.editor.right-open', true));
+  const [leftWidth, setLeftWidth] = useState(() => readStoredNumber('aperglyph.editor.left-width', 224));
+  const [rightWidth, setRightWidth] = useState(() => readStoredNumber('aperglyph.editor.right-width', 232));
   const [leftPanel, setLeftPanel] = useState<'shapes' | 'outline'>(() => readStoredPanel());
+  const [viewPreferences, setViewPreferences] = useState<ViewPreferences>(() => readViewPreferences());
   const [focusMode, setFocusMode] = useState(false);
   const [presentationMode, setPresentationMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(() => Boolean(globalThis.document?.fullscreenElement));
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [validationEnabled, setValidationEnabled] = useState(isDiagnosticsEnabled);
   const [showPalette, setShowPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteIndex, setPaletteIndex] = useState(0);
   const paletteInputRef = useRef<HTMLInputElement>(null);
+  const panelResizeRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
 
   const paletteCommands: PaletteCommand[] = [
     { id: 'add-rectangle', label: 'Add rectangle', hint: 'Canvas', run: () => addNode(buildNode('rectangle', { x: -viewport.x - 90, y: -viewport.y - 44 }, { data: { label: 'Rectangle' } })) },
@@ -68,10 +80,30 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'toggle-outline', label: 'Show outline', hint: 'Workspace', run: () => { setLeftPanel('outline'); setLeftOpen(true); } },
     { id: 'toggle-focus', label: focusMode ? 'Exit focus mode' : 'Enter focus mode', hint: 'Workspace', run: () => setFocusMode((value) => !value) },
     { id: 'toggle-presentation', label: presentationMode ? 'Exit presentation mode' : 'Enter presentation mode', hint: 'Workspace', run: () => setPresentationMode((value) => !value) },
+    { id: 'diagnostics', label: 'Open diagnostics', hint: 'Validation', run: () => setShowDiagnostics(true) },
     { id: 'save-template', label: 'Save current document as template', hint: 'Templates', run: () => { const name = globalThis.prompt('Template name', document.name); if (name?.trim()) saveLocalTemplate(document, name); } },
     { id: 'shortcuts', label: 'Open keyboard shortcuts', hint: 'Help', run: () => setShowShortcuts(true) },
   ];
   const matchingCommands = paletteCommands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(paletteQuery.trim().toLowerCase()));
+  const diagnosticCount = validationEnabled ? collectDiagnostics(document).filter((diagnostic) => diagnostic.severity !== 'info').length : 0;
+
+  const updateViewPreferences = (changes: Partial<ViewPreferences>) => setViewPreferences((current) => ({ ...current, ...changes }));
+
+  const importFileAtPoint = async (file: File, point: { x: number; y: number }) => {
+    try {
+      const imported = await readDiagramFile(file);
+      const importedPage = imported.pages[0];
+      if (!importedPage || (importedPage.nodes.length === 0 && importedPage.edges.length === 0)) return;
+      const points = importedPage.nodes.flatMap((node) => [node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height }]);
+      const minX = Math.min(...points.map((value) => value.x));
+      const maxX = Math.max(...points.map((value) => value.x));
+      const minY = Math.min(...points.map((value) => value.y));
+      const maxY = Math.max(...points.map((value) => value.y));
+      pastePayload({ nodes: importedPage.nodes, edges: importedPage.edges }, { x: point.x - (minX + maxX) / 2, y: point.y - (minY + maxY) / 2 });
+    } catch {
+      editorEvents.emit('storage:error', { error: new Error('Unable to import this file into the canvas.') });
+    }
+  };
 
   const writeSystemClipboard = async () => {
     const payload = copySelection();
@@ -131,10 +163,42 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       globalThis.localStorage?.setItem('aperglyph.editor.left-open', JSON.stringify(leftOpen));
       globalThis.localStorage?.setItem('aperglyph.editor.right-open', JSON.stringify(rightOpen));
       globalThis.localStorage?.setItem('aperglyph.editor.left-panel', leftPanel);
+      globalThis.localStorage?.setItem('aperglyph.editor.left-width', String(leftWidth));
+      globalThis.localStorage?.setItem('aperglyph.editor.right-width', String(rightWidth));
+      globalThis.localStorage?.setItem(VIEW_PREFERENCES_KEY, JSON.stringify(viewPreferences));
     } catch {
       // Local UI preferences are optional.
     }
-  }, [leftOpen, leftPanel, rightOpen]);
+  }, [leftOpen, leftPanel, leftWidth, rightOpen, rightWidth, viewPreferences]);
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const resize = panelResizeRef.current;
+      if (!resize) return;
+      const delta = event.clientX - resize.startX;
+      if (resize.side === 'left') setLeftWidth(clampPanelWidth(resize.startWidth + delta));
+      else setRightWidth(clampPanelWidth(resize.startWidth - delta));
+    };
+    const end = () => {
+      if (!panelResizeRef.current) return;
+      panelResizeRef.current = null;
+      globalThis.document?.body.classList.remove('panel-resizing');
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, []);
+
+  const beginPanelResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    panelResizeRef.current = { side, startX: event.clientX, startWidth: side === 'left' ? leftWidth : rightWidth };
+    globalThis.document?.body.classList.add('panel-resizing');
+  };
 
   const viewportKey = `${document.id}:${activePageId}`;
   const restoredViewportKey = useRef<string | null>(null);
@@ -195,7 +259,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
-       if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
+       if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setShowDiagnostics(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
         const distance = event.shiftKey ? (page?.settings.snapToGrid ? page.settings.gridSize : 10) : 1;
@@ -210,18 +274,27 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     return () => window.removeEventListener('keydown', handler);
     }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboard, pastePayload, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
 
-  useEffect(() => editorEvents.on('ui:shortcuts', () => setShowShortcuts(true)), []);
+  useEffect(() => {
+    const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));
+    const unsubscribeDiagnostics = editorEvents.on('ui:diagnostics', () => setShowDiagnostics(true));
+    const unsubscribeSettings = editorEvents.on('diagnostics:changed', ({ enabled }) => setValidationEnabled(enabled));
+    return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribeSettings(); };
+  }, []);
 
+  const workspaceStyle = { '--left-panel-width': `${leftWidth}px`, '--right-panel-width': `${rightWidth}px` } as CSSProperties;
   return <main className={`editor-shell ${focusMode ? 'focus-mode' : ''} ${presentationMode ? 'presentation-mode' : ''}`}>
-    <EditorTopBar onExit={onExit} />
-    <div className="editor-workspace">
+     <EditorTopBar onExit={onExit} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} fullscreen={fullscreen} focusMode={focusMode} />
+    <div className="editor-workspace" style={workspaceStyle}>
       <EditorToolbar />
       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel /> : <ShapeLibrary />)}
-      <section className="canvas-column"><CanvasViewport /><PageTabs /><StatusBar /></section>
-      {rightOpen && <PropertiesPanel />}
+      {leftOpen && <PanelResizeHandle side="left" onPointerDown={(event) => beginPanelResize('left', event)} />}
+       <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} /><PageTabs /><StatusBar /></section>
+      {rightOpen && <PanelResizeHandle side="right" onPointerDown={(event) => beginPanelResize('right', event)} />}
+       {rightOpen && <PropertiesPanel />}
       <div className="workspace-toggles workspace-toggles-left"><button onClick={() => setLeftOpen((open) => !open)} title="Toggle left panel" aria-label="Toggle left panel">{leftOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button><button onClick={() => { setLeftPanel('outline'); setLeftOpen(true); }} title="Show outline" aria-label="Show outline"><ListTree size={14} /></button><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} title="Show shapes" aria-label="Show shapes"><Shapes size={14} /></button></div>
       <div className="workspace-toggles workspace-toggles-right"><button onClick={() => setRightOpen((open) => !open)} title="Toggle properties panel" aria-label="Toggle properties panel">{rightOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}</button><button onClick={() => setFocusMode((value) => !value)} title={focusMode ? 'Exit focus mode' : 'Focus mode'} aria-label={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={14} /></button><button onClick={() => setPresentationMode((value) => !value)} title={presentationMode ? 'Exit presentation mode' : 'Presentation mode'} aria-label={presentationMode ? 'Exit presentation mode' : 'Presentation mode'}><MonitorPlay size={14} /></button><button onClick={() => void toggleFullscreen()} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>{fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></div>
-    </div>
+     </div>
+      {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
      {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
    </main>;
@@ -254,4 +327,39 @@ function readStoredPanel(): 'shapes' | 'outline' {
   } catch {
     return 'shapes';
   }
+}
+
+function readStoredNumber(key: string, fallback: number): number {
+  try {
+    const stored = globalThis.localStorage?.getItem(key);
+    if (stored === null || stored === undefined || stored.trim() === '') return fallback;
+    const value = Number(stored);
+    return Number.isFinite(value) ? clampPanelWidth(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function clampPanelWidth(value: number): number {
+  return Math.min(380, Math.max(180, Math.round(value)));
+}
+
+function readViewPreferences(): ViewPreferences {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(VIEW_PREFERENCES_KEY) ?? 'null') as Partial<ViewPreferences> | null;
+    if (!value || typeof value !== 'object') return DEFAULT_VIEW_PREFERENCES;
+    return {
+      rulers: typeof value.rulers === 'boolean' ? value.rulers : DEFAULT_VIEW_PREFERENCES.rulers,
+      guides: typeof value.guides === 'boolean' ? value.guides : DEFAULT_VIEW_PREFERENCES.guides,
+      minimap: typeof value.minimap === 'boolean' ? value.minimap : DEFAULT_VIEW_PREFERENCES.minimap,
+      showPorts: typeof value.showPorts === 'boolean' ? value.showPorts : DEFAULT_VIEW_PREFERENCES.showPorts,
+      connectionHints: typeof value.connectionHints === 'boolean' ? value.connectionHints : DEFAULT_VIEW_PREFERENCES.connectionHints,
+    };
+  } catch {
+    return DEFAULT_VIEW_PREFERENCES;
+  }
+}
+
+function PanelResizeHandle({ side, onPointerDown }: { side: 'left' | 'right'; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void }) {
+  return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" aria-label={`Resize ${side} panel`} aria-orientation="vertical" onPointerDown={onPointerDown} />;
 }

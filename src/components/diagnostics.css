@@ -1,0 +1,29 @@
+.diagnostics-button { display: inline-flex; align-items: center; gap: 5px; }
+.diagnostics-button span { min-width: 16px; padding: 1px 4px; color: #11131b; background: #f0bd70; border-radius: 8px; font: 8px var(--mono); text-align: center; }
+.diagnostics-button.has-diagnostics { color: #f0c27c; border-color: #765b38; }
+.diagnostics-panel { position: absolute; z-index: 20; top: 54px; right: 14px; bottom: 14px; display: flex; width: min(420px, calc(100vw - 28px)); flex-direction: column; overflow: hidden; color: #dfe3ef; background: #111622; border: 1px solid #303a52; border-radius: 8px; box-shadow: 0 18px 46px rgba(0,0,0,.42); }
+.diagnostics-heading { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 15px 10px; border-bottom: 1px solid #252e42; }
+.diagnostics-heading h2 { margin: 2px 0 0; font-size: 15px; }
+.diagnostics-summary { display: flex; gap: 12px; padding: 9px 15px; border-bottom: 1px solid #20283a; font: 9px var(--mono); }
+.diagnostic-count { display: inline-flex; align-items: center; gap: 4px; }
+.diagnostic-count.error, .diagnostic-row.error .diagnostic-severity { color: #ff8e9c; }
+.diagnostic-count.warning, .diagnostic-row.warning .diagnostic-severity { color: #f0bd70; }
+.diagnostics-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 10px 15px; }
+.diagnostics-filters label { display: grid; gap: 4px; color: #7f89a2; font: 8px var(--mono); }
+.diagnostics-filters select { min-width: 0; padding: 5px; color: #cbd2e2; background: #171d2b; border: 1px solid #303a52; border-radius: 4px; font: 8px var(--mono); }
+.diagnostics-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 15px 8px; color: #818ba4; font: 8px var(--mono); }
+.diagnostics-toolbar span { display: inline-flex; align-items: center; gap: 4px; }
+.diagnostics-list { min-height: 0; flex: 1; overflow: auto; padding: 0 9px 10px; }
+.diagnostic-row { display: flex; gap: 5px; align-items: stretch; margin-bottom: 5px; background: #171d2a; border: 1px solid #273249; border-radius: 5px; }
+.diagnostic-main { display: flex; min-width: 0; flex: 1; gap: 8px; padding: 9px 7px; color: inherit; background: transparent; text-align: left; }
+.diagnostic-main > span:last-child { min-width: 0; display: grid; gap: 4px; }
+.diagnostic-main strong { color: #dfe3ef; font: 10px/1.35 var(--mono); font-weight: 500; }
+.diagnostic-main small { color: #7f89a2; font: 8px var(--mono); }
+.diagnostic-actions { display: flex; align-items: flex-start; gap: 3px; padding: 5px 5px 0 0; }
+.diagnostic-ignore { width: 20px; height: 20px; color: #737e98; background: transparent; border-radius: 3px; }
+.diagnostic-ignore:hover { color: #fff; background: #293248; }
+.diagnostic-fix { padding: 4px 6px; color: #b9abff; background: #29234b; border: 1px solid #4f4383; border-radius: 3px; font: 8px var(--mono); }
+.diagnostics-empty { display: grid; justify-items: center; gap: 7px; padding: 56px 20px; color: #7e89a1; text-align: center; }
+.diagnostics-empty svg { color: #56d7a7; }
+.diagnostics-empty strong { color: #cdd3e1; font: 11px var(--mono); }
+.diagnostics-empty span { max-width: 250px; font: 9px/1.5 var(--mono); }

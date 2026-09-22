@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createEdge, createNode, serializeProject } from '../core/document';
-import { documentToSvg } from './files';
+import { documentToSvg, sanitizeSvg } from './files';
 
 describe('native file helpers', () => {
   it('produces a self-contained SVG scene', () => {
@@ -25,6 +25,13 @@ describe('native file helpers', () => {
   it('serializes a native project for import/export', () => {
     const document = createDocument('Project');
     expect(serializeProject(document)).toContain('"format": "aperglyph"');
+  });
+
+  it('removes executable and remote SVG content while keeping the drawing', () => {
+    const svg = sanitizeSvg('<svg onload="javascript:alert(1)"><script>alert(1)</script><animate attributeName="href" to="javascript:alert(2)"/><rect width="20" height="20" fill="red"/><image href="https://example.com/a.png" /></svg>');
+    expect(svg).toContain('<rect');
+    expect(svg).not.toMatch(/script|animate|onload|https?:/i);
+    expect(() => sanitizeSvg('<html><script>alert(1)</script></html>')).toThrow(/valid SVG/);
   });
 
   it('exports cardinality markers with the connector geometry', () => {

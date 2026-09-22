@@ -143,6 +143,29 @@ describe('command history', () => {
     expect(edgeRoute(nextEdge, source, target)[0]).toEqual({ x: 180, y: 44 });
   });
 
+  it('clears a stale offset when reconnecting to a cardinal anchor', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const previousTarget = createNode('rectangle', { x: 300, y: 0 });
+    const circle = createNode('circle', { x: 300, y: 180 }, { size: { width: 112, height: 112 } });
+    const edge = createEdge(
+      { nodeId: source.id, port: 'right' },
+      { nodeId: previousTarget.id, port: 'left', offset: 0.72 },
+    );
+    document.pages[0].nodes.push(source, previousTarget, circle);
+
+    const manager = new CommandManager();
+    const withEdge = manager.execute(new CreateEdgeCommand(pageId, edge), document);
+    const updated = manager.execute(new UpdateEdgeCommand(pageId, edge.id, {
+      target: { nodeId: circle.id, port: 'left' },
+    }), withEdge);
+    const nextEdge = updated.pages[0].edges[0];
+
+    expect(nextEdge.target).toEqual({ nodeId: circle.id, port: 'left' });
+    expect(edgeRoute(nextEdge, source, circle).at(-1)).toEqual({ x: 300, y: 236 });
+  });
+
   it('supports page lifecycle commands', () => {
     const document = createDocument();
     const page = createPage('Review');

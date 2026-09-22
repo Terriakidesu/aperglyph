@@ -36,6 +36,13 @@ describe('AperGlyph document model', () => {
     expect(parsed.pages[0].edges[0].source).toEqual({ point: { x: 80, y: 90 } });
   });
 
+  it('restores semantic defaults for legacy DFD pages', () => {
+    const document = createDocument('Legacy DFD', 'dfd');
+    delete (document.pages[0] as { data?: unknown }).data;
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].data).toEqual({ dfdLevel: 0, dataDictionary: [] });
+  });
+
   it('repairs stale free points when an endpoint is attached to a node', () => {
     const document = createDocument('Attached endpoint');
     const source = createNode('entity', { x: 0, y: 0 });

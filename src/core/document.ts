@@ -92,12 +92,14 @@ export function createDocument(
   diagramType: DiagramType = 'general',
 ): DiagramDocument {
   const now = Date.now();
+  const page = createPage();
+  if (diagramType === 'dfd') page.data = { dfdLevel: 0, dataDictionary: [] };
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     id: createId('doc'),
     name,
     diagramType,
-    pages: [createPage()],
+    pages: [page],
     palette: [...defaultDocumentPalette],
     stylePresets: [],
     createdAt: now,
@@ -264,6 +266,7 @@ function validatePage(value: unknown, pageIndex: number, pageIds: Set<string>, e
   if (!Array.isArray(value.nodes) || value.nodes.length > MAX_NODES_PER_PAGE) errors.push(`${path}.nodes exceeds the maximum size`);
   if (!Array.isArray(value.edges) || value.edges.length > MAX_EDGES_PER_PAGE) errors.push(`${path}.edges exceeds the maximum size`);
   validatePageSettings(value.settings, `${path}.settings`, errors);
+  if (value.data !== undefined) validateData(value.data, `${path}.data`, errors);
   if (value.guides !== undefined) {
     if (!Array.isArray(value.guides) || value.guides.length > 1000) errors.push(`${path}.guides exceeds the maximum size`);
     else value.guides.forEach((guide, index) => validateGuide(guide, `${path}.guides[${index}]`, errors));
@@ -442,12 +445,19 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
   const pages = Array.isArray(input.pages) && input.pages.length > 0
     ? input.pages.map((page, index) => {
       const nodes = Array.isArray(page.nodes) ? page.nodes.map(migrateNode) : [];
+      const diagramType = input.diagramType ?? base.diagramType;
+      const data = isRecord(page.data)
+        ? structuredClone(page.data)
+        : diagramType === 'dfd'
+          ? { dfdLevel: 0, dataDictionary: [] }
+          : undefined;
       return {
         ...createPage(page.name ?? `Page ${index + 1}`),
         ...page,
         settings: { ...createPage().settings, ...(page.settings ?? {}) },
+        ...(data ? { data } : {}),
         nodes,
-        edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, input.diagramType ?? base.diagramType)) : [],
+        edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, diagramType)) : [],
       };
     })
     : base.pages;

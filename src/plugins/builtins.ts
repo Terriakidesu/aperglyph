@@ -1,6 +1,8 @@
 import { validateDfd } from '../core/dfd';
 import { entityFieldAnchors } from '../core/anchors';
+import { validateErd } from '../core/erd';
 import { validateUseCase } from '../core/useCase';
+import { validateFlowchart } from '../core/flowchart';
 import type { DiagramDocument } from '../core/types';
 import type { DiagramPlugin } from './types';
 
@@ -47,7 +49,7 @@ export const flowchartPlugin: DiagramPlugin = {
      { id: 'off-page-connector', type: 'off-page-connector', label: 'Off-page connector', icon: 'diamond', defaultSize: { width: 120, height: 90 }, defaultData: { label: 'A' }, renderer: 'off-page-connector' },
   ],
   connectors: [orthogonal, straight],
-  validators: [],
+  validators: [{ id: 'flowchart-rules', label: 'Flowchart rules', validate: (document) => validateFlowchart(document as DiagramDocument) }],
 };
 
 export const erdPlugin: DiagramPlugin = {
@@ -60,7 +62,7 @@ export const erdPlugin: DiagramPlugin = {
     { id: 'relationship', label: 'Relationship', routing: 'orthogonal', defaultStyle: { startMarker: 'bar', endMarker: 'crowfoot' } },
     { id: 'identifying', label: 'Identifying relationship', routing: 'orthogonal', defaultStyle: { startMarker: 'bar', endMarker: 'crowfoot', dash: 'dashed' } },
   ],
-  validators: [],
+  validators: [{ id: 'erd-rules', label: 'ERD integrity', validate: (document) => validateErd(document as DiagramDocument) }],
 };
 
 export const dfdPlugin: DiagramPlugin = {
@@ -71,7 +73,7 @@ export const dfdPlugin: DiagramPlugin = {
     { id: 'store', type: 'store', label: 'Data store', icon: 'database', defaultSize: { width: 190, height: 64 }, defaultStyle: { fill: 'none', stroke: '#e0a95b', radius: 0 }, defaultData: { label: 'Data store' }, renderer: 'dfd-store' },
   ],
   connectors: [{ id: 'data-flow', label: 'Data flow', routing: 'orthogonal' }],
-  validators: [{ id: 'dfd-rules', label: 'DFD flow rules', validate: (document) => validateDfd(document as DiagramDocument).map((diagnostic) => diagnostic.message) }],
+  validators: [{ id: 'dfd-rules', label: 'DFD flow rules', validate: (document) => validateDfd(document as DiagramDocument) }],
 };
 
 export const useCasePlugin: DiagramPlugin = {
@@ -87,8 +89,9 @@ export const useCasePlugin: DiagramPlugin = {
     { id: 'association', label: 'Association', routing: 'straight', defaultStyle: { endMarker: 'none' } },
     { id: 'include', label: '«include»', routing: 'straight', defaultStyle: { dash: 'dashed' } },
     { id: 'extend', label: '«extend»', routing: 'straight', defaultStyle: { dash: 'dashed' } },
+    { id: 'generalization', label: 'Generalization', routing: 'straight', defaultStyle: { dash: 'solid', endMarker: 'arrow' } },
   ],
-  validators: [{ id: 'use-case-rules', label: 'Use-case relationship rules', validate: (document) => validateUseCase(document as DiagramDocument).map((diagnostic) => diagnostic.message) }],
+  validators: [{ id: 'use-case-rules', label: 'Use-case relationship rules', validate: (document) => validateUseCase(document as DiagramDocument) }],
 };
 
 export const builtInPlugins: DiagramPlugin[] = [generalPlugin, flowchartPlugin, erdPlugin, dfdPlugin, useCasePlugin];

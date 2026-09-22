@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createId, migrateDocument } from '../core/document';
 import { createTemplateDocument } from '../core/templates';
 import type { DiagramDocument, DiagramType } from '../core/types';
-import { clearRecoverySnapshot, createWorkspaceBackup, deleteDocument, deleteLocalTemplate, downloadWorkspaceBackup, duplicateDocument, getRecoverySnapshot, getStorageEstimate, listDocuments, listLocalTemplates, listTrashedDocuments, readProjectFile, renameDocument, requestPersistentStorage, restoreDocument, restoreWorkspaceBackup, trashDocument, updateDocumentMetadata } from '../persistence';
+import { clearRecoverySnapshot, createWorkspaceBackup, deleteDocument, deleteLocalTemplate, downloadWorkspaceBackup, duplicateDocument, getRecoverySnapshot, getStorageEstimate, listDocuments, listLocalTemplates, listTrashedDocuments, readDiagramFile, renameDocument, requestPersistentStorage, restoreDocument, restoreWorkspaceBackup, trashDocument, updateDocumentMetadata } from '../persistence';
 import type { LocalTemplate, RecoverySnapshot, StorageEstimate, StoredDocument } from '../persistence';
 import { LogoMark } from './LogoMark';
 
@@ -80,7 +80,7 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
   const openFile = async (file: File) => {
     try {
       setFileError(null);
-      onOpen(await readProjectFile(file));
+       onOpen(await readDiagramFile(file));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : 'Unable to open this file.');
     }
@@ -277,7 +277,7 @@ export function HomeScreen({ onOpen, onInstall }: HomeScreenProps) {
 
        {fileError && <div className="file-error"><span>{fileError}</span><button onClick={() => setFileError(null)}>Dismiss</button></div>}
        {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="Close shortcuts">×</button></div><div className="shortcut-list"><div className="shortcut-row"><span>Select tool</span><kbd>V</kbd></div><div className="shortcut-row"><span>Pan canvas</span><kbd>H</kbd></div><div className="shortcut-row"><span>Undo / redo</span><kbd>Ctrl Z / Ctrl Shift Z</kbd></div><div className="shortcut-row"><span>Copy / paste</span><kbd>Ctrl C / Ctrl V</kbd></div><div className="shortcut-row"><span>Duplicate</span><kbd>Ctrl D</kbd></div></div></div></div>}
-       <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
+        <input ref={fileInput} className="visually-hidden" type="file" accept=".wdiag,.json,.mmd,.mermaid,.puml,.plantuml,.sql,application/json,text/plain,text/sql" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openFile(file); event.target.value = ''; }} />
        <input ref={backupInput} className="visually-hidden" type="file" accept=".json,.wbackup,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importWorkspace(file); event.target.value = ''; }} />
       <footer className="home-footer"><span><LayoutTemplate size={14} /> AperGlyph 0.13.0</span><span>Local-first · Open format · No account required</span><span className="footer-links">Guide &nbsp;·&nbsp; Privacy &nbsp;·&nbsp; Keyboard shortcuts</span></footer>
     </main>

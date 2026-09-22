@@ -22,7 +22,7 @@ scope.onmessage = async (event) => {
   const request = event.data;
   try {
     await wasmReady;
-    const positions = wasmLayout && !['grid', 'compact'].includes(request.mode)
+    const positions = wasmLayout && !['grid', 'compact', 'radial'].includes(request.mode)
       ? layoutWithWasm(request)
       : layoutWithTypeScript(request);
     scope.postMessage({ requestId: request.requestId, positions });
@@ -65,6 +65,14 @@ function layoutWithTypeScript(request: LayoutRequest): Array<{ x: number; y: num
     const width = Math.max(...request.nodes.map((node) => node.width));
     const height = Math.max(...request.nodes.map((node) => node.height));
     request.nodes.forEach((_, index) => { positions[index] = { x: (index % columns) * (width + 48), y: Math.floor(index / columns) * (height + 48) }; });
+    return positions;
+  }
+  if (request.mode === 'radial') {
+    const radius = Math.max(180, request.nodes.length * 42);
+    request.nodes.forEach((node, index) => {
+      const angle = -Math.PI / 2 + index * Math.PI * 2 / request.nodes.length;
+      positions[index] = { x: Math.round(Math.cos(angle) * radius - node.width / 2), y: Math.round(Math.sin(angle) * radius - node.height / 2) };
+    });
     return positions;
   }
   const incoming = request.nodes.map(() => 0);

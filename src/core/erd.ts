@@ -1,5 +1,5 @@
-import { createId } from './document';
-import type { DiagramDocument, DiagramNode } from './types';
+import { createEdge, createId } from './document';
+import type { Diagnostic, DiagramDocument, DiagramEdge, DiagramNode } from './types';
 
 export interface EntityField {
   id: string;
@@ -19,8 +19,17 @@ export type ReferentialAction = 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'NO ACTION
 export interface EntityReference {
   entityId: string;
   fieldId?: string;
+  /** SQL constraint identity used to preserve composite foreign keys. */
+  constraintId?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
+}
+
+export interface EntityIndex {
+  id: string;
+  name: string;
+  fieldIds: string[];
+  unique: boolean;
 }
 
 export type EntityVariant = 'key-field' | 'key-field-type' | 'field-type' | 'field' | 'field-nullability' | 'key-field-nullability' | 'key-field-type-nullability';
@@ -32,11 +41,7 @@ export interface EntityColumn {
   width: number;
 }
 
-export interface ErdDiagnostic {
-  severity: 'warning' | 'error';
-  message: string;
-  nodeId?: string;
-}
+export interface ErdDiagnostic extends Diagnostic {}
 
 export const ERD_HEADER_HEIGHT = 34;
 export const ERD_COLUMN_HEADER_HEIGHT = 21;
@@ -172,12 +177,95 @@ export function normalizeEntityFields(value: unknown): EntityField[] {
       reference: isRecord(field.reference) && typeof field.reference.entityId === 'string' ? {
         entityId: field.reference.entityId,
         ...(typeof field.reference.fieldId === 'string' ? { fieldId: field.reference.fieldId } : {}),
+        ...(typeof field.reference.constraintId === 'string' ? { constraintId: field.reference.constraintId } : {}),
         ...(isReferentialAction(field.reference.onDelete) ? { onDelete: field.reference.onDelete } : {}),
         ...(isReferentialAction(field.reference.onUpdate) ? { onUpdate: field.reference.onUpdate } : {}),
       } : undefined,
     });
     return createEntityField({ id: `field_${index}_attribute`, name: `field_${index + 1}` });
   });
+}
+
+export function normalizeEntityIndexes(value: unknown, fields: EntityField[] = []): EntityIndex[] {
+  if (!Array.isArray(value)) return [];
+  const fieldIds = new Set(fields.map((field) => field.id));
+  return value.flatMap((index, indexNumber) => {
+    if (!isRecord(index)) return [];
+    const name = typeof index.name === 'string' ? index.name.trim() : '';
+    const ids = Array.isArray(index.fieldIds)
+      ? index.fieldIds.filter((fieldId): fieldId is string => typeof fieldId === 'string' && fieldIds.has(fieldId))
+      : [];
+    if (!name || ids.length === 0) return [];
+    return [{
+      id: typeof index.id === 'string' && index.id.trim() ? index.id : `index_${indexNumber}_${slugify(name)}`,
+      name,
+      fieldIds: [...new Set(ids)],
+      unique: index.unique === true,
+    }];
+  });
+}
+
+export function entityPrimaryKeyFields(node: DiagramNode): EntityField[] {
+  return normalizeEntityFields(node.data.fields).filter((field) => field.primaryKey);
+}
+
+/** Build a relationship for an explicit FK without guessing from geometry. */
+export function relationshipForForeignKey(page: DiagramDocument['pages'][number], sourceEntityId: string, fieldId: string): DiagramEdge | null {
+  const source = page.nodes.find((node) => node.id === sourceEntityId && node.type === 'entity');
+  if (!source) return null;
+  const fields = normalizeEntityFields(source.data.fields);
+  const field = fields.find((candidate) => candidate.id === fieldId && candidate.foreignKey && candidate.reference?.entityId);
+  if (!field?.reference?.entityId) return null;
+  const target = page.nodes.find((node) => node.id === field.reference?.entityId && node.type === 'entity');
+  if (!target || target.id === source.id) return null;
+  const targetFields = normalizeEntityFields(target.data.fields);
+  const relatedFields = field.reference.constraintId
+    ? fields.filter((candidate) => candidate.reference?.constraintId === field.reference?.constraintId && candidate.reference?.entityId === target.id)
+    : [field];
+  const relatedTargetFields = relatedFields
+    .map((candidate) => targetFields.find((targetField) => targetField.id === candidate.reference?.fieldId))
+    .filter((candidate): candidate is EntityField => Boolean(candidate));
+  const targetField = targetFields.find((candidate) => candidate.id === field.reference?.fieldId) ?? targetFields.find((candidate) => candidate.primaryKey);
+  const sourceFieldIds = relatedFields.map((candidate) => candidate.id);
+  const targetFieldIds = relatedTargetFields.length > 0 ? relatedTargetFields.map((candidate) => candidate.id) : targetField ? [targetField.id] : [];
+  return createEdge(
+    { nodeId: source.id, port: 'right', offset: entityFieldPortOffset(fields, fields.indexOf(field)) },
+    { nodeId: target.id, port: 'left', offset: targetField ? entityFieldPortOffset(targetFields, targetFields.indexOf(targetField)) : undefined },
+    {
+      type: 'orthogonal',
+      style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-bar' : 'bar', endMarker: 'bar-crowfoot' },
+      data: { label: field.nullable ? '0..N : 0..1' : '1 : N', relationship: 'foreign-key', sourceFieldId: field.id, targetFieldId: targetField?.id, sourceFieldIds, targetFieldIds },
+    },
+  );
+}
+
+/** Add FK fields to the source side of a relationship when a schema has no
+ * explicit field metadata yet. Existing fields are left untouched. */
+export function foreignKeyForRelationship(document: DiagramDocument, pageId: string, edgeId: string): DiagramDocument {
+  const next = structuredClone(document);
+  const page = next.pages.find((candidate) => candidate.id === pageId);
+  const edge = page?.edges.find((candidate) => candidate.id === edgeId);
+  if (!page || !edge?.source.nodeId || !edge.target.nodeId) return next;
+  const source = page.nodes.find((node) => node.id === edge.source.nodeId && node.type === 'entity');
+  const target = page.nodes.find((node) => node.id === edge.target.nodeId && node.type === 'entity');
+  if (!source || !target) return next;
+  const sourceFields = normalizeEntityFields(source.data.fields);
+  const targetFields = normalizeEntityFields(target.data.fields);
+  const targetKeys = targetFields.filter((field) => field.primaryKey);
+  if (targetKeys.length === 0) return next;
+  const constraintId = typeof edge.data.constraintId === 'string' ? edge.data.constraintId : `fk_${edge.id}`;
+  const fields = targetKeys.map((targetField) => createEntityField({
+    name: `${slugify(String(target.data.label ?? 'entity'))}_${targetField.name}`,
+    type: targetField.type,
+    foreignKey: true,
+    nullable: edge.style.startMarker === 'circle' || edge.style.startMarker === 'circle-bar' || edge.style.startMarker === 'circle-crowfoot',
+    reference: { entityId: target.id, fieldId: targetField.id, constraintId, onDelete: 'NO ACTION', onUpdate: 'NO ACTION' },
+  })).filter((field) => !sourceFields.some((existing) => existing.name.toLowerCase() === field.name.toLowerCase()));
+  if (fields.length === 0) return next;
+  source.data.fields = [...sourceFields, ...fields];
+  source.size.height = entityAutoHeight(source.data.fields, source.data.entityVariant, source.data.columnHeaders === true);
+  edge.data = { ...edge.data, relationship: 'foreign-key', constraintId, sourceFieldId: fields[0].id, targetFieldId: targetKeys[0].id, sourceFieldIds: fields.map((field) => field.id), targetFieldIds: targetKeys.map((field) => field.id) };
+  return next;
 }
 
 export function entityFieldLabel(field: EntityField): string {
@@ -190,23 +278,47 @@ export function validateErd(document: DiagramDocument): ErdDiagnostic[] {
   document.pages.forEach((page) => {
     const entities = page.nodes.filter((node) => node.type === 'entity');
     const entityIds = new Set(entities.map((node) => node.id));
+    const tableNames = new Map<string, string>();
     entities.forEach((entity) => {
       const label = typeof entity.data.label === 'string' ? entity.data.label.trim() : '';
-      if (!label) diagnostics.push({ severity: 'error', message: 'Entity is missing a table name.', nodeId: entity.id });
+      if (!label) diagnostics.push({ severity: 'error', code: 'erd.missing-table-name', message: 'Entity is missing a table name.', pageId: page.id, nodeId: entity.id });
+      const normalizedLabel = label.toLowerCase();
+      if (normalizedLabel && tableNames.has(normalizedLabel)) diagnostics.push({ severity: 'error', code: 'erd.duplicate-table-name', message: `Table name “${label}” is used more than once.`, pageId: page.id, nodeId: entity.id });
+      if (normalizedLabel) tableNames.set(normalizedLabel, entity.id);
       const fields = normalizeEntityFields(entity.data.fields);
-      if (fields.length === 0) diagnostics.push({ severity: 'warning', message: `${label || 'Entity'} has no attributes.`, nodeId: entity.id });
+      if (fields.length === 0) diagnostics.push({ severity: 'warning', code: 'erd.empty-entity', message: `${label || 'Entity'} has no attributes.`, pageId: page.id, nodeId: entity.id });
       const seen = new Set<string>();
       fields.forEach((field) => {
         const name = field.name.trim().toLowerCase();
-        if (!name) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} contains an unnamed attribute.`, nodeId: entity.id });
-        if (seen.has(name)) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} contains duplicate attribute “${field.name}”.`, nodeId: entity.id });
+        if (!name) diagnostics.push({ severity: 'error', code: 'erd.unnamed-attribute', message: `${label || 'Entity'} contains an unnamed attribute.`, pageId: page.id, nodeId: entity.id });
+        if (seen.has(name)) diagnostics.push({ severity: 'error', code: 'erd.duplicate-attribute', message: `${label || 'Entity'} contains duplicate attribute “${field.name}”.`, pageId: page.id, nodeId: entity.id });
         seen.add(name);
-        if (field.reference && !entityIds.has(field.reference.entityId)) diagnostics.push({ severity: 'error', message: `${label || 'Entity'} attribute “${field.name}” references a missing entity.`, nodeId: entity.id });
-        if (field.reference && !field.foreignKey) diagnostics.push({ severity: 'warning', message: `${label || 'Entity'} attribute “${field.name}” has a reference but is not marked FK.`, nodeId: entity.id });
+        if (field.reference && !entityIds.has(field.reference.entityId)) diagnostics.push({ severity: 'error', code: 'erd.missing-reference-entity', message: `${label || 'Entity'} attribute “${field.name}” references a missing entity.`, pageId: page.id, nodeId: entity.id });
+        if (field.reference && !field.foreignKey) diagnostics.push({ severity: 'warning', code: 'erd.reference-not-fk', message: `${label || 'Entity'} attribute “${field.name}” has a reference but is not marked FK.`, pageId: page.id, nodeId: entity.id });
+        if (field.reference && entityIds.has(field.reference.entityId)) {
+          const referencedEntity = entities.find((candidate) => candidate.id === field.reference?.entityId);
+          const referencedFields = referencedEntity ? normalizeEntityFields(referencedEntity.data.fields) : [];
+           if (field.reference.fieldId && !referencedFields.some((candidate) => candidate.id === field.reference?.fieldId)) diagnostics.push({ severity: 'error', code: 'erd.missing-reference-field', message: `${label || 'Entity'} attribute “${field.name}” references a missing attribute.`, pageId: page.id, nodeId: entity.id });
+           const targetField = referencedFields.find((candidate) => candidate.id === field.reference?.fieldId);
+           const targetHasSingleColumnUniqueIndex = targetField
+             ? normalizeEntityIndexes(referencedEntity?.data.indexes, referencedFields).some((index) => index.unique && index.fieldIds.length === 1 && index.fieldIds[0] === targetField.id)
+             : false;
+           if (targetField && !targetField.primaryKey && !targetField.unique && !targetHasSingleColumnUniqueIndex) diagnostics.push({ severity: 'warning', code: 'erd.reference-not-key', message: `${label || 'Entity'} attribute “${field.name}” references an attribute that is not a key or unique.`, pageId: page.id, nodeId: entity.id });
+        }
+      });
+      normalizeEntityIndexes(entity.data.indexes, fields).forEach((index) => {
+        if (index.fieldIds.length === 0) diagnostics.push({ severity: 'warning', code: 'erd.empty-index', message: `${label || 'Entity'} contains an index with no attributes.`, pageId: page.id, nodeId: entity.id });
       });
     });
     page.edges.forEach((edge) => {
-      if (!edge.source.nodeId || !edge.target.nodeId || !entityIds.has(edge.source.nodeId) || !entityIds.has(edge.target.nodeId)) diagnostics.push({ severity: 'warning', message: 'ERD relationships should connect two entities.' });
+      if (!edge.source.nodeId || !edge.target.nodeId || !entityIds.has(edge.source.nodeId) || !entityIds.has(edge.target.nodeId)) diagnostics.push({ severity: 'warning', code: 'erd.invalid-relationship', message: 'ERD relationships should connect two entities.', pageId: page.id, edgeId: edge.id });
+      if (edge.source.nodeId && edge.target.nodeId && edge.source.nodeId === edge.target.nodeId) diagnostics.push({ severity: 'error', code: 'erd.self-relationship', message: 'An ERD relationship must connect distinct entities.', pageId: page.id, edgeId: edge.id });
+      const source = entities.find((node) => node.id === edge.source.nodeId);
+      if (source && edge.data.sourceFieldId) {
+        const field = normalizeEntityFields(source.data.fields).find((candidate) => candidate.id === edge.data.sourceFieldId);
+        const optional = edge.style.startMarker === 'circle' || edge.style.startMarker === 'circle-bar' || edge.style.startMarker === 'circle-crowfoot';
+        if (field && field.nullable !== optional) diagnostics.push({ severity: 'warning', code: 'erd.optionality-mismatch', message: `Relationship optionality does not match “${field.name}” nullability.`, pageId: page.id, edgeId: edge.id });
+      }
     });
   });
   return diagnostics;
@@ -227,3 +339,5 @@ function isFieldFlag(value: string): boolean {
 function isReferentialAction(value: unknown): value is ReferentialAction {
   return value === 'CASCADE' || value === 'RESTRICT' || value === 'SET NULL' || value === 'NO ACTION';
 }
+
+export { exportErdSql, exportSql, importErdSql, parseErdSql } from './erdSql';

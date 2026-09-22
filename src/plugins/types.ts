@@ -1,6 +1,7 @@
-import type { DiagramType, EdgeStyle, NodeStyle, ShapeBoundary, Size } from '../core/types';
+import type { Diagnostic, DiagramType, EdgeStyle, NodeStyle, ShapeBoundary, Size } from '../core/types';
 import type { ConnectionPort } from '../core/geometry';
 import type { DiagramNode } from '../core/types';
+import type { DocumentCommand } from '../core/commands';
 
 export type ShapeIconId = 'square' | 'rounded-rectangle' | 'circle' | 'diamond' | 'text' | 'line' | 'database' | 'table' | 'workflow';
 
@@ -47,7 +48,8 @@ export interface ConnectorDefinition {
 export interface ValidatorDefinition {
   id: string;
   label: string;
-  validate: (document: unknown) => string[];
+  validate: (document: unknown) => Diagnostic[];
+  quickFix?: (diagnostic: Diagnostic, document: unknown) => DocumentCommand | null;
 }
 
 export interface DiagramPlugin {

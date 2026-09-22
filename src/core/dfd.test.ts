@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createEdge, createNode } from './document';
-import { validateDfd } from './dfd';
+import { decomposeDfdProcess, validateDfd } from './dfd';
 
 describe('DFD semantic validation', () => {
   it('warns when an external entity connects directly to a data store', () => {
@@ -31,5 +31,16 @@ describe('DFD semantic validation', () => {
     const diagnostics = validateDfd(document);
     expect(diagnostics.some((diagnostic) => diagnostic.message.includes('used more than once'))).toBe(true);
     expect(diagnostics.some((diagnostic) => diagnostic.message.includes('should use a form'))).toBe(true);
+  });
+
+  it('creates a linked child page for a process and reports balance gaps', () => {
+    const document = createDocument('DFD', 'dfd');
+    const process = createNode('process', { x: 0, y: 0 }, { data: { label: 'Checkout' } });
+    document.pages[0].nodes.push(process);
+    const result = decomposeDfdProcess(document, document.pages[0].id, process.id);
+    expect(result).not.toBeNull();
+    expect(result!.document.pages).toHaveLength(2);
+    expect(result!.document.pages[0].nodes[0].data.childPageId).toBe(result!.childPageId);
+    expect(result!.document.pages[1].data?.parentProcessId).toBe(process.id);
   });
 });

@@ -1,10 +1,11 @@
 import type { DiagramEdge, DiagramNode, Point } from './types';
 
-export type LayoutMode = 'hierarchical' | 'horizontal' | 'vertical' | 'tree' | 'grid' | 'compact';
+export type LayoutMode = 'hierarchical' | 'dag' | 'horizontal' | 'vertical' | 'tree' | 'grid' | 'compact' | 'radial';
 
 export function layoutNodes(nodes: DiagramNode[], edges: DiagramEdge[], mode: LayoutMode): Record<string, Point> {
   if (nodes.length === 0) return {};
   if (mode === 'grid' || mode === 'compact') return gridLayout(nodes, mode === 'compact' ? 4 : Math.ceil(Math.sqrt(nodes.length)));
+  if (mode === 'radial') return radialLayout(nodes);
 
   const nodeIds = new Set(nodes.map((node) => node.id));
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
@@ -53,6 +54,15 @@ export function layoutNodes(nodes: DiagramNode[], edges: DiagramEdge[], mode: La
     });
   });
   return positions;
+}
+
+function radialLayout(nodes: DiagramNode[]): Record<string, Point> {
+  if (nodes.length === 1) return { [nodes[0].id]: { x: 0, y: 0 } };
+  const radius = Math.max(180, nodes.length * 42);
+  return Object.fromEntries(nodes.map((node, index) => {
+    const angle = -Math.PI / 2 + index * Math.PI * 2 / nodes.length;
+    return [node.id, { x: Math.round(Math.cos(angle) * radius - node.size.width / 2), y: Math.round(Math.sin(angle) * radius - node.size.height / 2) }];
+  }));
 }
 
 function gridLayout(nodes: DiagramNode[], columns: number): Record<string, Point> {

@@ -346,3 +346,77 @@ button:disabled { cursor: default; opacity: .35; }
 .quick-create-list button:hover { color: #fff; background: #29234b; }
 .quick-create-list .shape-mini { width: 24px; height: 24px; display: grid; place-items: center; color: #a99cff; background: #211d3b; border: 1px solid #4b3f84; border-radius: 5px; font-size: 15px; }
 .quick-create-list small { color: #727d95; font-size: 8px; }
+
+/* Adaptive workspace controls */
+.editor-workspace { --left-panel-width: 224px; --right-panel-width: 232px; }
+.shape-library, .outline-panel { width: var(--left-panel-width); flex-basis: var(--left-panel-width); }
+.properties-panel { width: var(--right-panel-width); flex-basis: var(--right-panel-width); }
+.panel-resize-handle { z-index: 7; position: relative; width: 6px; flex: 0 0 6px; cursor: col-resize; background: transparent; }
+.panel-resize-handle::after { position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; background: transparent; content: ''; transition: background .15s, box-shadow .15s; }
+.panel-resize-handle:hover::after, body.panel-resizing .panel-resize-handle::after { background: #7568c2; box-shadow: 0 0 8px rgba(144,123,255,.3); }
+body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user-select: none !important; }
+.editor-shell.focus-mode .panel-resize-handle, .editor-shell.presentation-mode .panel-resize-handle { display: none; }
+
+/* View menu */
+.view-menu-wrap { position: relative; }
+.topbar-view { height: 31px; padding: 0 9px; font-size: 10px; }
+.topbar-view.active { color: #eeeaff; background: #29234b; border-color: #4d4186; }
+.view-menu { width: 218px; }
+.view-menu > button { display: flex; align-items: center; gap: 7px; }
+.view-menu > button svg { color: #9d91e8; }
+.view-menu-toggle { justify-content: space-between; }
+.view-menu-toggle small { color: #6f7990; font-size: 8px; text-transform: uppercase; }
+.view-menu-toggle.enabled small { color: #b4a7ff; }
+.view-menu-divider { height: 1px; margin: 5px 3px; background: #293249; }
+
+/* Contextual diagnostics */
+.diagnostics-button:not(.has-diagnostics) { color: #8a93a8; border-color: #30384d; }
+.diagnostics-button:not(.has-diagnostics) svg { color: #737e94; }
+.status-diagnostics { position: relative; padding: 2px 0; color: #70798e; background: transparent; font: 9px var(--mono); }
+.status-diagnostics.has-diagnostics { color: #f0bd70; }
+.status-diagnostics strong { min-width: 15px; display: inline-grid; place-items: center; margin-left: 4px; padding: 1px 4px; color: #11131b; background: #f0bd70; border-radius: 8px; font-size: 8px; }
+.status-diagnostics:hover { color: #e2e5ef; }
+
+/* Empty inspector and status context */
+.empty-properties .no-selection { display: grid; justify-items: center; gap: 8px; padding: 25px 16px 21px; color: #727d94; text-align: center; }
+.empty-properties .no-selection strong { color: #d8dce7; font: 600 12px var(--display); }
+.empty-properties .no-selection span { max-width: 190px; font: 9px/1.5 var(--mono); }
+.empty-properties .property-section { padding-top: 14px; }
+.page-background-field { display: flex; align-items: center; gap: 8px; height: 29px; padding: 0 8px; color: #aab2c5; background: #0e121b; border: 1px solid #2b3448; border-radius: 5px; font: 9px var(--mono); }
+.page-background-field input { width: 22px; height: 20px; padding: 2px; background: transparent; border: 1px solid #39445c; border-radius: 4px; }
+.page-background-field span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-setting-value { display: flex; align-items: center; height: 29px; padding: 0 8px; color: #b5bdd0; background: #0e121b; border: 1px solid #2b3448; border-radius: 5px; font: 10px var(--mono); }
+.empty-setting-toggles { display: grid; gap: 3px; margin-top: 12px; }
+.empty-shortcuts { display: grid; gap: 7px; color: #858fa5; font: 9px var(--mono); }
+.empty-shortcuts span { display: flex; align-items: center; gap: 7px; }
+.empty-shortcuts kbd { min-width: 28px; padding: 3px 4px; color: #beb4ff; background: #272149; border: 1px solid #4b3f84; border-radius: 4px; font: 8px var(--mono); text-align: center; }
+.status-selection, .status-selection-size, .status-coordinate, .status-grid { white-space: nowrap; }
+.status-grid { padding: 2px 0; color: #70798e; background: transparent; font: 9px var(--mono); }
+.status-grid:hover { color: #d6d9e5; }
+
+/* Ruler pointer feedback */
+.ruler-pointer { position: absolute; z-index: 2; display: block; pointer-events: none; color: #c7beff; background: #332b5d; font: 8px var(--mono); }
+.ruler-pointer-horizontal { top: 0; height: 100%; border-left: 1px solid #a18fff; transform: translateX(-1px); }
+.ruler-pointer-horizontal i { position: absolute; top: 1px; left: 3px; padding: 1px 3px; font-style: normal; white-space: nowrap; }
+.ruler-pointer-vertical { left: 0; width: 100%; border-top: 1px solid #a18fff; transform: translateY(-1px); }
+.ruler-pointer-vertical i { position: absolute; top: 2px; left: 1px; padding: 1px 2px; font-style: normal; transform: rotate(-90deg) translateX(-100%); transform-origin: top left; white-space: nowrap; }
+.canvas-minimap { opacity: .82; transition: opacity .18s; }
+.canvas-minimap:hover { opacity: 1; }
+.property-heading { position: sticky; top: 0; z-index: 2; padding-top: 4px; padding-bottom: 4px; background: #11151f; }
+
+/* Library hierarchy and recency */
+.library-scope { display: flex; align-items: center; gap: 7px; margin: -4px 14px 11px; color: #747f96; font: 8px var(--mono); }
+.library-scope span { flex: 0 0 auto; text-transform: uppercase; letter-spacing: .05em; }
+.library-scope select { min-width: 0; flex: 1; height: 27px; padding: 0 6px; color: #c9cede; background: #0e121b; border: 1px solid #20283a; border-radius: 5px; outline: none; font: 9px var(--mono); }
+.library-scope select:focus { border-color: #786bc7; }
+.shape-item-row.recent .shape-item { color: #d0cbeb; background: rgba(52, 43, 91, .24); }
+.shape-item-row.recent .shape-mini { border-color: #6556a8; }
+.shape-favorite { opacity: 0; transition: opacity .14s, color .14s, background .14s; }
+.shape-item-row:hover .shape-favorite, .shape-item-row:focus-within .shape-favorite, .shape-favorite.active { opacity: 1; }
+
+@media (max-width: 800px) {
+  .panel-resize-handle { display: none; }
+  .status-selection-size, .status-coordinate, .status-grid { display: none; }
+  .status-left { gap: 7px; }
+  .library-scope { margin-right: 12px; margin-left: 12px; }
+}

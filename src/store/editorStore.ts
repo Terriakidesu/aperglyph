@@ -3,6 +3,7 @@ import {
   AlignNodesCommand,
   CommandManager,
   CreateEdgeCommand,
+  CreateDfdChildPageCommand,
   CreateNodeAndEdgeCommand,
   CreatePageCommand,
   CreateNodeCommand,
@@ -35,6 +36,7 @@ import {
 import { createDocument, createEdge, createNode, createPage as buildPage, defaultNodeStyle } from '../core/document';
 import { editorEvents } from '../core/events';
 import type { Alignment, DistributionAxis, ZOrderAction } from '../core/commands';
+import type { DocumentCommand } from '../core/commands';
 import { layoutNodes } from '../core/layout';
 import type { LayoutMode } from '../core/layout';
 import { LayoutWorkerClient } from '../spatial/layoutClient';
@@ -65,6 +67,7 @@ interface EditorStore {
   createNode: (node: DiagramNode) => void;
   createEdge: (edge: DiagramEdge) => void;
   createNodeAndEdge: (node: DiagramNode, edge: DiagramEdge) => void;
+  executeCommand: (command: DocumentCommand) => void;
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   resetEdge: (edgeId?: string) => void;
   moveNodes: (positions: Record<string, Point>) => void;
@@ -87,7 +90,7 @@ interface EditorStore {
   copySelection: () => ClipboardPayload | null;
   cutSelection: () => void;
   pasteClipboard: () => void;
-  pastePayload: (payload: ClipboardPayload) => void;
+  pastePayload: (payload: ClipboardPayload, offset?: Point) => void;
   duplicateSelection: (offset?: Point) => string[];
   rotateSelection: (degrees?: number) => void;
   alignSelection: (alignment: Alignment) => void;
@@ -97,6 +100,7 @@ interface EditorStore {
   ungroupSelection: () => void;
   autoLayout: (mode?: LayoutMode) => Promise<void>;
   createPage: (name?: string) => void;
+  createDfdChildPage: (processId: string) => void;
   deletePage: (pageId?: string) => void;
   renamePage: (pageId: string, name: string) => void;
   duplicatePage: (pageId?: string) => void;
@@ -183,6 +187,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       get().setSelection([node.id, edge.id], edge.id);
       editorEvents.emit('node:created', { nodeId: node.id });
       editorEvents.emit('edge:created', { edgeId: edge.id });
+    },
+    executeCommand: (command) => {
+      const { document } = get();
+      const next = manager.execute(command, document);
+      updateDocument(next, command.label);
     },
     updateEdge: (edgeId, changes, label) => {
       const { activePageId, document } = get();
@@ -343,10 +352,10 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (!clipboard || (clipboard.nodes.length === 0 && clipboard.edges.length === 0)) return;
       get().pastePayload(clipboard);
     },
-    pastePayload: (source) => {
+     pastePayload: (source, offset = { x: 24, y: 24 }) => {
       const { document, activePageId } = get();
       if (source.nodes.length === 0 && source.edges.length === 0) return;
-      const payload = offsetClipboard(source);
+       const payload = offsetClipboard(source, offset);
       const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
       updateDocument(next, 'Paste selection');
       get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
@@ -415,11 +424,24 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, `Auto layout · ${mode}`);
     },
     createPage: (name) => {
-      const { document } = get();
+      const { document, activePageId } = get();
       const page = buildPage(name?.trim() || `Page ${document.pages.length + 1}`);
+      if (document.diagramType === 'dfd') {
+        const parent = document.pages.find((candidate) => candidate.id === activePageId);
+        page.data = { dfdLevel: typeof parent?.data?.dfdLevel === 'number' ? parent.data.dfdLevel : 0, dataDictionary: [] };
+      }
       const next = manager.execute(new CreatePageCommand(page), document);
       updateDocument(next, 'Create page');
       set({ activePageId: page.id, selectedIds: [], primarySelectedId: null });
+    },
+    createDfdChildPage: (processId) => {
+      const { activePageId, document } = get();
+      if (document.diagramType !== 'dfd') return;
+      const command = new CreateDfdChildPageCommand(activePageId, processId);
+      const next = manager.execute(command, document);
+      if (next.pages.length === document.pages.length) return;
+      updateDocument(next, command.label);
+      set({ activePageId: command.childPageId, selectedIds: [], primarySelectedId: null });
     },
     deletePage: (pageId = get().activePageId) => {
       const { document, activePageId } = get();
@@ -474,18 +496,20 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (removedEdgeIds.length > 0) editorEvents.emit('edge:removed', { edgeIds: removedEdgeIds });
     },
     undo: () => {
-      const { document } = get();
+      const { document, activePageId } = get();
       const next = manager.undo(document);
       if (!next) return;
-      set({ document: next, isDirty: true, lastAction: manager.lastAction });
+      const pageStillExists = next.pages.some((page) => page.id === activePageId);
+      set({ document: next, activePageId: pageStillExists ? activePageId : next.pages[0]?.id ?? '', ...(pageStillExists ? {} : { selectedIds: [], primarySelectedId: null }), isDirty: true, lastAction: manager.lastAction });
       editorEvents.emit('document:changed', { document: next, action: 'Undo' });
       editorEvents.emit('history:changed', { canUndo: manager.canUndo, canRedo: manager.canRedo, lastAction: manager.lastAction });
     },
     redo: () => {
-      const { document } = get();
+      const { document, activePageId } = get();
       const next = manager.redo(document);
       if (!next) return;
-      set({ document: next, isDirty: true, lastAction: manager.lastAction });
+      const pageStillExists = next.pages.some((page) => page.id === activePageId);
+      set({ document: next, activePageId: pageStillExists ? activePageId : next.pages[0]?.id ?? '', ...(pageStillExists ? {} : { selectedIds: [], primarySelectedId: null }), isDirty: true, lastAction: manager.lastAction });
       editorEvents.emit('document:changed', { document: next, action: 'Redo' });
       editorEvents.emit('history:changed', { canUndo: manager.canUndo, canRedo: manager.canRedo, lastAction: manager.lastAction });
     },

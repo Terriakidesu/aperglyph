@@ -269,6 +269,54 @@ test.describe('diagram editing workflow', () => {
     expect(Math.abs((reconnectedBox?.y ?? 0) + (reconnectedBox?.height ?? 0) / 2 - sourceAnchor.y)).toBeLessThan(2);
   });
 
+  test('preserves the preview anchor after reconnecting from an offset attachment', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    await page.locator('.shape-item[title="Drag Circle onto the canvas"]').dragTo(canvas, { targetPosition: { x: 180, y: 250 } });
+    await page.locator('.shape-item[title="Drag Rectangle onto the canvas"]').dragTo(canvas, { targetPosition: { x: 650, y: 250 } });
+
+    await page.getByTitle('Connector (C)').click();
+    const nodes = page.locator('[data-node-id]');
+    const sourcePort = nodes.nth(0).locator('[data-connection-port="right"]');
+    const targetPort = nodes.nth(1).locator('[data-connection-port="left"]');
+    const sourcePortBox = await sourcePort.boundingBox();
+    const targetPortBox = await targetPort.boundingBox();
+    const targetNodeBox = await nodes.nth(1).boundingBox();
+    expect(sourcePortBox).not.toBeNull();
+    expect(targetPortBox).not.toBeNull();
+    expect(targetNodeBox).not.toBeNull();
+    const sourceAnchor = { x: (sourcePortBox?.x ?? 0) + (sourcePortBox?.width ?? 0) / 2, y: (sourcePortBox?.y ?? 0) + (sourcePortBox?.height ?? 0) / 2 };
+    const targetPortCenter = { x: (targetPortBox?.x ?? 0) + (targetPortBox?.width ?? 0) / 2, y: (targetPortBox?.y ?? 0) + (targetPortBox?.height ?? 0) / 2 };
+    const offsetDrop = { x: (targetNodeBox?.x ?? 0) + 6, y: (targetNodeBox?.y ?? 0) + (targetNodeBox?.height ?? 0) * 0.88 };
+    await page.mouse.move(sourceAnchor.x, sourceAnchor.y);
+    await page.mouse.down();
+    await page.mouse.move(offsetDrop.x, offsetDrop.y, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('[data-edge-id]')).toHaveCount(1);
+
+    const endpoint = page.locator('[data-edge-endpoint="target"]');
+    const offsetEndpointBox = await endpoint.boundingBox();
+    expect(offsetEndpointBox).not.toBeNull();
+    expect(Math.abs((offsetEndpointBox?.y ?? 0) + (offsetEndpointBox?.height ?? 0) / 2 - targetPortCenter.y)).toBeGreaterThan(4);
+
+    await page.getByTitle('Select (V)').click();
+    const startBox = await endpoint.boundingBox();
+    expect(startBox).not.toBeNull();
+    await page.mouse.move((startBox?.x ?? 0) + (startBox?.width ?? 0) / 2, (startBox?.y ?? 0) + (startBox?.height ?? 0) / 2);
+    await page.mouse.down();
+    await page.mouse.move(sourceAnchor.x + 14, sourceAnchor.y + 8, { steps: 6 });
+    const previewBox = await page.locator('.connection-target-preview circle').first().boundingBox();
+    expect(previewBox).not.toBeNull();
+    const previewAnchor = { x: (previewBox?.x ?? 0) + (previewBox?.width ?? 0) / 2, y: (previewBox?.y ?? 0) + (previewBox?.height ?? 0) / 2 };
+    await page.mouse.up();
+
+    const committedBox = await endpoint.boundingBox();
+    expect(committedBox).not.toBeNull();
+    const committedAnchor = { x: (committedBox?.x ?? 0) + (committedBox?.width ?? 0) / 2, y: (committedBox?.y ?? 0) + (committedBox?.height ?? 0) / 2 };
+    expect(Math.abs(committedAnchor.x - previewAnchor.x)).toBeLessThan(2);
+    expect(Math.abs(committedAnchor.y - previewAnchor.y)).toBeLessThan(2);
+  });
+
   test('quick-creates a shape from an empty connector endpoint', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
@@ -315,6 +363,43 @@ test.describe('diagram editing workflow', () => {
     await nodes.nth(1).locator('[data-port="field-1-left"]').dispatchEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 });
     await expect(page.locator('[data-edge-id]')).toHaveCount(initialEdges + 1);
     await expect(page.locator('.edge-visible').last()).toHaveAttribute('d', /M -200 -111\.5/);
+  });
+
+  test('imports an SQL schema and exposes ERD export actions', async ({ page }) => {
+    await page.locator('input[type="file"]').first().setInputFiles({
+      name: 'schema.sql',
+      mimeType: 'text/sql',
+      buffer: Buffer.from('CREATE TABLE customers (id uuid PRIMARY KEY); CREATE TABLE orders (customer_id uuid REFERENCES customers (id));'),
+    });
+    await expect(page.locator('.editor-shell')).toBeVisible();
+    await expect(page.locator('.node-entity-title')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'SQL schema (.sql)' })).toBeVisible();
+  });
+
+  test('opens diagnostics and focuses a semantic DFD problem', async ({ page }) => {
+    await page.getByRole('button', { name: 'Data flow diagram See information in motion 3 elements · 2 flows' }).click();
+    await page.locator('.canvas-node').filter({ hasText: 'Manage order' }).click();
+    await page.getByLabel('Label').fill('');
+    await expect(page.getByLabel('Open diagnostics')).toContainText('Diagnostics');
+    await page.getByLabel('Open diagnostics').click();
+    await expect(page.locator('.diagnostics-panel')).toBeVisible();
+    await expect(page.locator('.diagnostic-row')).toContainText('missing a name');
+    await page.locator('.diagnostic-main').first().click();
+    await expect(page.locator('.diagnostics-panel')).toBeVisible();
+  });
+
+  test('creates an undoable child page from a DFD process', async ({ page }) => {
+    await page.getByRole('button', { name: 'Data flow diagram See information in motion 3 elements · 2 flows' }).click();
+    await page.locator('.canvas-node').filter({ hasText: 'Manage order' }).click();
+    await page.getByRole('button', { name: 'Create child DFD page' }).click();
+    await expect(page.locator('.page-tab')).toHaveCount(2);
+    await expect(page.locator('.page-tab').last()).toContainText('Manage order');
+    await page.getByLabel('Open diagnostics').click();
+    await expect(page.locator('.diagnostics-panel')).toBeVisible();
+    await expect(page.locator('.diagnostic-row')).toHaveCount(2);
+    await page.getByTitle('Undo (⌘Z)').click();
+    await expect(page.locator('.page-tab')).toHaveCount(1);
   });
 
   test('creates and duplicates pages, then preserves the document locally', async ({ page }) => {
@@ -378,6 +463,31 @@ test.describe('diagram editing workflow', () => {
     await page.getByTitle('Page actions').click();
     await page.getByRole('button', { name: 'Use light canvas' }).click();
     await expect(canvas.locator('.canvas-background')).toHaveAttribute('fill', '#f6f7fb');
+  });
+
+  test('customizes the view, library scope, and inspector layout', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await expect(page.getByText('Nothing selected')).toBeVisible();
+    await expect(page.getByLabel('Grid size')).toBeVisible();
+
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    const rulersToggle = page.locator('.view-menu-toggle').filter({ hasText: 'Rulers' });
+    await expect(rulersToggle).toBeVisible();
+    await rulersToggle.click();
+    await expect(page.locator('.canvas-ruler-top')).toBeHidden();
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByLabel('Shape library category').selectOption('erd');
+    await expect(page.getByTitle('Drag Entity onto the canvas')).toBeVisible();
+
+    const separator = page.getByRole('separator', { name: 'Resize right panel' });
+    const separatorBox = await separator.boundingBox();
+    expect(separatorBox).not.toBeNull();
+    await page.mouse.move((separatorBox?.x ?? 0) + 3, (separatorBox?.y ?? 0) + 80);
+    await page.mouse.down();
+    await page.mouse.move((separatorBox?.x ?? 0) - 24, (separatorBox?.y ?? 0) + 80);
+    await page.mouse.up();
+    await expect.poll(() => page.locator('.properties-panel').evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBeGreaterThan(232);
+    await expect.poll(() => page.evaluate(() => window.localStorage.getItem('aperglyph.editor.right-width'))).not.toBeNull();
   });
 
   test('creates and lists a named local snapshot', async ({ page }) => {

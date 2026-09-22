@@ -7,6 +7,19 @@ export interface Point {
   y: number;
 }
 
+export type DiagnosticSeverity = 'error' | 'warning' | 'info';
+
+/** A normalized, locatable semantic/editor diagnostic. */
+export interface Diagnostic {
+  severity: DiagnosticSeverity;
+  message: string;
+  code?: string;
+  plugin?: string;
+  pageId?: string;
+  nodeId?: string;
+  edgeId?: string;
+}
+
 export interface Size {
   width: number;
   height: number;
@@ -132,6 +145,8 @@ export interface DiagramPage {
   edges: DiagramEdge[];
   settings: PageSettings;
   guides?: DiagramGuide[];
+  /** Optional semantic metadata owned by a diagram plugin. */
+  data?: Record<string, unknown>;
 }
 
 export type PageSettingsPatch = Partial<PageSettings>;

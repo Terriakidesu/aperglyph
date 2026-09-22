@@ -5,9 +5,12 @@ export interface EditorEventMap {
   'document:opened': { document: DiagramDocument };
   'selection:changed': { ids: string[] };
   'viewport:changed': Viewport;
+  'pointer:changed': Point | null;
   'viewport:fit': { scope: 'page' | 'selection' };
   'interaction:cancel': undefined;
   'ui:shortcuts': undefined;
+  'ui:diagnostics': undefined;
+  'diagnostics:changed': { enabled: boolean };
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };
   'node:moved': { nodeIds: string[]; positions: Record<string, Point> };

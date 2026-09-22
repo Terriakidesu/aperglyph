@@ -226,7 +226,22 @@ function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Po
   return { nodeId, port, ...(offset === undefined ? {} : { offset }) };
 }
 
-export function CanvasViewport() {
+interface CanvasViewportProps {
+  onImportFile?: (file: File, point: Point) => void | Promise<void>;
+  view?: CanvasViewOptions;
+}
+
+interface CanvasViewOptions {
+  rulers: boolean;
+  guides: boolean;
+  minimap: boolean;
+  showPorts: boolean;
+  connectionHints: boolean;
+}
+
+const DEFAULT_CANVAS_VIEW: CanvasViewOptions = { rulers: true, guides: true, minimap: true, showPorts: false, connectionHints: true };
+
+export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: CanvasViewportProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSession | null>(null);
@@ -254,6 +269,7 @@ export function CanvasViewport() {
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
   const [guidePreview, setGuidePreview] = useState<DiagramGuide | null>(null);
   const [guidesOpen, setGuidesOpen] = useState(false);
+  const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
   const [showCanvasHint, setShowCanvasHint] = useState(() => {
     try {
       return globalThis.localStorage?.getItem('aperglyph.canvas-hint-dismissed') !== 'true';
@@ -261,6 +277,7 @@ export function CanvasViewport() {
       return true;
     }
   });
+  const previousHintsPreference = useRef(view.connectionHints);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -270,6 +287,11 @@ export function CanvasViewport() {
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
   const spatialReadyRef = useRef(false);
   const spatialQueryRef = useRef(0);
+
+  useEffect(() => {
+    if (view.connectionHints && !previousHintsPreference.current) setShowCanvasHint(true);
+    previousHintsPreference.current = view.connectionHints;
+  }, [view.connectionHints]);
 
   // Shape definitions are an external, HMR-aware catalog. Subscribing here
   // makes updated anchor resolvers visible without restarting the editor.
@@ -307,6 +329,10 @@ export function CanvasViewport() {
     observer.observe(stageRef.current);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if ((page?.nodes.length ?? 0) + (page?.edges.length ?? 0) > 0) setShowCanvasHint(false);
+  }, [page?.edges.length, page?.nodes.length]);
 
   const fitViewport = useCallback((scope: 'page' | 'selection') => {
     if (!page || size.width <= 0 || size.height <= 0) return;
@@ -652,6 +678,11 @@ export function CanvasViewport() {
   };
 
   const handleShapeDragOver = (event: ReactDragEvent<SVGSVGElement>) => {
+    if (event.dataTransfer.files?.length && onImportFile) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      return;
+    }
     const payload = parseShapeDrop(event.dataTransfer);
     if (!payload && !Array.from(event.dataTransfer.types).includes(SHAPE_DRAG_MIME)) return;
     event.preventDefault();
@@ -660,6 +691,13 @@ export function CanvasViewport() {
   };
 
   const handleShapeDrop = (event: ReactDragEvent<SVGSVGElement>) => {
+    const file = event.dataTransfer.files?.[0];
+    if (file && onImportFile) {
+      event.preventDefault();
+      void onImportFile(file, worldPoint(event));
+      setShapeDragPreview(null);
+      return;
+    }
     const payload = parseShapeDrop(event.dataTransfer);
     if (!payload) return;
     event.preventDefault();
@@ -974,6 +1012,9 @@ export function CanvasViewport() {
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const pointer = worldPoint(event);
+    setPointerWorld(pointer);
+    editorEvents.emit('pointer:changed', pointer);
     if (updateGuideDrag(event)) return;
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
@@ -1122,6 +1163,11 @@ export function CanvasViewport() {
     dragRef.current = null;
   };
 
+  const clearPointerPosition = () => {
+    setPointerWorld(null);
+    editorEvents.emit('pointer:changed', null);
+  };
+
   const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
     const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * (event.deltaY > 0 ? 0.92 : 1.08)));
     const before = worldPoint(event);
@@ -1222,12 +1268,12 @@ export function CanvasViewport() {
   const minimapRect = (bounds: WorldBounds) => ({ ...minimapPoint({ x: bounds.x, y: bounds.y }), width: bounds.width * minimapScale, height: bounds.height * minimapScale });
   const minimapViewport = minimapRect(visibleWorld);
   const guideWorld = { left: visibleWorld.x - visibleWorld.width, right: visibleWorld.x + visibleWorld.width * 2, top: visibleWorld.y - visibleWorld.height, bottom: visibleWorld.y + visibleWorld.height * 2 };
+  const pointerScreen = pointerWorld ? { x: size.width / 2 + (pointerWorld.x + viewport.x) * viewport.zoom, y: size.height / 2 + (pointerWorld.y + viewport.y) * viewport.zoom } : null;
   const quickCreateMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => `${shape.label} ${shape.tags?.join(' ') ?? ''}`.toLowerCase().includes(quickCreateSearch.trim().toLowerCase())).slice(0, 8);
 
-   return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef}>
-     {showCanvasHint && <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>}
-     <div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}</div>
-     <div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}</div>
+    return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef} onPointerLeave={clearPointerPosition}>
+      {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">Hold Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>}
+      {view.rulers && <><div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}</div><div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}</div></>}
     <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
          <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke={canvasGridColor} strokeWidth="0.7" opacity={page?.settings.canvasTheme === 'light' ? '0.7' : '0.62'} /></pattern>
@@ -1240,11 +1286,11 @@ export function CanvasViewport() {
           <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : canvasBackground} />
           {shapePreviewNode && <g className="shape-drop-preview" transform={`translate(${shapePreviewNode.position.x} ${shapePreviewNode.position.y})`} pointerEvents="none"><NodeGraphic node={shapePreviewNode} diagramType={document.diagramType} /></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
-          <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
+          {view.guides && <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
             ? <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guide.position} y1={guideWorld.top} x2={guide.position} y2={guideWorld.bottom} onPointerDown={(event) => beginGuideDrag(event, 'vertical', guide)} onDoubleClick={() => removeGuide(guide.id)} />
             : <line key={guide.id} className={`canvas-guide ${guide.locked ? 'locked' : ''}`} x1={guideWorld.left} y1={guide.position} x2={guideWorld.right} y2={guide.position} onPointerDown={(event) => beginGuideDrag(event, 'horizontal', guide)} onDoubleClick={() => removeGuide(guide.id)} />)}{guidePreview && (guidePreview.orientation === 'vertical'
             ? <line className="canvas-guide preview" x1={guidePreview.position} y1={guideWorld.top} x2={guidePreview.position} y2={guideWorld.bottom} />
-            : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>
+             : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>}
          <g className="edge-layer">{renderedEdges.map((edge) => {
           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
@@ -1254,7 +1300,7 @@ export function CanvasViewport() {
           const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
             return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} />;
         })}</g>
-         <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+          <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={view.showPorts || activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
          {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
          <g className="edge-marker-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
@@ -1278,10 +1324,10 @@ export function CanvasViewport() {
        {contextMenu.target.kind === 'canvas' && <button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button>}
       </div>}
       {quickCreate && <div className="quick-create-menu" style={{ left: Math.min(Math.max(8, quickCreate.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, quickCreate.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Quick create</span><button title="Cancel quick create" aria-label="Cancel quick create" onClick={() => { setQuickCreate(null); setQuickCreateSearch(''); }}>×</button></div><input autoFocus aria-label="Search quick create shapes" placeholder="Search shapes…" value={quickCreateSearch} onChange={(event) => setQuickCreateSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuickCreate(null); setQuickCreateSearch(''); } }} /><div className="quick-create-list">{quickCreateMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : quickCreateMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.type}`} onClick={() => createQuickShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
-       <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
+       {view.minimap && <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
         <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>
-      </div>
-      {(page?.guides?.length ?? 0) > 0 && <details className="guide-controls" open={guidesOpen} onToggle={(event) => setGuidesOpen(event.currentTarget.open)}><summary><Ruler size={12} /> Guides <span>{page?.guides?.length}</span></summary><div className="guide-control-list">{page?.guides?.map((guide) => <div key={guide.id} className="guide-control"><i className={guide.orientation} /><span>{guide.orientation === 'vertical' ? `X ${Math.round(guide.position)}` : `Y ${Math.round(guide.position)}`}</span><button title={guide.locked ? 'Unlock guide' : 'Lock guide'} aria-label={guide.locked ? 'Unlock guide' : 'Lock guide'} onClick={() => toggleGuideLock(guide.id)}>{guide.locked ? <Lock size={12} /> : <Unlock size={12} />}</button><button title="Delete guide" aria-label="Delete guide" disabled={guide.locked} onClick={() => removeGuide(guide.id)}><Trash2 size={12} /></button></div>)}</div></details>}
+       </div>}
+       {view.guides && (page?.guides?.length ?? 0) > 0 && <details className="guide-controls" open={guidesOpen} onToggle={(event) => setGuidesOpen(event.currentTarget.open)}><summary><Ruler size={12} /> Guides <span>{page?.guides?.length}</span></summary><div className="guide-control-list">{page?.guides?.map((guide) => <div key={guide.id} className="guide-control"><i className={guide.orientation} /><span>{guide.orientation === 'vertical' ? `X ${Math.round(guide.position)}` : `Y ${Math.round(guide.position)}`}</span><button title={guide.locked ? 'Unlock guide' : 'Lock guide'} aria-label={guide.locked ? 'Unlock guide' : 'Lock guide'} onClick={() => toggleGuideLock(guide.id)}>{guide.locked ? <Lock size={12} /> : <Unlock size={12} />}</button><button title="Delete guide" aria-label="Delete guide" disabled={guide.locked} onClick={() => removeGuide(guide.id)}><Trash2 size={12} /></button></div>)}</div></details>}
    </div>;
 }
 

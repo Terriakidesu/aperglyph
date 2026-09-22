@@ -1,4 +1,4 @@
-import { cloneDocument, clonePageWithNewIds, createId, getPage } from './document';
+import { cloneDocument, clonePageWithNewIds, createId, createPage, getPage } from './document';
 import { wrappedNodeHeight } from './text';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset } from './types';
 
@@ -107,13 +107,25 @@ export class DeleteNodesCommand implements DocumentCommand {
     const page = getPage(next, this.pageId);
     if (page) {
       const ids = new Set(this.selectionIds);
-      const removedNodeIds = new Set(page.nodes.filter((node) => ids.has(node.id) && !node.locked).map((node) => node.id));
+      const removedNodes = page.nodes.filter((node) => ids.has(node.id) && !node.locked);
+      const removedNodeIds = new Set(removedNodes.map((node) => node.id));
       page.nodes = page.nodes.filter((node) => !removedNodeIds.has(node.id));
       // Removing an owner must not leave dangling container references in the
       // surviving document. Children remain on the canvas and become root
       // objects, which is safer than silently deleting more user content.
       page.nodes = page.nodes.map((node) => removedNodeIds.has(node.containerId ?? '') ? { ...node, containerId: undefined } : node);
       page.edges = page.edges.filter((edge) => !ids.has(edge.id) && (edge.source.nodeId === undefined || !removedNodeIds.has(edge.source.nodeId)) && (edge.target.nodeId === undefined || !removedNodeIds.has(edge.target.nodeId)));
+
+      // Deleting a decomposed process should not leave its retained child
+      // page claiming an owner that no longer exists. The child page remains
+      // available as user content, but becomes a normal root page.
+      removedNodes.forEach((node) => {
+        const childPageId = typeof node.data.childPageId === 'string' ? node.data.childPageId : undefined;
+        if (!childPageId) return;
+        next.pages = next.pages.map((candidate) => candidate.id === childPageId && candidate.data?.parentPageId === page.id && candidate.data.parentProcessId === node.id
+          ? { ...candidate, data: withoutDataKeys(candidate.data, ['parentPageId', 'parentProcessId']) }
+          : candidate);
+      });
     }
     next.updatedAt = Date.now();
     return next;
@@ -257,13 +269,64 @@ export class CreatePageCommand implements DocumentCommand {
   }
 }
 
+/** Creates a levelled DFD child page and links the selected process to it. */
+export class CreateDfdChildPageCommand implements DocumentCommand {
+  readonly label = 'Create child DFD page';
+  readonly childPageId = createId('page');
+  constructor(private readonly parentPageId: string, private readonly processId: string) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const parent = getPage(next, this.parentPageId);
+    const process = parent?.nodes.find((node) => node.id === this.processId && node.type === 'process');
+    if (!parent || !process || next.pages.some((page) => page.id === this.childPageId) || (typeof process.data.childPageId === 'string' && next.pages.some((page) => page.id === process.data.childPageId))) return next;
+    const level = typeof parent.data?.dfdLevel === 'number' ? parent.data.dfdLevel + 1 : 1;
+    const child = createPage(typeof process.data.label === 'string' && process.data.label.trim() ? process.data.label.trim() : `Process ${this.processId}`);
+    child.id = this.childPageId;
+    child.data = { dfdLevel: level, parentPageId: parent.id, parentProcessId: process.id, dataDictionary: [] };
+    parent.nodes = parent.nodes.map((node) => node.id === process.id ? { ...node, data: { ...node.data, childPageId: child.id } } : node);
+    next.pages.push(child);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class DeletePageCommand implements DocumentCommand {
   readonly label = 'Delete page';
   constructor(private readonly pageId: string) {}
 
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
-    if (next.pages.length > 1) next.pages = next.pages.filter((page) => page.id !== this.pageId);
+    if (next.pages.length > 1 && next.pages.some((page) => page.id === this.pageId)) {
+      const orphanedPages = new Set<string>([this.pageId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        next.pages.forEach((page) => {
+          if (typeof page.data?.parentPageId === 'string' && orphanedPages.has(page.data.parentPageId) && !orphanedPages.has(page.id)) {
+            orphanedPages.add(page.id);
+            changed = true;
+          }
+        });
+      }
+      next.pages = next.pages.filter((page) => page.id !== this.pageId);
+      next.pages = next.pages.map((page) => {
+        const data = page.data;
+        const parentRemoved = typeof data?.parentPageId === 'string' && orphanedPages.has(data.parentPageId);
+        const nodes = page.nodes.map((node) => {
+          const childPageId = typeof node.data.childPageId === 'string' ? node.data.childPageId : undefined;
+          return childPageId && orphanedPages.has(childPageId)
+            ? { ...node, data: withoutDataKeys(node.data, ['childPageId']) }
+            : node;
+        });
+        if (!parentRemoved && nodes.every((node, index) => node === page.nodes[index])) return page;
+        return {
+          ...page,
+          ...(parentRemoved ? { data: withoutDataKeys(data, ['parentPageId', 'parentProcessId', 'dfdLevel']) } : {}),
+          nodes,
+        };
+      });
+    }
     next.updatedAt = Date.now();
     return next;
   }
@@ -703,14 +766,29 @@ function offsetEndpoint(endpoint: DiagramEdge['source'], nodeIds: Map<string, st
 
 /** Keep attached endpoints node-relative and free endpoints point-relative. */
 function mergeEndpoint(current: DiagramEdge['source'], patch: DiagramEdge['source']): DiagramEdge['source'] {
-  const endpoint = { ...current, ...patch };
-  if (endpoint.nodeId) return { ...endpoint, point: undefined };
-  if (endpoint.point) return { ...endpoint, port: undefined, offset: undefined };
-  return endpoint;
+  // A node attachment is a complete geometric identity. Do not inherit a
+  // port or offset from the previous node when the new anchor omits it.
+  if (patch.nodeId) {
+    return {
+      nodeId: patch.nodeId,
+      ...(patch.port === undefined ? {} : { port: patch.port }),
+      ...(patch.offset === undefined ? {} : { offset: patch.offset }),
+    };
+  }
+  // A free point is also complete; attached geometry must not survive the
+  // transition back to a free endpoint.
+  if (patch.point) return { point: { ...patch.point } };
+  return { ...current, ...patch };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function withoutDataKeys(data: Record<string, unknown> | undefined, keys: string[]): Record<string, unknown> {
+  const next = { ...(data ?? {}) };
+  keys.forEach((key) => delete next[key]);
+  return next;
 }
 
 export class UpdateEdgeCommand implements DocumentCommand {

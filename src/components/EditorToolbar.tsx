@@ -25,7 +25,7 @@ export function EditorToolbar() {
       {tools.map(({ id, label, icon: Icon, shortcut }) => <button key={id} className={`rail-button ${activeTool === id ? 'active' : ''}`} onClick={() => setTool(id)} title={`${label} (${shortcut})`}><Icon size={18} /><span>{label}</span>{activeTool === id && <i />}</button>)}
     </div>
     <div className="rail-separator" />
-    <div className="rail-arrange"><button className={`rail-button ${arrangeOpen ? 'active' : ''}`} title="Arrange layout" onClick={() => setArrangeOpen((open) => !open)}><LayoutGrid size={17} /><span>Arrange</span></button>{arrangeOpen && <div className="rail-popover"><strong>Arrange</strong>{(['hierarchical', 'horizontal', 'vertical', 'tree', 'grid', 'compact'] as LayoutMode[]).map((mode) => <button key={mode} onClick={() => { void autoLayout(mode); setArrangeOpen(false); }}>{mode.replace('-', ' ')}</button>)}</div>}</div>
+     <div className="rail-arrange"><button className={`rail-button ${arrangeOpen ? 'active' : ''}`} title="Arrange layout" onClick={() => setArrangeOpen((open) => !open)}><LayoutGrid size={17} /><span>Arrange</span></button>{arrangeOpen && <div className="rail-popover"><strong>Arrange</strong>{(['hierarchical', 'dag', 'horizontal', 'vertical', 'tree', 'grid', 'compact', 'radial'] as LayoutMode[]).map((mode) => <button key={mode} onClick={() => { void autoLayout(mode); setArrangeOpen(false); }}>{mode.replace('-', ' ')}</button>)}</div>}</div>
     <div className="rail-spacer" />
       <button className="rail-button" title="Fit page" aria-label="Fit page" onClick={() => editorEvents.emit('viewport:fit', { scope: 'page' })}><ZoomIn size={18} /><span>Fit</span></button>
     <div className="rail-user">AG</div>

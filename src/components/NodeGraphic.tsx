@@ -16,6 +16,10 @@ export function NodeGraphic({ node, diagramType }: { node: DiagramNode; diagramT
   const renderer = shapeRenderer(node, diagramType);
   const commonProps = { fill: node.style.fill, stroke: node.style.stroke, strokeWidth: node.style.strokeWidth, opacity: node.style.opacity };
   const shape = (() => {
+    if (renderer === 'image') {
+      const source = typeof node.data.src === 'string' && node.data.src.startsWith('data:image/') ? node.data.src : '';
+      return <g><rect width={width} height={height} fill={node.style.fill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} opacity={node.style.opacity} />{source && <image href={source} width={width} height={height} preserveAspectRatio="xMidYMid meet" />}<NodeLabel node={node} label={label} width={width} height={height} vertical="bottom" /></g>;
+    }
     if (renderer === 'diamond' || renderer === 'decision') {
       const points = `${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`;
       return <polygon points={points} {...commonProps} />;
