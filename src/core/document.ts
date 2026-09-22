@@ -16,6 +16,7 @@ import type {
   TextAlign,
   VerticalAlign,
 } from './types';
+import { defaultSnapSettings } from './snapping';
 
 export const CURRENT_SCHEMA_VERSION = 1;
 const MAX_PAGES = 1000;
@@ -82,6 +83,7 @@ export function createPage(name = 'Page 1'): DiagramPage {
       gridSize: 16,
       gridVisible: true,
       snapToGrid: true,
+      snapSettings: { ...defaultSnapSettings },
     },
     guides: [],
   };
@@ -308,7 +310,14 @@ function validatePageSettings(value: unknown, path: string, errors: string[]): v
   if (value.canvasTheme !== undefined && (typeof value.canvasTheme !== 'string' || !canvasThemes.has(value.canvasTheme as CanvasTheme))) errors.push(`${path}.canvasTheme is invalid`);
   finiteInRange(value.gridSize, `${path}.gridSize`, 1, 512, errors);
   if (typeof value.gridVisible !== 'boolean') errors.push(`${path}.gridVisible must be boolean`);
-  if (typeof value.snapToGrid !== 'boolean') errors.push(`${path}.snapToGrid must be boolean`);
+  if (value.snapToGrid !== undefined && typeof value.snapToGrid !== 'boolean') errors.push(`${path}.snapToGrid must be boolean`);
+  if (value.snapSettings !== undefined) {
+    const snapSettings = value.snapSettings;
+    if (!isRecord(snapSettings)) errors.push(`${path}.snapSettings must be an object`);
+    else (['grid', 'objects', 'guides', 'ports'] as const).forEach((key) => {
+      if (snapSettings[key] !== undefined && typeof snapSettings[key] !== 'boolean') errors.push(`${path}.snapSettings.${key} must be boolean`);
+    });
+  }
 }
 
 function validateGuide(value: unknown, path: string, errors: string[]): void {
@@ -454,7 +463,21 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
       return {
         ...createPage(page.name ?? `Page ${index + 1}`),
         ...page,
-        settings: { ...createPage().settings, ...(page.settings ?? {}) },
+        settings: {
+          ...createPage().settings,
+          ...(page.settings ?? {}),
+          snapToGrid: page.settings?.snapSettings?.grid ?? page.settings?.snapToGrid ?? true,
+          snapSettings: {
+            ...defaultSnapSettings,
+            ...(page.settings?.snapToGrid === undefined ? {} : {
+              grid: page.settings.snapToGrid,
+              objects: page.settings.snapToGrid,
+              guides: page.settings.snapToGrid,
+              ports: page.settings.snapToGrid,
+            }),
+            ...(page.settings?.snapSettings ?? {}),
+          },
+        },
         ...(data ? { data } : {}),
         nodes,
         edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, diagramType)) : [],

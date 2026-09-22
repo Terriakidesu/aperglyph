@@ -27,6 +27,23 @@ describe('object snapping', () => {
     expect(result.guides).toHaveLength(0);
   });
 
+  it('can snap only to persistent guides', () => {
+    const moving = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 60 } });
+    const result = snapNodes([moving], { [moving.id]: { x: 116, y: 7 } }, [], {
+      gridSize: 16,
+      snapToGrid: false,
+      snapToObjects: false,
+      snapToGuides: true,
+      guides: [
+        { id: 'guide-x', orientation: 'vertical', position: 120 },
+        { id: 'guide-y', orientation: 'horizontal', position: 4 },
+      ],
+      threshold: 10,
+    });
+    expect(result.positions[moving.id]).toEqual({ x: 120, y: 4 });
+    expect(result.guides).toHaveLength(2);
+  });
+
   it('uses one drag calculation for the preview and final release', () => {
     const moving = createNode('rectangle', { x: 3, y: 7 });
     const result = snapDraggedNodes(

@@ -17,6 +17,7 @@ import {
   MoveNodesCommand,
   RenamePageCommand,
   ReorderPageCommand,
+  RenameDocumentCommand,
   ResetEdgeCommand,
   ReorderNodesCommand,
   RotateNodesCommand,
@@ -100,6 +101,7 @@ interface EditorStore {
   ungroupSelection: () => void;
   autoLayout: (mode?: LayoutMode) => Promise<void>;
   createPage: (name?: string) => void;
+  renameDocument: (name: string) => void;
   createDfdChildPage: (processId: string) => void;
   deletePage: (pageId?: string) => void;
   renamePage: (pageId: string, name: string) => void;
@@ -433,6 +435,13 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const next = manager.execute(new CreatePageCommand(page), document);
       updateDocument(next, 'Create page');
       set({ activePageId: page.id, selectedIds: [], primarySelectedId: null });
+    },
+    renameDocument: (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const { document } = get();
+      const next = manager.execute(new RenameDocumentCommand(trimmed), document);
+      updateDocument(next, 'Rename document');
     },
     createDfdChildPage: (processId) => {
       const { activePageId, document } = get();

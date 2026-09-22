@@ -1,7 +1,9 @@
-import { AlertTriangle, CheckCircle2, Download, Eye, History, Maximize2, MoreHorizontal, Redo2, Undo2, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Command, Download, Eye, FileText, History, Maximize2, MoreHorizontal, Redo2, Undo2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { editorEvents } from '../core/events';
-import { copySelectionPng, copySelectionSvg, deleteDocumentSnapshot, downloadMermaid, downloadPdf, downloadPng, downloadPlantUml, downloadProject, downloadSql, downloadSvg, getSnapshotLimit, listDocumentSnapshots, loadDocumentSnapshot, normalizeSnapshotLimit, printDocument, pruneDocumentSnapshots, saveDocumentSnapshot, setSnapshotLimit } from '../persistence';
+import { createId } from '../core/document';
+import type { DiagramDocument } from '../core/types';
+import { copySelectionPng, copySelectionSvg, createWorkspaceBackup, deleteDocumentSnapshot, downloadMermaid, downloadPdf, downloadPng, downloadPlantUml, downloadProject, downloadSql, downloadSvg, downloadWorkspaceBackup, getSnapshotLimit, listDocumentSnapshots, loadDocumentSnapshot, normalizeSnapshotLimit, printDocument, pruneDocumentSnapshots, readDiagramFile, rememberActiveDocument, saveDocumentSnapshot, setSnapshotLimit } from '../persistence';
 import type { DocumentSnapshot } from '../persistence';
 import { useEditorStore } from '../store/editorStore';
 import { LogoMark } from './LogoMark';
@@ -23,6 +25,8 @@ interface EditorTopBarProps {
   fullscreen: boolean;
   focusMode: boolean;
   presentationMode: boolean;
+  onOpenDocument?: (document: DiagramDocument) => void;
+  onOpenPreferences?: () => void;
 }
 
 type ExportScale = 1 | 2 | 4;
@@ -35,7 +39,7 @@ export interface ViewPreferences {
   connectionHints: boolean;
 }
 
-export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, onTogglePresentation, fullscreen, focusMode, presentationMode }: EditorTopBarProps) {
+export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view, gridVisible, onViewChange, onToggleGrid, onFitPage, onFitSelection, onZoom100, onToggleFocus, onToggleFullscreen, onTogglePresentation, fullscreen, focusMode, presentationMode, onOpenDocument, onOpenPreferences }: EditorTopBarProps) {
   const document = useEditorStore((state) => state.document);
   const isDirty = useEditorStore((state) => state.isDirty);
   const canUndo = useEditorStore((state) => state.commandManager.canUndo);
@@ -55,9 +59,38 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
   const [snapshotLimit, setSnapshotLimitState] = useState(getSnapshotLimit);
   const [viewOpen, setViewOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [documentMenuOpen, setDocumentMenuOpen] = useState(false);
+  const [documentInfoOpen, setDocumentInfoOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(document.name);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const selectionIds = selectedIds.length > 0 ? selectedIds : undefined;
   const inspectDocument = () => { void navigator.clipboard?.writeText(JSON.stringify(document, null, 2)); };
   const closeExport = () => setExportOpen(false);
+  useEffect(() => { if (!editingTitle) setTitleDraft(document.name); }, [document.name, editingTitle]);
+  const commitTitle = () => {
+    const nextName = titleDraft.trim();
+    if (nextName && nextName !== document.name) useEditorStore.getState().renameDocument(nextName);
+    setEditingTitle(false);
+  };
+  const duplicateCurrentDocument = () => {
+    const now = Date.now();
+    const duplicate = { ...structuredClone(document), id: createId('doc'), name: `${document.name} copy`, createdAt: now, updatedAt: now };
+    onOpenDocument?.(duplicate);
+    setDocumentMenuOpen(false);
+  };
+  const openFile = async (file: File) => {
+    try {
+      onOpenDocument?.(await readDiagramFile(file));
+      setDocumentMenuOpen(false);
+    } catch {
+      editorEvents.emit('storage:error', { error: new Error('Unable to open this diagram file.') });
+    }
+  };
+  const createBackup = async () => {
+    try { downloadWorkspaceBackup(await createWorkspaceBackup(), `${document.name}-workspace-backup.json`); } catch { editorEvents.emit('storage:error', { error: new Error('Unable to create a workspace backup.') }); }
+    setDocumentMenuOpen(false);
+  };
 
   const refreshSnapshots = async () => {
     setSnapshots(await listDocumentSnapshots(document.id));
@@ -96,24 +129,34 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
 
   return <>
     <header className="editor-topbar">
-      <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title"><strong>{document.name}</strong><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div></div>
+      <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title-wrap"><div className="document-title">{editingTitle ? <input className="document-title-input" aria-label="Document title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitTitle(); } if (event.key === 'Escape') { setTitleDraft(document.name); setEditingTitle(false); } }} autoFocus /> : <button className="document-title-button" title="Rename document" onClick={() => setEditingTitle(true)}><strong>{document.name}</strong></button>}<button className="document-menu-toggle" title="Document menu" aria-label="Document menu" aria-expanded={documentMenuOpen} onClick={() => setDocumentMenuOpen((open) => !open)}><ChevronDown size={13} /></button><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div>{documentMenuOpen && <DocumentMenu onRename={() => { setDocumentMenuOpen(false); setEditingTitle(true); }} onNew={() => { useEditorStore.getState().reset(); rememberActiveDocument(useEditorStore.getState().document.id); setDocumentMenuOpen(false); }} onOpen={() => fileInputRef.current?.click()} onDuplicate={duplicateCurrentDocument} onInfo={() => { setDocumentMenuOpen(false); setDocumentInfoOpen(true); }} onBackup={() => void createBackup()} onPrint={() => { printDocument(document, { pageId: activePageId, contentBounds: true, padding: 32, outlineOnly: true }); setDocumentMenuOpen(false); }} />}{documentInfoOpen && <DocumentInfo document={document} onClose={() => setDocumentInfoOpen(false)} />}</div><input ref={fileInputRef} className="visually-hidden" type="file" accept=".wdiag,.mmd,.mermaid,.puml,.plantuml,.sql,.svg,image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }} /></div>
          <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)"><Redo2 size={17} /></button></div><span className="topbar-divider" />
         {onDiagnostics && <button className={`secondary-button diagnostics-button ${diagnosticCount > 0 ? 'has-diagnostics' : ''}`} onClick={onDiagnostics} title={diagnosticCount > 0 ? `Open diagnostics · ${diagnosticCount} issues` : 'No active diagnostics'} aria-label="Open diagnostics">{diagnosticCount > 0 ? <><AlertTriangle size={14} /><span className="diagnostics-label">Diagnostics</span><span>{diagnosticCount}</span></> : <CheckCircle2 size={14} />}</button>}
         <div className="view-menu-wrap"><button className={`secondary-button topbar-view ${viewOpen ? 'active' : ''}`} onClick={() => setViewOpen((open) => !open)} title="Canvas view"><Eye size={14} /> View</button>{viewOpen && <ViewMenu view={view} gridVisible={gridVisible} onViewChange={onViewChange} onToggleGrid={onToggleGrid} onFitPage={onFitPage} onFitSelection={onFitSelection} onZoom100={onZoom100} onToggleFocus={onToggleFocus} onToggleFullscreen={onToggleFullscreen} onTogglePresentation={onTogglePresentation} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />}</div>
         <div className="topbar-export-wrap"><button className="secondary-button topbar-export" onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export</button>{exportOpen && <ExportMenu document={document} activePageId={activePageId} selectionIds={selectionIds} scale={exportScale} padding={exportPadding} transparent={transparent} outlineOnly={outlineOnly} setScale={setExportScale} setPadding={setExportPadding} setTransparent={setTransparent} setOutlineOnly={setOutlineOnly} close={closeExport} />}</div>
-        <div className="topbar-more-wrap"><button className={`icon-button ${moreOpen ? 'active' : ''}`} title="More editor actions" aria-label="More editor actions" onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={18} /></button>{moreOpen && <MoreMenu onInspect={() => { setInspectOpen(true); setMoreOpen(false); }} onHistory={() => { setMoreOpen(false); setSnapshotsOpen(true); }} onShortcuts={() => { setMoreOpen(false); editorEvents.emit('ui:shortcuts', undefined); }} />}{snapshotsOpen && <SnapshotMenu snapshots={snapshots} snapshotLimit={snapshotLimit} onLimitChange={(value) => void changeSnapshotLimit(value)} onCheckpoint={() => void createCheckpoint()} onRestore={(snapshot) => void restoreSnapshot(snapshot)} onDelete={(snapshot) => void removeSnapshot(snapshot)} />}</div>
+         <button className="command-trigger" title="Open command palette · ⌘K" aria-label="Open command palette" onClick={() => editorEvents.emit('ui:palette', undefined)}><Command size={13} /><span>Search</span><kbd>⌘K</kbd></button><div className="topbar-more-wrap"><button className={`icon-button ${moreOpen ? 'active' : ''}`} title="More editor actions" aria-label="More editor actions" onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={18} /></button>{moreOpen && <MoreMenu onInspect={() => { setInspectOpen(true); setMoreOpen(false); }} onHistory={() => { setMoreOpen(false); setSnapshotsOpen(true); }} onShortcuts={() => { setMoreOpen(false); editorEvents.emit('ui:shortcuts', undefined); }} onPreferences={() => { setMoreOpen(false); onOpenPreferences?.(); }} />}{snapshotsOpen && <SnapshotMenu snapshots={snapshots} snapshotLimit={snapshotLimit} onLimitChange={(value) => void changeSnapshotLimit(value)} onCheckpoint={() => void createCheckpoint()} onRestore={(snapshot) => void restoreSnapshot(snapshot)} onDelete={(snapshot) => void removeSnapshot(snapshot)} />}</div>
       </div>
     </header>
     {inspectOpen && <div className="inspect-drawer"><div className="inspect-heading"><strong>Document inspector</strong><div><button className="secondary-button" onClick={inspectDocument}>Copy JSON</button><button className="icon-button" onClick={() => setInspectOpen(false)} aria-label="Close inspector"><X size={15} /></button></div></div><pre>{JSON.stringify(document, null, 2)}</pre></div>}
   </>;
 }
 
-function MoreMenu({ onInspect, onHistory, onShortcuts }: { onInspect: () => void; onHistory: () => void; onShortcuts: () => void }) {
+function DocumentMenu({ onRename, onNew, onOpen, onDuplicate, onInfo, onBackup, onPrint }: { onRename: () => void; onNew: () => void; onOpen: () => void; onDuplicate: () => void; onInfo: () => void; onBackup: () => void; onPrint: () => void }) {
+  return <div className="topbar-menu document-menu" onPointerDown={(event) => event.stopPropagation()}><strong>Document</strong><button onClick={onRename}>Rename</button><button onClick={onNew}>New diagram</button><button onClick={onOpen}>Open / Import</button><button onClick={onDuplicate}>Duplicate document</button><div className="view-menu-divider" /><button onClick={onInfo}><FileText size={13} /> Document information</button><button onClick={onBackup}>Workspace backup</button><button onClick={onPrint}>Print</button></div>;
+}
+
+function DocumentInfo({ document, onClose }: { document: DiagramDocument; onClose: () => void }) {
+  const pageObjects = document.pages.reduce((total, page) => total + page.nodes.length + page.edges.length, 0);
+  return <div className="document-info-popover"><div><strong>Document information</strong><button className="icon-button" aria-label="Close document information" onClick={onClose}><X size={14} /></button></div><dl><dt>Name</dt><dd>{document.name}</dd><dt>Type</dt><dd>{document.diagramType}</dd><dt>Pages</dt><dd>{document.pages.length}</dd><dt>Objects</dt><dd>{pageObjects}</dd><dt>Created</dt><dd>{new Date(document.createdAt).toLocaleString()}</dd><dt>Updated</dt><dd>{new Date(document.updatedAt).toLocaleString()}</dd></dl></div>;
+}
+
+function MoreMenu({ onInspect, onHistory, onShortcuts, onPreferences }: { onInspect: () => void; onHistory: () => void; onShortcuts: () => void; onPreferences: () => void }) {
   return <div className="topbar-menu more-menu" onPointerDown={(event) => event.stopPropagation()}>
     <strong>More editor actions</strong>
     <button onClick={onHistory}><History size={13} /> History</button>
     <button onClick={onInspect}>Inspect document</button>
     <button onClick={onShortcuts}>Keyboard shortcuts</button>
+    <button onClick={onPreferences}>Preferences</button>
   </div>;
 }
 

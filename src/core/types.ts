@@ -123,6 +123,15 @@ export interface DiagramGuide {
   locked?: boolean;
 }
 
+/** Independent snapping targets. `snapToGrid` remains as a legacy mirror for
+ * documents written before the individual controls existed. */
+export interface SnapSettings {
+  grid: boolean;
+  objects: boolean;
+  guides: boolean;
+  ports: boolean;
+}
+
 export type EdgePatch = Partial<Pick<DiagramEdge, 'type' | 'source' | 'target' | 'waypoints'>> & {
   style?: Partial<EdgeStyle>;
   data?: Record<string, unknown>;
@@ -136,6 +145,7 @@ export interface PageSettings {
   gridSize: number;
   gridVisible: boolean;
   snapToGrid: boolean;
+  snapSettings: SnapSettings;
 }
 
 export interface DiagramPage {
@@ -149,7 +159,7 @@ export interface DiagramPage {
   data?: Record<string, unknown>;
 }
 
-export type PageSettingsPatch = Partial<PageSettings>;
+export type PageSettingsPatch = Partial<Omit<PageSettings, 'snapSettings'>> & { snapSettings?: Partial<SnapSettings> };
 
 export interface ClipboardPayload {
   nodes: DiagramNode[];

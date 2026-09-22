@@ -43,6 +43,25 @@ describe('AperGlyph document model', () => {
     expect(migrated.pages[0].data).toEqual({ dfdLevel: 0, dataDictionary: [] });
   });
 
+  it('migrates the legacy snap switch into independent snap targets', () => {
+    const document = createDocument('Legacy snapping');
+    const legacy = structuredClone(document) as typeof document;
+    delete (legacy.pages[0].settings as Partial<typeof legacy.pages[0]['settings']>).snapSettings;
+    legacy.pages[0].settings.snapToGrid = false;
+    const migrated = migrateDocument(legacy);
+    expect(migrated.pages[0].settings.snapSettings).toEqual({ grid: false, objects: false, guides: false, ports: false });
+  });
+
+  it('preserves partial independent snap settings during migration', () => {
+    const document = createDocument('Independent snapping');
+    const legacy = structuredClone(document) as typeof document;
+    legacy.pages[0].settings.snapToGrid = true;
+    legacy.pages[0].settings.snapSettings = { grid: false, objects: true, guides: false, ports: true };
+    const migrated = migrateDocument(legacy);
+    expect(migrated.pages[0].settings.snapSettings).toEqual({ grid: false, objects: true, guides: false, ports: true });
+    expect(migrated.pages[0].settings.snapToGrid).toBe(false);
+  });
+
   it('repairs stale free points when an endpoint is attached to a node', () => {
     const document = createDocument('Attached endpoint');
     const source = createNode('entity', { x: 0, y: 0 });

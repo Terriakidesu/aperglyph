@@ -1,4 +1,4 @@
-import type { DiagramNode, Point } from '../core/types';
+import type { DiagramGuide, DiagramNode, Point } from '../core/types';
 
 export interface AlignmentGuide {
   orientation: 'vertical' | 'horizontal';
@@ -10,8 +10,11 @@ export interface AlignmentGuide {
 export interface SnapOptions {
   gridSize: number;
   snapToGrid: boolean;
-  /** Master switch used by the editor's Snap control. */
+  /** Snap moving bounds to nearby object edges and centers. */
   snapToObjects?: boolean;
+  /** Snap moving bounds to persistent ruler guides. */
+  snapToGuides?: boolean;
+  guides?: DiagramGuide[];
   threshold: number;
 }
 
@@ -54,14 +57,15 @@ export function snapNodes(
 
   const movingIds = new Set(movingNodes.map((node) => node.id));
   const candidates = options.snapToObjects === false ? [] : candidateNodes.filter((node) => !movingIds.has(node.id));
+  const guideTargets = options.snapToGuides === false ? [] : (options.guides ?? []);
   const xMatch = closestMatch(axisTargets(movingBounds.minX, movingBounds.maxX), candidates.flatMap((node) => {
     const bounds = nodeBounds(node);
     return axisTargets(bounds.minX, bounds.maxX).map((target) => ({ value: target, nodeBounds: bounds }));
-  }), options.threshold);
+  }).concat(guideTargets.filter((guide) => guide.orientation === 'vertical').map((guide) => ({ value: guide.position, nodeBounds: { minX: guide.position, maxX: guide.position, minY: movingBounds.minY, maxY: movingBounds.maxY } }))), options.threshold);
   const yMatch = closestMatch(axisTargets(movingBounds.minY, movingBounds.maxY), candidates.flatMap((node) => {
     const bounds = nodeBounds(node);
     return axisTargets(bounds.minY, bounds.maxY).map((target) => ({ value: target, nodeBounds: bounds }));
-  }), options.threshold);
+  }).concat(guideTargets.filter((guide) => guide.orientation === 'horizontal').map((guide) => ({ value: guide.position, nodeBounds: { minX: movingBounds.minX, maxX: movingBounds.maxX, minY: guide.position, maxY: guide.position } }))), options.threshold);
 
   const guides: AlignmentGuide[] = [];
   if (xMatch) {
@@ -102,11 +106,12 @@ export function snapDraggedNodes(
   const desiredPositions = Object.fromEntries(
     Object.entries(initialPositions).map(([id, position]) => [id, { x: position.x + delta.x, y: position.y + delta.y }]),
   );
-  const snappingEnabled = options.snapToGrid && !modifiers.disableSnapping;
+  const snappingEnabled = !modifiers.disableSnapping;
   return snapNodes(movingNodes, desiredPositions, candidateNodes, {
     ...options,
-    snapToGrid: snappingEnabled,
-    snapToObjects: snappingEnabled && options.snapToObjects !== false,
+    snapToGrid: options.snapToGrid && snappingEnabled,
+    snapToObjects: options.snapToObjects !== false && snappingEnabled,
+    snapToGuides: options.snapToGuides !== false && snappingEnabled,
   });
 }
 

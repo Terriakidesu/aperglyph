@@ -8,6 +8,7 @@ import { connectionAnchorPoints as resolveConnectionAnchorPoints } from '../core
 import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT } from '../core/erd';
 import { editorEvents } from '../core/events';
+import { getSnapSettings } from '../core/snapping';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
@@ -18,6 +19,7 @@ import { pluginManager } from '../plugins';
 import { nodeToSpatialNode, snapDraggedNodes, SpatialWorkerClient, viewportBounds } from '../spatial';
 import type { AlignmentGuide, SpatialNode } from '../spatial';
 import { NodeGraphic } from './NodeGraphic';
+import { ContextualToolbar } from './ContextualToolbar';
 
 interface CanvasSize { width: number; height: number }
 interface WorldBounds { x: number; y: number; width: number; height: number }
@@ -114,6 +116,11 @@ function asConnectionPort(value: string | null): ConnectionPort | undefined {
 
 function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function endpointPoint(endpoint: Endpoint, node: DiagramNode | undefined, toward?: Point): Point | undefined {
+  if (node) return nodeConnectionPoint(node, toward ?? nodeCenter(node), endpoint.port, endpoint.offset);
+  return endpoint.point;
 }
 
 function resizeGeometry(initial: { position: Point; size: Size }, handle: ResizeHandle, start: Point, current: Point, preserveAspect: boolean): { position: Point; size: Size } {
@@ -310,9 +317,21 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const setTool = useEditorStore((state) => state.setTool);
   const addEdge = useEditorStore((state) => state.createEdge);
   const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
+  const copySelection = useEditorStore((state) => state.copySelection);
+  const cutSelection = useEditorStore((state) => state.cutSelection);
+  const pasteClipboard = useEditorStore((state) => state.pasteClipboard);
+  const selectAll = useEditorStore((state) => state.selectAll);
+  const alignSelection = useEditorStore((state) => state.alignSelection);
+  const distributeSelection = useEditorStore((state) => state.distributeSelection);
+  const groupSelection = useEditorStore((state) => state.groupSelection);
+  const ungroupSelection = useEditorStore((state) => state.ungroupSelection);
+  const setZOrder = useEditorStore((state) => state.setZOrder);
+  const updateNodes = useEditorStore((state) => state.updateNodes);
   const updateEdge = useEditorStore((state) => state.updateEdge);
+  const resetEdge = useEditorStore((state) => state.resetEdge);
   const updateNode = useEditorStore((state) => state.updateNode);
   const formatPainter = useEditorStore((state) => state.formatPainter);
+  const activateFormatPainter = useEditorStore((state) => state.activateFormatPainter);
   const clearFormatPainter = useEditorStore((state) => state.clearFormatPainter);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
   const updateViewport = useEditorStore((state) => state.updateViewport);
@@ -523,8 +542,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       : edgeTarget?.getAttribute('data-edge-id')
         ? { kind: 'edge' as const, id: edgeTarget.getAttribute('data-edge-id') ?? undefined }
         : { kind: 'canvas' as const };
-    if (menuTarget.id) setSelection([menuTarget.id], menuTarget.id);
-    else setSelection([]);
+    if (menuTarget.id && !selectedIds.includes(menuTarget.id)) setSelection([menuTarget.id], menuTarget.id);
     setTextEdit(null);
     const point = screenPoint(event);
     setContextMenu({ x: point.x, y: point.y, target: menuTarget });
@@ -567,6 +585,103 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (contextMenu.target.id) setSelection([contextMenu.target.id], contextMenu.target.id);
     deleteSelection();
     setContextMenu(null);
+  };
+
+  const toggleSelectedLock = () => {
+    const nodes = page?.nodes.filter((node) => selectedIds.includes(node.id)) ?? [];
+    if (nodes.length === 0) return;
+    const locked = !nodes.every((node) => node.locked);
+    updateNodes(nodes.map((node) => node.id), { locked }, locked ? 'Lock selection' : 'Unlock selection');
+  };
+
+  const toggleSelectedHidden = () => {
+    const nodes = page?.nodes.filter((node) => selectedIds.includes(node.id)) ?? [];
+    if (nodes.length === 0) return;
+    const hidden = !nodes.every((node) => node.hidden);
+    updateNodes(nodes.map((node) => node.id), { hidden }, hidden ? 'Hide selection' : 'Show selection');
+  };
+
+  const selectConnected = (nodeId: string) => {
+    if (!page) return;
+    const ids = new Set<string>([nodeId]);
+    page.edges.forEach((edge) => {
+      if (edge.source.nodeId === nodeId || edge.target.nodeId === nodeId) {
+        ids.add(edge.id);
+        if (edge.source.nodeId) ids.add(edge.source.nodeId);
+        if (edge.target.nodeId) ids.add(edge.target.nodeId);
+      }
+    });
+    setSelection([...ids], nodeId);
+  };
+
+  const selectSameType = (nodeId: string) => {
+    const source = page?.nodes.find((node) => node.id === nodeId);
+    if (!source || !page) return;
+    const ids = page.nodes.filter((node) => !node.hidden && node.type === source.type).map((node) => node.id);
+    setSelection(ids, nodeId);
+  };
+
+  const reverseContextEdge = (edgeId: string) => {
+    const edge = page?.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return;
+    updateEdge(edgeId, { source: edge.target, target: edge.source, waypoints: edge.waypoints.slice().reverse() }, 'Reverse connector direction');
+  };
+
+  const addContextWaypoint = (edgeId: string) => {
+    const edge = page?.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return;
+    const sourceNode = edge.source.nodeId ? page?.nodes.find((node) => node.id === edge.source.nodeId) : undefined;
+    const targetNode = edge.target.nodeId ? page?.nodes.find((node) => node.id === edge.target.nodeId) : undefined;
+    const route = edgeRoute(edge, sourceNode, targetNode, page.nodes);
+    const point = route[Math.floor(route.length / 2)] ?? endpointPoint(edge.source, sourceNode, targetNode ? nodeCenter(targetNode) : edge.target.point) ?? { x: 0, y: 0 };
+    updateEdge(edgeId, { waypoints: [...edge.waypoints, { x: Math.round(point.x), y: Math.round(point.y) }] }, 'Add waypoint');
+  };
+
+  const swapContextMarkers = (edgeId: string) => {
+    const edge = page?.edges.find((candidate) => candidate.id === edgeId);
+    if (edge) updateEdge(edgeId, { style: { startMarker: edge.style.endMarker, endMarker: edge.style.startMarker } }, 'Swap connector markers');
+  };
+
+  const selectedNodeItems = page?.nodes.filter((node) => !node.hidden && selectedIds.includes(node.id)) ?? [];
+  const selectedEdgeItems = page?.edges.filter((edge) => selectedIds.includes(edge.id)) ?? [];
+  const toolbarKind: 'node' | 'selection' | 'edge' | null = selectedNodeItems.length > 1
+    ? 'selection'
+    : selectedNodeItems.length === 1
+      ? 'node'
+      : selectedEdgeItems.length === 1
+        ? 'edge'
+        : null;
+  const toolbarEdge = toolbarKind === 'edge' ? selectedEdgeItems[0] : undefined;
+  const toolbarPoint = (() => {
+    if (!toolbarKind || !page) return null;
+    let worldPoint: Point;
+    let worldTop: number;
+    if (toolbarEdge) {
+      const source = toolbarEdge.source.nodeId ? page.nodes.find((node) => node.id === toolbarEdge.source.nodeId) : undefined;
+      const target = toolbarEdge.target.nodeId ? page.nodes.find((node) => node.id === toolbarEdge.target.nodeId) : undefined;
+      const route = edgeRoute(toolbarEdge, source, target, page.nodes);
+      worldPoint = route[Math.floor(route.length / 2)] ?? toolbarEdge.source.point ?? toolbarEdge.target.point ?? { x: 0, y: 0 };
+      worldTop = Math.min(...route.map((point) => point.y));
+    } else {
+      const nodes = selectedNodeItems;
+      const minX = Math.min(...nodes.map((node) => node.position.x));
+      const maxX = Math.max(...nodes.map((node) => node.position.x + node.size.width));
+      const minY = Math.min(...nodes.map((node) => node.position.y));
+      worldPoint = { x: (minX + maxX) / 2, y: minY };
+      worldTop = minY;
+    }
+    const screen = {
+      x: size.width / 2 + (worldPoint.x + viewport.x) * viewport.zoom,
+      y: size.height / 2 + (worldTop + viewport.y) * viewport.zoom,
+    };
+    const toolbarWidth = toolbarKind === 'edge' ? 440 : toolbarKind === 'selection' ? 410 : 280;
+    return { x: Math.min(Math.max(8, screen.x - toolbarWidth / 2), Math.max(8, size.width - toolbarWidth - 8)), y: Math.min(Math.max(8, screen.y - 46), Math.max(8, size.height - 42)) };
+  })();
+  const applySelectedFill = (color: string) => {
+    if (selectedNodeItems.length > 0) updateNodes(selectedNodeItems.map((node) => node.id), { style: { fill: color } }, 'Set fill color');
+  };
+  const changeEdgeRouting = (routing: string) => {
+    if (toolbarEdge) updateEdge(toolbarEdge.id, { data: { routing } }, 'Change connector routing');
   };
 
   const queryVisibleNodes = useCallback(async () => {
@@ -672,7 +787,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
 
   const dropPosition = (point: Point, shapeSize: Size, disableSnapping = false): Point => {
     const raw = { x: point.x - shapeSize.width / 2, y: point.y - shapeSize.height / 2 };
-    if (!page?.settings.snapToGrid || disableSnapping) return raw;
+    if (!page || !getSnapSettings(page.settings).grid || disableSnapping) return raw;
     const gridSize = page.settings.gridSize;
     return { x: Math.round(raw.x / gridSize) * gridSize, y: Math.round(raw.y / gridSize) * gridSize };
   };
@@ -787,7 +902,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
 
     if (activeTool === 'connector') {
-      if (!port && !page?.settings.snapToGrid) return;
+      if (!port && page && !getSnapSettings(page.settings).ports) return;
       const anchor = { nodeId: node.id, port, ...(offset === undefined ? {} : { offset }) } satisfies ConnectorAnchor;
       if (!connectorStart) {
         setConnectorStart(anchor);
@@ -894,7 +1009,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       const route = edgeRoute(edge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, [...nodeMap.values()]);
       const nearest = nearestRoutePoint(route, worldPoint(event));
       if (nearest) {
-        const nextPoint = page?.settings.snapToGrid
+        const nextPoint = page && getSnapSettings(page.settings).grid
           ? { x: Math.round(nearest.point.x / page.settings.gridSize) * page.settings.gridSize, y: Math.round(nearest.point.y / page.settings.gridSize) * page.settings.gridSize }
           : nearest.point;
         const waypoints = edge.waypoints.slice();
@@ -956,7 +1071,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (!session.edgeId || !session.endpoint || !page) return;
     const edge = page.edges.find((candidate) => candidate.id === session.edgeId);
     if (!edge) return;
-    const snappingEnabled = page.settings.snapToGrid && !disableSnapping && !session.disableSnapping;
+    const snappingEnabled = getSnapSettings(page.settings).ports && !disableSnapping && !session.disableSnapping;
     // Endpoint edits may intentionally reconnect to the other endpoint's node
     // to form a self-loop. Connector creation has its own self-loop policy;
     // do not apply that exclusion while an existing endpoint is being edited.
@@ -1035,7 +1150,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
     const point = worldPoint(event);
     if (session.mode === 'connector' && connectorDragPreview) {
-      const snappingEnabled = page?.settings.snapToGrid && !event.altKey && !session.disableSnapping;
+      const snappingEnabled = page ? getSnapSettings(page.settings).ports && !event.altKey && !session.disableSnapping : false;
       const snapped = snappingEnabled ? nearestConnectionAnchor(page?.nodes ?? [], point, session.connectorSource?.nodeId, ENDPOINT_SNAP_DISTANCE / viewport.zoom) : null;
       setConnectorDragPreview({ ...connectorDragPreview, current: snapped?.point ?? point, target: snapped ?? undefined });
     } else if (session.mode === 'label' && session.edgeId) {
@@ -1045,15 +1160,16 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
        setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey) });
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
-      const gridSize = page?.settings.gridSize ?? 16;
-      const nextPoint = page?.settings.snapToGrid && !event.altKey && !session.disableSnapping
+       const gridSize = page?.settings.gridSize ?? 16;
+       const nextPoint = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
         ? { x: Math.round(point.x / gridSize) * gridSize, y: Math.round(point.y / gridSize) * gridSize }
         : point;
       setWaypointPreview({ edgeId: session.edgeId, index: session.waypointIndex, point: nextPoint });
     } else if (session.mode === 'drag' && session.initialPositions) {
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
       const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
-      const snapped = snapDraggedNodes(movingNodes, session.initialPositions, session.startWorld, point, candidateNodes, { gridSize: page?.settings.gridSize ?? 16, snapToGrid: page?.settings.snapToGrid ?? false, snapToObjects: page?.settings.snapToGrid ?? false, threshold: 10 / viewport.zoom }, { constrainAxis: event.shiftKey, disableSnapping: event.altKey || session.disableSnapping });
+       const snap = page ? getSnapSettings(page.settings) : undefined;
+       const snapped = snapDraggedNodes(movingNodes, session.initialPositions, session.startWorld, point, candidateNodes, { gridSize: page?.settings.gridSize ?? 16, snapToGrid: snap?.grid ?? false, snapToObjects: snap?.objects ?? false, snapToGuides: snap?.guides ?? false, guides: page?.guides ?? [], threshold: 10 / viewport.zoom }, { constrainAxis: event.shiftKey, disableSnapping: event.altKey || session.disableSnapping });
       const preview = snapped.positions;
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
@@ -1085,7 +1201,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       const moved = distanceBetween(screenPoint(event), session.startClient) > 5;
       if (moved) {
         const point = worldPoint(event);
-        const snappingEnabled = page ? page.settings.snapToGrid && !event.altKey && !session.disableSnapping : false;
+         const snappingEnabled = page ? getSnapSettings(page.settings).ports && !event.altKey && !session.disableSnapping : false;
         const target = page ? connectionDropAnchor(event, point, page.nodes, session.connectorSource.nodeId, snappingEnabled, ENDPOINT_SNAP_DISTANCE / viewport.zoom) : null;
         if (target) createConnection(session.connectorSource, target);
         else if (page) setQuickCreate({ source: session.connectorSource, point, screen: screenPoint(event), disableSnapping: event.altKey || Boolean(session.disableSnapping) });
@@ -1139,7 +1255,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         const point = worldPoint(event);
         const movingNodes = page.nodes.filter((node) => Object.hasOwn(session.initialPositions!, node.id));
         const candidateNodes = page.nodes.filter((node) => snapCandidateIds.includes(node.id));
-        const snapped = snapDraggedNodes(movingNodes, session.initialPositions, session.startWorld, point, candidateNodes, { gridSize: page.settings.gridSize, snapToGrid: page.settings.snapToGrid, snapToObjects: page.settings.snapToGrid, threshold: 10 / viewport.zoom }, { constrainAxis: event.shiftKey, disableSnapping: event.altKey || session.disableSnapping });
+         const snap = getSnapSettings(page.settings);
+         const snapped = snapDraggedNodes(movingNodes, session.initialPositions, session.startWorld, point, candidateNodes, { gridSize: page.settings.gridSize, snapToGrid: snap.grid, snapToObjects: snap.objects, snapToGuides: snap.guides, guides: page.guides ?? [], threshold: 10 / viewport.zoom }, { constrainAxis: event.shiftKey, disableSnapping: event.altKey || session.disableSnapping });
         moveNodes(snapped.positions);
       }
       setDragPreview({});
@@ -1316,13 +1433,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
       </g>
     </svg>
-     {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
-       {contextMenu && <div className="canvas-context-menu" style={{ left: Math.min(contextMenu.x, Math.max(8, size.width - 178)), top: Math.min(contextMenu.y, Math.max(8, size.height - 170)) }} onPointerDown={(event) => event.stopPropagation()}>
-      {contextMenu.target.kind !== 'canvas' && <button onClick={() => { if (contextMenu.target.kind !== 'canvas' && contextMenu.target.id) beginTextEdit(contextMenu.target.kind, contextMenu.target.id); }}>{contextMenu.target.kind === 'node' ? 'Edit text' : 'Edit label'}</button>}
-      {contextMenu.target.kind !== 'canvas' && <button onClick={duplicateContextTarget}>Duplicate</button>}
-      {contextMenu.target.kind !== 'canvas' && <button className="context-danger" onClick={deleteContextTarget}>Delete</button>}
-       {contextMenu.target.kind === 'canvas' && <button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button>}
-      </div>}
+       {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
+       {toolbarKind && toolbarPoint && !contextMenu && !textEdit && !quickCreate && <ContextualToolbar kind={toolbarKind} x={toolbarPoint.x} y={toolbarPoint.y} nodes={selectedNodeItems} edge={toolbarEdge} document={document} onDuplicate={() => duplicateSelection()} onDelete={deleteSelection} onToggleLock={toggleSelectedLock} onToggleHidden={toolbarKind === 'node' ? toggleSelectedHidden : undefined} onFormatPainter={toolbarKind === 'node' ? activateFormatPainter : undefined} onFill={toolbarKind === 'node' || toolbarKind === 'selection' ? applySelectedFill : undefined} onAlign={toolbarKind === 'selection' ? alignSelection : undefined} onDistribute={toolbarKind === 'selection' ? distributeSelection : undefined} onGroup={toolbarKind === 'selection' ? groupSelection : undefined} onUngroup={toolbarKind === 'selection' ? ungroupSelection : undefined} onZOrder={toolbarKind !== 'edge' ? setZOrder : undefined} onEdgeRouting={toolbarKind === 'edge' ? changeEdgeRouting : undefined} onReverse={toolbarEdge ? () => reverseContextEdge(toolbarEdge.id) : undefined} onSwapMarkers={toolbarEdge ? () => swapContextMarkers(toolbarEdge.id) : undefined} onAddWaypoint={toolbarEdge ? () => addContextWaypoint(toolbarEdge.id) : undefined} onResetEdge={toolbarEdge ? () => resetEdge(toolbarEdge.id) : undefined} />}
+        {contextMenu && <div className="canvas-context-menu" style={{ left: Math.min(contextMenu.x, Math.max(8, size.width - 218)), top: Math.min(contextMenu.y, Math.max(8, size.height - 360)) }} onPointerDown={(event) => event.stopPropagation()}>
+       {contextMenu.target.kind === 'canvas' && <><button onClick={() => { pasteClipboard(); setContextMenu(null); }}>Paste</button><button onClick={() => { selectAll(); setContextMenu(null); }}>Select all</button><button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button><div className="context-menu-divider" /><button onClick={() => { editorEvents.emit('viewport:fit', { scope: 'page' }); setContextMenu(null); }}>Fit page</button><button onClick={() => { useEditorStore.getState().updateViewport({ zoom: 1 }); setContextMenu(null); }}>100% zoom</button></>}
+       {contextMenu.target.kind === 'node' && contextMenu.target.id && <><button onClick={() => beginTextEdit('node', contextMenu.target.id!)}>Edit text</button><div className="context-menu-divider" /><button onClick={() => { void copySelection(); setContextMenu(null); }}>Copy</button><button onClick={() => { cutSelection(); setContextMenu(null); }}>Cut</button><button onClick={duplicateContextTarget}>Duplicate</button><div className="context-menu-divider" /><button onClick={() => { setZOrder('forward'); setContextMenu(null); }}>Bring forward</button><button onClick={() => { setZOrder('backward'); setContextMenu(null); }}>Send backward</button><button onClick={() => { setZOrder('front'); setContextMenu(null); }}>Bring to front</button><button onClick={() => { setZOrder('back'); setContextMenu(null); }}>Send to back</button><div className="context-menu-divider" /><button onClick={() => { toggleSelectedLock(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => { toggleSelectedHidden(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.hidden ? 'Show' : 'Hide'}</button><button onClick={() => { selectConnected(contextMenu.target.id!); setContextMenu(null); }}>Select connected</button><button onClick={() => { selectSameType(contextMenu.target.id!); setContextMenu(null); }}>Select same type</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
+       {contextMenu.target.kind === 'edge' && contextMenu.target.id && <><button onClick={() => beginTextEdit('edge', contextMenu.target.id!)}>Edit label</button><button onClick={() => { reverseContextEdge(contextMenu.target.id!); setContextMenu(null); }}>Reverse</button><button onClick={() => { addContextWaypoint(contextMenu.target.id!); setContextMenu(null); }}>Add waypoint</button><button onClick={() => { resetEdge(contextMenu.target.id!); setContextMenu(null); }}>Reset route</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
+       </div>}
       {quickCreate && <div className="quick-create-menu" style={{ left: Math.min(Math.max(8, quickCreate.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, quickCreate.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Quick create</span><button title="Cancel quick create" aria-label="Cancel quick create" onClick={() => { setQuickCreate(null); setQuickCreateSearch(''); }}>×</button></div><input autoFocus aria-label="Search quick create shapes" placeholder="Search shapes…" value={quickCreateSearch} onChange={(event) => setQuickCreateSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuickCreate(null); setQuickCreateSearch(''); } }} /><div className="quick-create-list">{quickCreateMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : quickCreateMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.type}`} onClick={() => createQuickShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
        {view.minimap && <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
         <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>

@@ -1,5 +1,6 @@
 import { MoreHorizontal, Plus } from 'lucide-react';
 import { useState } from 'react';
+import { getSnapSettings } from '../core/snapping';
 import { useEditorStore } from '../store/editorStore';
 
 export function PageTabs() {
@@ -58,7 +59,7 @@ export function PageTabs() {
         <button disabled={activeIndex <= 0} onClick={() => { reorderPage(activePage.id, activeIndex - 1); setMenuOpen(false); }}>Move left</button>
         <button disabled={activeIndex >= document.pages.length - 1} onClick={() => { reorderPage(activePage.id, activeIndex + 1); setMenuOpen(false); }}>Move right</button>
         <button onClick={() => updatePageSettings({ gridVisible: !activePage.settings.gridVisible }, activePage.id, 'Toggle grid')}>{activePage.settings.gridVisible ? 'Hide grid' : 'Show grid'}</button>
-        <button onClick={() => updatePageSettings({ snapToGrid: !activePage.settings.snapToGrid }, activePage.id, 'Toggle snap')}>{activePage.settings.snapToGrid ? 'Disable snapping' : 'Enable snapping'}</button>
+         <button onClick={() => updatePageSettings({ snapSettings: { ...getSnapSettings(activePage.settings), grid: !getSnapSettings(activePage.settings).grid } }, activePage.id, 'Toggle grid snapping')}>{getSnapSettings(activePage.settings).grid ? 'Disable grid snapping' : 'Enable grid snapping'}</button>
         <button onClick={toggleCanvasTheme}>Use {activePage.settings.canvasTheme === 'light' ? 'dark' : 'light'} canvas</button>
         <label className="page-color-input">Canvas color<input type="color" value={/^#[0-9a-f]{6}$/i.test(activePage.settings.background) ? activePage.settings.background : '#10131c'} onChange={(event) => updatePageSettings({ background: event.target.value }, activePage.id, 'Change canvas color')} /></label>
         <button onClick={promptSettings}>Page settings</button>

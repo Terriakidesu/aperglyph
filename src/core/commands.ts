@@ -1,4 +1,5 @@
 import { cloneDocument, clonePageWithNewIds, createId, createPage, getPage } from './document';
+import { getSnapSettings } from './snapping';
 import { wrappedNodeHeight } from './text';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset } from './types';
 
@@ -344,6 +345,18 @@ export class RenamePageCommand implements DocumentCommand {
   }
 }
 
+export class RenameDocumentCommand implements DocumentCommand {
+  readonly label = 'Rename document';
+  constructor(private readonly name: string) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.name = this.name.trim() || next.name;
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class DuplicatePageCommand implements DocumentCommand {
   readonly label = 'Duplicate page';
   private readonly duplicate: DiagramPage;
@@ -386,7 +399,27 @@ export class UpdatePageSettingsCommand implements DocumentCommand {
 
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
-    next.pages = next.pages.map((page) => page.id === this.pageId ? { ...page, settings: { ...page.settings, ...this.changes } } : page);
+    next.pages = next.pages.map((page) => {
+      if (page.id !== this.pageId) return page;
+      const changes = this.changes;
+      const legacySnap = changes.snapToGrid;
+      const snapSettings = {
+        ...(legacySnap === undefined
+          ? getSnapSettings(page.settings)
+          : { grid: legacySnap, objects: legacySnap, guides: legacySnap, ports: legacySnap }),
+        ...changes.snapSettings,
+      };
+      const { snapSettings: _partialSnapSettings, ...pageSettingChanges } = changes;
+      return {
+        ...page,
+        settings: {
+          ...page.settings,
+          ...pageSettingChanges,
+          snapToGrid: snapSettings.grid,
+          snapSettings,
+        },
+      };
+    });
     next.updatedAt = Date.now();
     return next;
   }

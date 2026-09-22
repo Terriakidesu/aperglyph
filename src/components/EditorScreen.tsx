@@ -5,8 +5,9 @@ import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { createNode as buildNode } from '../core/document';
 import { editorEvents } from '../core/events';
+import { getSnapSettings } from '../core/snapping';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import { readDiagramFile, saveLocalTemplate } from '../persistence';
+import { getSnapshotLimit, normalizeSnapshotLimit, readDiagramFile, rememberActiveDocument, saveLocalTemplate, setSnapshotLimit } from '../persistence';
 import { CanvasViewport } from './CanvasViewport';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { EditorToolbar } from './EditorToolbar';
@@ -14,6 +15,7 @@ import { EditorTopBar, type ViewPreferences } from './EditorTopBar';
 import { PageTabs } from './PageTabs';
 import { PropertiesPanel } from './PropertiesPanel';
 import { OutlinePanel } from './OutlinePanel';
+import { PreferencesDialog } from './PreferencesDialog';
 import { ShapeLibrary } from './ShapeLibrary';
 import { StatusBar } from './StatusBar';
 
@@ -45,6 +47,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
   const clearFormatPainter = useEditorStore((state) => state.clearFormatPainter);
   const document = useEditorStore((state) => state.document);
+  const setDocument = useEditorStore((state) => state.setDocument);
   const activePageId = useEditorStore((state) => state.activePageId);
   const viewport = useEditorStore((state) => state.viewport);
   const page = getActivePage(document, activePageId);
@@ -59,6 +62,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const [fullscreen, setFullscreen] = useState(() => Boolean(globalThis.document?.fullscreenElement));
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [snapshotLimit, setSnapshotLimitState] = useState(getSnapshotLimit);
   const [validationEnabled, setValidationEnabled] = useState(isDiagnosticsEnabled);
   const [showPalette, setShowPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
@@ -88,6 +93,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const diagnosticCount = validationEnabled ? collectDiagnostics(document).filter((diagnostic) => diagnostic.severity !== 'info').length : 0;
 
   const updateViewPreferences = (changes: Partial<ViewPreferences>) => setViewPreferences((current) => ({ ...current, ...changes }));
+  const openDocument = (next: typeof document) => {
+    rememberActiveDocument(next.id);
+    setDocument(next);
+  };
 
   const importFileAtPoint = async (file: File, point: { x: number; y: number }) => {
     try {
@@ -262,7 +271,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
        if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setShowDiagnostics(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
-        const distance = event.shiftKey ? (page?.settings.snapToGrid ? page.settings.gridSize : 10) : 1;
+        const distance = event.shiftKey ? (page && getSnapSettings(page.settings).grid ? page.settings.gridSize : 10) : 1;
         nudgeSelection({ x: event.key === 'ArrowLeft' ? -distance : event.key === 'ArrowRight' ? distance : 0, y: event.key === 'ArrowUp' ? -distance : event.key === 'ArrowDown' ? distance : 0 });
         return;
       }
@@ -277,14 +286,16 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));
     const unsubscribeDiagnostics = editorEvents.on('ui:diagnostics', () => setShowDiagnostics(true));
+    const unsubscribePalette = editorEvents.on('ui:palette', () => { setShowPalette(true); setShowShortcuts(false); });
+    const unsubscribePreferences = editorEvents.on('ui:preferences', () => setShowPreferences(true));
     const unsubscribeProperties = editorEvents.on('ui:toggle-properties', () => setRightOpen((open) => !open));
     const unsubscribeSettings = editorEvents.on('diagnostics:changed', ({ enabled }) => setValidationEnabled(enabled));
-    return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribeProperties(); unsubscribeSettings(); };
+    return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribePalette(); unsubscribePreferences(); unsubscribeProperties(); unsubscribeSettings(); };
   }, []);
 
   const workspaceStyle = { '--left-panel-width': `${leftWidth}px`, '--right-panel-width': `${rightWidth}px` } as CSSProperties;
   return <main className={`editor-shell ${focusMode ? 'focus-mode' : ''} ${presentationMode ? 'presentation-mode' : ''}`}>
-     <EditorTopBar onExit={onExit} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} onTogglePresentation={() => setPresentationMode((value) => !value)} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />
+     <EditorTopBar onExit={onExit} onOpenDocument={openDocument} onOpenPreferences={() => setShowPreferences(true)} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} onTogglePresentation={() => setPresentationMode((value) => !value)} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />
     <div className="editor-workspace" style={workspaceStyle}>
       <EditorToolbar />
       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
@@ -296,6 +307,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
        {!rightOpen && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
       </div>
       {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
+      {showPreferences && <PreferencesDialog view={viewPreferences} onViewChange={updateViewPreferences} pageSettings={page?.settings} onPageSettingsChange={(changes) => updatePageSettings(changes, activePageId, 'Update preferences')} leftWidth={leftWidth} rightWidth={rightWidth} onWidthChange={(side, value) => side === 'left' ? setLeftWidth(clampPanelWidth(value, 'left')) : setRightWidth(clampPanelWidth(value, 'right'))} snapshotLimit={snapshotLimit} onSnapshotLimitChange={(value) => { const next = setSnapshotLimit(normalizeSnapshotLimit(value)); setSnapshotLimitState(next); }} onRestoreDefaults={() => { setViewPreferences(DEFAULT_VIEW_PREFERENCES); setLeftWidth(228); setRightWidth(288); setSnapshotLimitState(setSnapshotLimit(31)); if (page) updatePageSettings({ gridSize: 16, snapSettings: { grid: true, objects: true, guides: true, ports: true } }, page.id, 'Restore editor defaults'); }} onClose={() => setShowPreferences(false)} />}
      {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
    </main>;

@@ -85,6 +85,31 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
   });
 
+  test('exposes contextual controls, independent snapping, rename, and preferences', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await expect(page.locator('.contextual-toolbar-node')).toBeVisible();
+
+    await page.getByLabel('Node rotation').fill('45');
+    await expect(page.getByLabel('Node rotation')).toHaveValue('45');
+    await page.getByLabel('Lock aspect ratio').click();
+    await expect(page.getByLabel('Lock aspect ratio')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByLabel('Snap settings').click();
+    await expect(page.getByText('Snap settings', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Snap grid size')).toBeVisible();
+
+    await page.getByTitle('Rename document').click();
+    await page.getByLabel('Document title').fill('P0 controls');
+    await page.getByLabel('Document title').press('Enter');
+    await expect(page.getByTitle('Rename document')).toContainText('P0 controls');
+
+    await page.getByTitle('More editor actions').click();
+    await page.getByRole('button', { name: 'Preferences' }).click();
+    await expect(page.getByRole('heading', { name: 'Preferences' })).toBeVisible();
+    await page.getByRole('button', { name: 'Done' }).click();
+  });
+
   test('Alt-drag duplicates without applying grid snapping', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
