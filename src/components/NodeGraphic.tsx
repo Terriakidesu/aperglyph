@@ -1,4 +1,5 @@
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, normalizeEntityFields } from '../core/erd';
+import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramNode } from '../core/types';
 import { pluginManager } from '../plugins';
@@ -20,6 +21,11 @@ export function NodeGraphic({ node, diagramType }: { node: DiagramNode; diagramT
       const source = typeof node.data.src === 'string' && node.data.src.startsWith('data:image/') ? node.data.src : '';
       return <g><rect width={width} height={height} fill={node.style.fill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} opacity={node.style.opacity} />{source && <image href={source} width={width} height={height} preserveAspectRatio="xMidYMid meet" />}<NodeLabel node={node} label={label} width={width} height={height} vertical="bottom" /></g>;
     }
+    const notationShape = notationRenderer(renderer, node, diagramType);
+    const silhouette = shapeSilhouette(notationShape, width, height, node.style.radius);
+    if (silhouette) {
+      return <g>{renderSilhouette(silhouette, commonProps, notationShape === 'arrow-line' ? 'url(#arrow-end)' : undefined)}{notationShape === 'gane-process' && typeof node.data.number === 'string' && <text x={width / 2} y="17" textAnchor="middle" style={{ fill: node.style.textColor, fontSize: 9, fontWeight: 600 }}>{node.data.number}</text>}</g>;
+    }
     if (renderer === 'diamond' || renderer === 'decision') {
       const points = `${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}`;
       return <polygon points={points} {...commonProps} />;
@@ -40,6 +46,8 @@ export function NodeGraphic({ node, diagramType }: { node: DiagramNode; diagramT
       const fields = normalizeEntityFields(node.data.fields);
       const columns = entityColumns(node.data.entityVariant, width);
       const striped = node.data.striped !== false;
+      const isWeak = node.data.weak === true;
+      const isView = node.data.view === true;
       const showColumnHeaders = node.data.columnHeaders === true;
       const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
       const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
@@ -47,7 +55,8 @@ export function NodeGraphic({ node, diagramType }: { node: DiagramNode; diagramT
       const textColor = node.style.textColor;
       const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
       return <g opacity={node.style.opacity}>
-        <rect width={width} height={height} rx={node.style.radius} fill={rowFill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={node.data.associative ? '5 3' : undefined} />
+         <rect width={width} height={height} rx={node.style.radius} fill={rowFill} stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={node.data.associative || isView ? '5 3' : undefined} />
+         {isWeak && <rect x="4" y="4" width={Math.max(0, width - 8)} height={Math.max(0, height - 8)} rx={Math.max(0, node.style.radius - 2)} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} />}
         <rect width={width} height={ERD_HEADER_HEIGHT} rx={node.style.radius} fill={headerFill} />
         <line x1="0" y1={ERD_HEADER_HEIGHT} x2={width} y2={ERD_HEADER_HEIGHT} stroke={node.style.stroke} strokeWidth="1" />
         {showColumnHeaders && <g className="entity-column-headers"><rect y={ERD_HEADER_HEIGHT} width={width} height={ERD_COLUMN_HEADER_HEIGHT} fill={headerFill} opacity="0.42" /><line x1="0" y1={fieldTop} x2={width} y2={fieldTop} stroke={node.style.stroke} strokeOpacity="0.55" />{columns.map((column) => <text key={column.id} className="node-field-column-header" x={column.id === 'key' ? column.x + column.width / 2 : column.x + 7} y={ERD_HEADER_HEIGHT + 15} textAnchor={column.id === 'key' ? 'middle' : undefined}>{column.label}</text>)}</g>}
@@ -61,10 +70,21 @@ export function NodeGraphic({ node, diagramType }: { node: DiagramNode; diagramT
     const radius = renderer === 'rounded-rectangle' || renderer === 'start' || renderer === 'use-case' ? Math.min(node.style.radius || 22, height / 2) : node.style.radius;
     return <rect width={width} height={height} rx={radius} {...commonProps} />;
   })();
-  const labelNode = !['entity', 'actor', 'store', 'dfd-store', 'boundary', 'line'].includes(renderer)
-    ? <NodeLabel node={node} label={label} width={width} height={height} className={`node-label ${renderer === 'start' || renderer === 'use-case' ? 'node-label-strong' : ''}`} />
+  const labelNode = !['entity', 'actor', 'store', 'dfd-store', 'boundary', 'line', 'arrow-line'].includes(renderer)
+    ? <NodeLabel node={node} label={label} width={width} height={height} align={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 'left' : undefined} vertical={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 'top' : undefined} padding={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 14 : undefined} className={`node-label ${renderer === 'start' || renderer === 'use-case' ? 'node-label-strong' : ''}`} />
     : renderer === 'actor' ? <NodeLabel node={node} label={label} width={width} height={height} vertical="bottom" /> : null;
   return <>{shape}{labelNode}</>;
+}
+
+function renderSilhouette(silhouette: ReturnType<typeof shapeSilhouette>, commonProps: { fill: string; stroke: string; strokeWidth: number; opacity: number }, markerEnd?: string) {
+  if (!silhouette) return null;
+  return silhouette.parts.map((part, index) => {
+    if (part.kind === 'rect') return <rect key={index} x={part.x} y={part.y} width={part.width} height={part.height} rx={part.radius ?? 0} {...commonProps} />;
+    if (part.kind === 'ellipse') return <ellipse key={index} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} {...commonProps} />;
+    if (part.kind === 'polygon') return <polygon key={index} points={part.points.map((point) => `${point.x},${point.y}`).join(' ')} {...commonProps} />;
+    if (part.kind === 'line') return <line key={index} x1={part.x1} y1={part.y1} x2={part.x2} y2={part.y2} fill="none" stroke={commonProps.stroke} strokeWidth={commonProps.strokeWidth} opacity={commonProps.opacity} markerEnd={markerEnd} />;
+    return <path key={index} d={part.d} fillRule={part.fillRule} {...commonProps} />;
+  });
 }
 
 export function NodeLabel({ node, label, width, height, className = 'node-label', align, vertical, padding, fontFamily }: { node: DiagramNode; label: string; width: number; height: number; className?: string; align?: 'left' | 'center' | 'right'; vertical?: 'top' | 'middle' | 'bottom'; padding?: number; fontFamily?: string }) {
@@ -73,6 +93,7 @@ export function NodeLabel({ node, label, width, height, className = 'node-label'
 }
 
 function shapeRenderer(node: DiagramNode, diagramType?: string): string {
-  return pluginManager.getShape(node.library, node.type)?.renderer
+  const renderer = pluginManager.getShape(node.library, node.type)?.renderer
     ?? (diagramType === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
+  return notationRenderer(renderer, node, diagramType);
 }

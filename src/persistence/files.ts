@@ -3,6 +3,7 @@ import { exportDiagramText, parseDiagramText } from '../core/interoperability';
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
 import { nodeCenter } from '../core/geometry';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
 import { pluginManager } from '../plugins';
@@ -311,8 +312,9 @@ function directionAngle(direction: Point): number {
 }
 
 function shapeRenderer(node: DiagramNode): string {
-  return pluginManager.getShape(node.library, node.type)?.renderer
+  const renderer = pluginManager.getShape(node.library, node.type)?.renderer
     ?? (node.library === 'dfd' && node.type === 'process' ? 'ellipse' : node.type);
+  return notationRenderer(renderer, node);
 }
 
 function svgTextMarkup(node: DiagramNode, label: string, width: number, height: number, fill: string, options: { align?: 'left' | 'center' | 'right'; vertical?: 'top' | 'middle' | 'bottom'; padding?: number; fontFamily?: string } = {}): string {
@@ -352,15 +354,27 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
     const labelMarkup = source ? '' : svgTextMarkup(node, rawLabel, width, height, textColor);
     return `<g transform="${transform}"><rect width="${width}" height="${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${source ? `<image href="${escapeXml(source)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>` : labelMarkup}</g>`;
   }
+  const silhouette = shapeSilhouette(renderer, width, height, radius);
+  if (silhouette) {
+    const primitiveMarkup = svgSilhouetteMarkup(silhouette, fill, stroke, node.style.strokeWidth, node.style.opacity, renderer === 'line' || renderer === 'arrow-line' ? 'url(#arrow)' : undefined);
+    const numberMarkup = renderer === 'gane-process' && typeof node.data.number === 'string'
+      ? `<text x="${width / 2}" y="17" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="9" font-weight="600">${escapeXml(node.data.number)}</text>`
+      : '';
+    const labelOptions = ['package', 'folded-note', 'system-boundary'].includes(renderer) ? { align: 'left' as const, vertical: 'top' as const, padding: 14 } : {};
+    const labelMarkup = ['line', 'arrow-line'].includes(renderer) ? '' : svgTextMarkup(node, rawLabel, width, height, textColor, labelOptions);
+    return `<g transform="${transform}">${primitiveMarkup}${numberMarkup}${labelMarkup}</g>`;
+  }
   if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'entity') {
-     const fields = normalizeEntityFields(node.data.fields);
-     const columns = entityColumns(node.data.entityVariant, width);
-     const showColumnHeaders = node.data.columnHeaders === true;
-     const striped = node.data.striped !== false;
+      const fields = normalizeEntityFields(node.data.fields);
+      const columns = entityColumns(node.data.entityVariant, width);
+      const showColumnHeaders = node.data.columnHeaders === true;
+      const striped = node.data.striped !== false;
+      const isWeak = node.data.weak === true;
+      const isView = node.data.view === true;
          const rowFill = outlineOnly ? outlineFill(typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill) : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
          const stripeFill = outlineOnly ? '#ffffff' : typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
          const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
@@ -382,7 +396,7 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
        const dividers = columns.slice(0, -1).map((column) => `<line x1="${column.x + column.width}" y1="${rowY}" x2="${column.x + column.width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>`).join('');
        return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/>${dividers}${values}</g>`;
      }).join('');
-        return `<g transform="${transform}" opacity="${node.style.opacity}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative ? ' stroke-dasharray="5 3"' : ''}/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="${node.style.fontSize}" font-weight="${node.style.fontWeight}" text-anchor="middle">${label}</text></g>`;
+         return `<g transform="${transform}" opacity="${node.style.opacity}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative || isView ? ' stroke-dasharray="5 3"' : ''}/>${isWeak ? `<rect x="4" y="4" width="${Math.max(0, width - 8)}" height="${Math.max(0, height - 8)}" rx="${Math.max(0, radius - 2)}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/>` : ''}<rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="${node.style.fontSize}" font-weight="${node.style.fontWeight}" text-anchor="middle">${label}</text></g>`;
    }
     if (renderer === 'ellipse') {
        return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
@@ -404,6 +418,18 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
         return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
    }
      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
+}
+
+function svgSilhouetteMarkup(silhouette: ReturnType<typeof shapeSilhouette>, fill: string, stroke: string, strokeWidth: number, opacity: number, markerEnd?: string): string {
+  if (!silhouette) return '';
+  return silhouette.parts.map((part) => {
+    const common = `fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"`;
+    if (part.kind === 'rect') return `<rect x="${part.x}" y="${part.y}" width="${part.width}" height="${part.height}" rx="${part.radius ?? 0}" ${common}/>`;
+    if (part.kind === 'ellipse') return `<ellipse cx="${part.cx}" cy="${part.cy}" rx="${part.rx}" ry="${part.ry}" ${common}/>`;
+    if (part.kind === 'polygon') return `<polygon points="${part.points.map((point) => `${point.x},${point.y}`).join(' ')}" ${common}/>`;
+    if (part.kind === 'line') return `<line x1="${part.x1}" y1="${part.y1}" x2="${part.x2}" y2="${part.y2}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${markerEnd ? ` marker-end="${markerEnd}"` : ''}/>`;
+    return `<path d="${part.d}" fill-rule="${part.fillRule ?? 'nonzero'}" ${common}/>`;
+  }).join('');
 }
 
 function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selectionIds?: string[]): { nodes: DiagramNode[]; edges: DiagramEdge[] } {

@@ -54,7 +54,7 @@ describe('node connector geometry', () => {
   it('uses a flowchart silhouette edge instead of its bounding rectangle', () => {
     const node = createNode('manual-input', { x: 0, y: 0 }, { library: 'flowchart', size: { width: 100, height: 100 } });
     const point = nodeConnectionPoint(node, { x: 200, y: 200 });
-    expect(point.x).toBeCloseTo(84.75, 1);
-    expect(point.y).toBeCloseTo(84.75, 1);
+    expect(point.x).toBeCloseTo(100, 1);
+    expect(point.y).toBeCloseTo(100, 1);
   });
 });

@@ -1,4 +1,5 @@
 import type { DiagramNode, Point, ShapeBoundary } from './types';
+import { notationRenderer, silhouetteBoundaryPoints } from './silhouettes';
 
 export type ConnectionPort = 'top' | 'right' | 'bottom' | 'left' | 'center' | 'north' | 'east' | 'south' | 'west';
 
@@ -40,7 +41,7 @@ function shapeEdgePoint(node: DiagramNode, target: Point): Point {
   const dx = target.x - center.x;
   const dy = target.y - center.y;
   if (Math.abs(dx) < Number.EPSILON && Math.abs(dy) < Number.EPSILON) return center;
-  const renderer = inferredRenderer(node);
+  const renderer = notationRenderer(inferredRenderer(node), node);
   const halfWidth = node.size.width / 2 || 1;
   const halfHeight = node.size.height / 2 || 1;
   if (renderer === 'ellipse' || renderer === 'use-case') {
@@ -70,6 +71,8 @@ function inferredRenderer(node: DiagramNode): string {
 }
 
 function shapePolygon(node: DiagramNode, renderer: string): Point[] | null {
+  const sharedBoundary = silhouetteBoundaryPoints(renderer, node.size.width, node.size.height, node.style.radius);
+  if (sharedBoundary) return offsetPoints(node, sharedBoundary.map((point) => [point.x, point.y]));
   switch (renderer) {
     case 'diamond':
     case 'decision':
