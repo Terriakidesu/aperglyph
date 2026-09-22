@@ -438,6 +438,7 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
         + length
         + (length > EPSILON && length < MIN_SEGMENT_LENGTH ? 36 : 0)
         + (current.direction >= 0 && current.direction !== neighbor.direction ? 32 : 0)
+        + (current.direction >= 0 && current.direction === oppositeDirection(neighbor.direction) ? 24 : 0)
         + routeSegmentPenalty(fromPoint, toPoint, options)
         + softConstraintPenalty(fromPoint, toPoint, options.constraints)
         + routeChangePenalty(fromPoint, toPoint, options.previousRoute);
@@ -575,6 +576,10 @@ function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): num
   return penalty;
 }
 
+function oppositeDirection(direction: number): number {
+  return direction === 0 ? 1 : direction === 1 ? 0 : direction === 2 ? 3 : 2;
+}
+
 function routeChangePenalty(from: Point, to: Point, previousRoute?: Point[]): number {
   if (!previousRoute || previousRoute.length < 2) return 0;
   const matchesPrevious = previousRoute.slice(0, -1).some((previousStart, index) => {
@@ -677,10 +682,11 @@ function routingDirection(endpoint: Endpoint, node: DiagramNode, boundary: Point
   if (!explicit) return exitDirection(node, boundary, fallbackTarget);
   const radians = node.rotation * Math.PI / 180;
   const local = explicit === 'north' ? { x: 0, y: -1 } : explicit === 'east' ? { x: 1, y: 0 } : explicit === 'south' ? { x: 0, y: 1 } : { x: -1, y: 0 };
-  return {
-    x: Math.round(local.x * Math.cos(radians) - local.y * Math.sin(radians)),
-    y: Math.round(local.x * Math.sin(radians) + local.y * Math.cos(radians)),
+  const world = {
+    x: local.x * Math.cos(radians) - local.y * Math.sin(radians),
+    y: local.x * Math.sin(radians) + local.y * Math.cos(radians),
   };
+  return Math.abs(world.x) >= Math.abs(world.y) ? { x: Math.sign(world.x) || 1, y: 0 } : { x: 0, y: Math.sign(world.y) || 1 };
 }
 
 function markerTerminalLength(marker: EdgeMarker): number {

@@ -35,6 +35,10 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.
 - Upgraded the Vitest benchmark/test toolchain to the patched v5 API with zero reported npm audit vulnerabilities.
 
+### Fixed
+
+- Prevented rotated explicit ports from introducing diagonal first segments and penalized immediate route reversals during search.
+
 ## [0.13.0] - 2026-09-22
 
 ### Added
