@@ -1,5 +1,5 @@
 import { createEdge, createId } from './document';
-import type { Diagnostic, DiagramDocument, DiagramEdge, DiagramNode } from './types';
+import type { Diagnostic, DiagramDocument, DiagramEdge, DiagramNode, Size } from './types';
 
 export interface EntityField {
   id: string;
@@ -69,6 +69,16 @@ export function normalizeEntityVariant(value: unknown): EntityVariant {
 
 export function entityAutoHeight(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): number {
   return ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0) + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
+}
+
+/** Minimum usable bounds for an entity table, based on its visible columns and rows. */
+export function entityMinimumSize(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): Size {
+  const columns = entityColumns(variant, 0);
+  const columnWidth = columns.reduce((total, column) => total + column.width, 0);
+  return {
+    width: Math.max(120, columnWidth),
+    height: entityAutoHeight(fields, variant, columnHeaders),
+  };
 }
 
 /**

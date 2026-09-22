@@ -6,7 +6,7 @@ import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
 import type { ShapeDropPayload } from '../core/shapeTransfer';
 import { connectionAnchorPoints as resolveConnectionAnchorPoints } from '../core/anchors';
 import type { ResolvedConnectionAnchor } from '../core/anchors';
-import { ERD_HEADER_HEIGHT } from '../core/erd';
+import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, pointsToPath } from '../core/routing';
@@ -43,6 +43,7 @@ interface DragSession {
   nodeId?: string;
   resizeHandle?: ResizeHandle;
   initialNode?: { position: Point; size: Size };
+  resizeMinimum?: Size;
   endpoint?: 'source' | 'target';
   connectorSource?: ConnectorAnchor;
   labelStart?: Point;
@@ -127,9 +128,9 @@ function endpointPoint(endpoint: Endpoint, node: DiagramNode | undefined, toward
   return endpoint.point;
 }
 
-function resizeGeometry(initial: { position: Point; size: Size }, handle: ResizeHandle, start: Point, current: Point, preserveAspect: boolean): { position: Point; size: Size } {
-  const minWidth = 48;
-  const minHeight = 32;
+function resizeGeometry(initial: { position: Point; size: Size }, handle: ResizeHandle, start: Point, current: Point, preserveAspect: boolean, minimum: Size = { width: 48, height: 32 }): { position: Point; size: Size } {
+  const minWidth = Math.max(48, minimum.width);
+  const minHeight = Math.max(32, minimum.height);
   const delta = { x: current.x - start.x, y: current.y - start.y };
   const initialRight = initial.position.x + initial.size.width;
   const initialBottom = initial.position.y + initial.size.height;
@@ -148,9 +149,11 @@ function resizeGeometry(initial: { position: Point; size: Size }, handle: Resize
     if (width / Math.max(1, initial.size.width) >= height / Math.max(1, initial.size.height)) {
       width = Math.max(minWidth, width);
       height = Math.max(minHeight, width / ratio);
+      width = Math.max(minWidth, height * ratio);
     } else {
       height = Math.max(minHeight, height);
       width = Math.max(minWidth, height * ratio);
+      height = Math.max(minHeight, width / ratio);
     }
     if (handle.includes('w')) left = initialRight - width;
     else right = initial.position.x + width;
@@ -209,6 +212,13 @@ function rotatedNodeBounds(node: DiagramNode): WorldBounds {
   const maxX = Math.max(...corners.map((point) => point.x));
   const maxY = Math.max(...corners.map((point) => point.y));
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function clampEntityNodeSize(node: DiagramNode): DiagramNode {
+  if (node.type !== 'entity') return node;
+  const minimum = entityMinimumSize(node.data.fields, node.data.entityVariant, node.data.columnHeaders === true);
+  if (node.size.width >= minimum.width && node.size.height >= minimum.height) return node;
+  return { ...node, size: { width: Math.max(node.size.width, minimum.width), height: Math.max(node.size.height, minimum.height) } };
 }
 
 function shapeConnectionAnchorPoints(node: DiagramNode): ResolvedConnectionAnchor[] {
@@ -871,6 +881,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       nodeId: node.id,
       resizeHandle: handle,
       initialNode: { position: { ...node.position }, size: { ...node.size } },
+      resizeMinimum: node.type === 'entity' ? entityMinimumSize(node.data.fields, node.data.entityVariant, node.data.columnHeaders === true) : undefined,
     };
     svgRef.current?.setPointerCapture(event.pointerId);
   };
@@ -1183,7 +1194,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'endpoint') {
       updateEndpointPreview(session, point, event.altKey, ENDPOINT_SNAP_DISTANCE / viewport.zoom);
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
-       setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey) });
+       setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey, session.resizeMinimum) });
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
        const gridSize = page?.settings.gridSize ?? 16;
        const nextPoint = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
@@ -1238,7 +1249,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'resize') {
       const nodeId = session.nodeId;
       if (nodeId && session.initialNode && session.resizeHandle) {
-        const geometry = resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, worldPoint(event), event.shiftKey);
+        const geometry = resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, worldPoint(event), event.shiftKey, session.resizeMinimum);
         updateNode(nodeId, geometry, 'Resize node');
         setResizePreview(null);
       }
@@ -1331,8 +1342,10 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
 
   const renderedNodes = page?.nodes.filter((node) => !node.hidden && (!visibleNodeIds || visibleNodeIds.has(node.id))).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)) ?? [];
   const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => {
-    const moved = dragPreview[node.id] ? { ...node, position: dragPreview[node.id] } : node;
-    return [node.id, resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved] as const;
+    const clamped = clampEntityNodeSize(node);
+    const moved = dragPreview[node.id] ? { ...clamped, position: dragPreview[node.id] } : clamped;
+    const preview = resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved;
+    return [node.id, clampEntityNodeSize(preview)] as const;
   })), [dragPreview, page?.nodes, resizePreview]);
   const groupBounds = (() => {
     const groups = new Map<string, DiagramNode[]>();

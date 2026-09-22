@@ -1,4 +1,5 @@
 import { cloneDocument, clonePageWithNewIds, createId, createPage, getPage } from './document';
+import { entityMinimumSize } from './erd';
 import { getSnapSettings } from './snapping';
 import { wrappedNodeHeight } from './text';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, DiagramPage, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset } from './types';
@@ -719,6 +720,10 @@ function applyNodePatch(node: DiagramNode, changes: NodePatch): DiagramNode {
     || widthChanged;
   if (textChanged && next.type !== 'entity' && next.style.textWrap && next.style.autoHeight) {
     next.size = { ...next.size, height: wrappedNodeHeight(next) };
+  }
+  if (next.type === 'entity') {
+    const minimum = entityMinimumSize(next.data.fields, next.data.entityVariant, next.data.columnHeaders === true);
+    next.size = { width: Math.max(next.size.width, minimum.width), height: Math.max(next.size.height, minimum.height) };
   }
   return next;
 }

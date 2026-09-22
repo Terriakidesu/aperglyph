@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createNode } from './document';
-import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, entityLayoutMetrics, normalizeEntityFields, parseEntityFields, parseErdSql, exportErdSql, validateErd } from './erd';
+import { entityAutoHeight, entityColumns, entityFieldLabel, entityFieldPortOffset, entityFieldValue, entityLayoutMetrics, entityMinimumSize, normalizeEntityFields, parseEntityFields, parseErdSql, exportErdSql, validateErd } from './erd';
 
 describe('ERD semantic model', () => {
   it('normalizes legacy compact attributes', () => {
@@ -21,6 +21,11 @@ describe('ERD semantic model', () => {
     expect(entityAutoHeight(['id · uuid', 'name · varchar'])).toBe(88);
     expect(entityAutoHeight(['id · uuid', 'name · varchar', 'created · date'])).toBe(115);
     expect(entityAutoHeight([])).toBe(61);
+  });
+
+  it('provides a usable minimum size for each table layout', () => {
+    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field')).toEqual({ width: 120, height: 88 });
+    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field-type-nullability', true)).toEqual({ width: 206, height: 109 });
   });
 
   it('supports selectable entity column variants and row anchors', () => {

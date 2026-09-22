@@ -513,9 +513,15 @@ function migrateNode(node: DiagramNode): DiagramNode {
     data: node.data ?? {},
   };
   const requiredHeight = wrappedNodeHeight(migrated);
-  return requiredHeight > migrated.size.height
-    ? { ...migrated, size: { ...migrated.size, height: requiredHeight } }
-    : migrated;
+  if (migrated.type !== 'entity') {
+    return requiredHeight > migrated.size.height
+      ? { ...migrated, size: { ...migrated.size, height: requiredHeight } }
+      : migrated;
+  }
+  const fieldCount = Math.max(1, Array.isArray(migrated.data.fields) ? migrated.data.fields.length : 0);
+  const minimumHeight = 34 + (migrated.data.columnHeaders === true ? 21 : 0) + fieldCount * 27;
+  const minimumWidth = migrated.data.entityVariant === 'key-field-type-nullability' ? 206 : migrated.data.entityVariant === 'key-field-type' || migrated.data.entityVariant === undefined ? 144 : migrated.data.entityVariant === 'key-field-nullability' ? 148 : 120;
+  return { ...migrated, size: { width: Math.max(migrated.size.width, minimumWidth), height: Math.max(migrated.size.height, minimumHeight, requiredHeight) } };
 }
 
 function normalizePalette(value: unknown): string[] {

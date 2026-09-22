@@ -192,6 +192,24 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('[data-node-id]').first().locator('.node-field-name').last()).toHaveText('created_at');
   });
 
+  test('clamps an ERD resize to its visible table rows', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Entity onto the canvas').click();
+    const node = page.locator('[data-node-id]').first();
+    await node.click();
+    const handle = node.locator('.node-handles .handle').nth(2);
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    await page.mouse.move((handleBox?.x ?? 0) + 4, (handleBox?.y ?? 0) + 4);
+    await page.mouse.down();
+    await page.mouse.move((handleBox?.x ?? 0) - 220, (handleBox?.y ?? 0) - 180, { steps: 5 });
+    await page.mouse.up();
+
+    const selectionBox = node.locator('.node-handles > rect').first();
+    await expect.poll(async () => Number(await selectionBox.getAttribute('height'))).toBeGreaterThanOrEqual(98);
+    await expect.poll(async () => Number(await node.locator('.node-entity-title').evaluate((element) => element.closest('g')?.querySelector('rect')?.getAttribute('height') ?? '0'))).toBeGreaterThanOrEqual(88);
+  });
+
   test('connects nodes by dragging between connection ports', async ({ page }) => {
     await page.locator('.template-card').first().click();
     const canvas = page.locator('svg.diagram-canvas');

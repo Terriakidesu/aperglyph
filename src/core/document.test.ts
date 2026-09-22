@@ -107,6 +107,17 @@ describe('AperGlyph document model', () => {
     expect(migrated.pages[0].edges[0].style.endMarker).toBe('crowfoot');
   });
 
+  it('clamps undersized ERD nodes to their visible content', () => {
+    const document = createDocument('Clamped ERD', 'erd');
+    const entity = createNode('entity', { x: 0, y: 0 }, {
+      size: { width: 48, height: 32 },
+      data: { label: 'users', entityVariant: 'key-field', fields: ['id · uuid', 'name · varchar'] },
+    });
+    document.pages[0].nodes.push(entity);
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].nodes[0].size).toEqual({ width: 120, height: 88 });
+  });
+
   it('rejects malformed imported geometry and endpoint references', () => {
     const document = createDocument('Unsafe');
     const raw = JSON.parse(serializeProject(document)) as Record<string, unknown>;
