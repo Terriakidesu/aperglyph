@@ -178,6 +178,97 @@ test.describe('diagram editing workflow', () => {
     expect(Math.abs((targetHandleBox?.y ?? 0) + (targetHandleBox?.height ?? 0) / 2 - ((targetPortBox?.y ?? 0) + (targetPortBox?.height ?? 0) / 2))).toBeLessThan(2);
   });
 
+  test('keeps both ends anchored after reconnecting a free endpoint', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox).not.toBeNull();
+    const shape = page.locator('.shape-item[title="Drag Rectangle onto the canvas"]');
+    await shape.dragTo(canvas, { targetPosition: { x: 180, y: 250 } });
+    await shape.dragTo(canvas, { targetPosition: { x: 650, y: 250 } });
+
+    await page.getByTitle('Connector (C)').click();
+    const nodes = page.locator('[data-node-id]');
+    const sourcePort = nodes.nth(0).locator('[data-connection-port="right"]');
+    const targetPort = nodes.nth(1).locator('[data-connection-port="left"]');
+    const sourcePortBox = await sourcePort.boundingBox();
+    const targetPortBox = await targetPort.boundingBox();
+    const sourceNodeBox = await nodes.nth(0).boundingBox();
+    const targetNodeBox = await nodes.nth(1).boundingBox();
+    expect(sourcePortBox).not.toBeNull();
+    expect(targetPortBox).not.toBeNull();
+    expect(sourceNodeBox).not.toBeNull();
+    expect(targetNodeBox).not.toBeNull();
+
+    // Clicking the node bodies creates an attached edge without explicit ports,
+    // which makes stale free-point geometry observable on the opposite end.
+    await page.mouse.click((sourceNodeBox?.x ?? 0) + (sourceNodeBox?.width ?? 0) / 2, (sourceNodeBox?.y ?? 0) + (sourceNodeBox?.height ?? 0) / 2);
+    await page.mouse.click((targetNodeBox?.x ?? 0) + (targetNodeBox?.width ?? 0) / 2, (targetNodeBox?.y ?? 0) + (targetNodeBox?.height ?? 0) / 2);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(1);
+
+    await page.getByTitle('Select (V)').click();
+    const endpoint = page.locator('[data-edge-endpoint="target"]');
+    const endpointBox = await endpoint.boundingBox();
+    expect(endpointBox).not.toBeNull();
+    const freePoint = { x: (canvasBox?.x ?? 0) + (canvasBox?.width ?? 0) - 100, y: (canvasBox?.y ?? 0) + (canvasBox?.height ?? 0) - 100 };
+    await page.mouse.move((endpointBox?.x ?? 0) + (endpointBox?.width ?? 0) / 2, (endpointBox?.y ?? 0) + (endpointBox?.height ?? 0) / 2);
+    await page.mouse.down();
+    await page.mouse.move(freePoint.x, freePoint.y, { steps: 6 });
+    await page.mouse.up();
+
+    const freeEndpointBox = await endpoint.boundingBox();
+    expect(freeEndpointBox).not.toBeNull();
+    const targetAnchor = { x: (targetPortBox?.x ?? 0) + (targetPortBox?.width ?? 0) / 2, y: (targetPortBox?.y ?? 0) + (targetPortBox?.height ?? 0) / 2 };
+    await page.mouse.move((freeEndpointBox?.x ?? 0) + (freeEndpointBox?.width ?? 0) / 2, (freeEndpointBox?.y ?? 0) + (freeEndpointBox?.height ?? 0) / 2);
+    await page.mouse.down();
+    await page.mouse.move(targetAnchor.x + 14, targetAnchor.y + 8, { steps: 6 });
+    await page.mouse.up();
+
+    const sourceHandle = page.locator('[data-edge-endpoint="source"]');
+    const sourceHandleBox = await sourceHandle.boundingBox();
+    const targetHandleBox = await endpoint.boundingBox();
+    expect(sourceHandleBox).not.toBeNull();
+    expect(targetHandleBox).not.toBeNull();
+    expect(Math.abs((sourceHandleBox?.x ?? 0) + (sourceHandleBox?.width ?? 0) / 2 - ((sourcePortBox?.x ?? 0) + (sourcePortBox?.width ?? 0) / 2))).toBeLessThan(2);
+    expect(Math.abs((sourceHandleBox?.y ?? 0) + (sourceHandleBox?.height ?? 0) / 2 - ((sourcePortBox?.y ?? 0) + (sourcePortBox?.height ?? 0) / 2))).toBeLessThan(2);
+    expect(Math.abs((targetHandleBox?.x ?? 0) + (targetHandleBox?.width ?? 0) / 2 - targetAnchor.x)).toBeLessThan(2);
+    expect(Math.abs((targetHandleBox?.y ?? 0) + (targetHandleBox?.height ?? 0) / 2 - targetAnchor.y)).toBeLessThan(2);
+  });
+
+  test('reconnects an attached endpoint to a curved opposite node anchor', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    await page.locator('.shape-item[title="Drag Circle onto the canvas"]').dragTo(canvas, { targetPosition: { x: 180, y: 250 } });
+    await page.locator('.shape-item[title="Drag Rectangle onto the canvas"]').dragTo(canvas, { targetPosition: { x: 650, y: 250 } });
+
+    await page.getByTitle('Connector (C)').click();
+    const nodes = page.locator('[data-node-id]');
+    const sourcePort = nodes.nth(0).locator('[data-connection-port="right"]');
+    const targetPort = nodes.nth(1).locator('[data-connection-port="left"]');
+    const sourcePortBox = await sourcePort.boundingBox();
+    const targetPortBox = await targetPort.boundingBox();
+    expect(sourcePortBox).not.toBeNull();
+    expect(targetPortBox).not.toBeNull();
+    const sourceAnchor = { x: (sourcePortBox?.x ?? 0) + (sourcePortBox?.width ?? 0) / 2, y: (sourcePortBox?.y ?? 0) + (sourcePortBox?.height ?? 0) / 2 };
+    await page.mouse.click(sourceAnchor.x, sourceAnchor.y);
+    await page.mouse.click((targetPortBox?.x ?? 0) + (targetPortBox?.width ?? 0) / 2, (targetPortBox?.y ?? 0) + (targetPortBox?.height ?? 0) / 2);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(1);
+
+    await page.getByTitle('Select (V)').click();
+    const endpoint = page.locator('[data-edge-endpoint="target"]');
+    const endpointBox = await endpoint.boundingBox();
+    expect(endpointBox).not.toBeNull();
+    await page.mouse.move((endpointBox?.x ?? 0) + (endpointBox?.width ?? 0) / 2, (endpointBox?.y ?? 0) + (endpointBox?.height ?? 0) / 2);
+    await page.mouse.down();
+    await page.mouse.move(sourceAnchor.x + 14, sourceAnchor.y + 8, { steps: 6 });
+    await page.mouse.up();
+
+    const reconnectedBox = await endpoint.boundingBox();
+    expect(reconnectedBox).not.toBeNull();
+    expect(Math.abs((reconnectedBox?.x ?? 0) + (reconnectedBox?.width ?? 0) / 2 - sourceAnchor.x)).toBeLessThan(2);
+    expect(Math.abs((reconnectedBox?.y ?? 0) + (reconnectedBox?.height ?? 0) / 2 - sourceAnchor.y)).toBeLessThan(2);
+  });
+
   test('quick-creates a shape from an empty connector endpoint', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();

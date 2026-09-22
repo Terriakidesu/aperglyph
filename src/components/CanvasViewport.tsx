@@ -918,9 +918,11 @@ export function CanvasViewport() {
     if (!session.edgeId || !session.endpoint || !page) return;
     const edge = page.edges.find((candidate) => candidate.id === session.edgeId);
     if (!edge) return;
-    const oppositeNodeId = session.endpoint === 'source' ? edge.target.nodeId : edge.source.nodeId;
     const snappingEnabled = page.settings.snapToGrid && !disableSnapping && !session.disableSnapping;
-    const nearest = snappingEnabled ? nearestConnectionAnchor(page.nodes, point, oppositeNodeId, maxDistance) : null;
+    // Endpoint edits may intentionally reconnect to the other endpoint's node
+    // to form a self-loop. Connector creation has its own self-loop policy;
+    // do not apply that exclusion while an existing endpoint is being edited.
+    const nearest = snappingEnabled ? nearestConnectionAnchor(page.nodes, point, undefined, maxDistance) : null;
     if (nearest) {
       const preview: EndpointPreview = { edgeId: edge.id, endpoint: session.endpoint, anchor: nearest.anchor, point: nearest.point };
       endpointPreviewRef.current = preview;
@@ -928,7 +930,7 @@ export function CanvasViewport() {
       return;
     }
     const candidate = snappingEnabled ? page.nodes
-      .filter((node) => !node.hidden && (!oppositeNodeId || node.id !== oppositeNodeId))
+      .filter((node) => !node.hidden)
       .filter((node) => point.x >= node.position.x - maxDistance && point.x <= node.position.x + node.size.width + maxDistance && point.y >= node.position.y - maxDistance && point.y <= node.position.y + node.size.height + maxDistance)
       .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0] : undefined;
     if (candidate) {

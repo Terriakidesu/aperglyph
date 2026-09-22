@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
+import { edgeRoute } from './routing';
 
 describe('command history', () => {
   it('supports execute, undo, and redo', () => {
@@ -121,6 +122,25 @@ describe('command history', () => {
     const payload = selectionClipboard(next, pageId, [edge.id]);
     const offset = offsetClipboard(payload, { x: 24, y: 18 });
     expect(offset.edges[0].source.point).toEqual({ x: 44, y: 48 });
+  });
+
+  it('clears stale free geometry when reconnecting an endpoint to a node', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    const edge = createEdge({ nodeId: source.id }, { point: { x: 40, y: 300 } });
+    document.pages[0].nodes.push(source, target);
+
+    const manager = new CommandManager();
+    const withEdge = manager.execute(new CreateEdgeCommand(pageId, edge), document);
+    const updated = manager.execute(new UpdateEdgeCommand(pageId, edge.id, {
+      target: { nodeId: target.id, port: 'left' },
+    }), withEdge);
+    const nextEdge = updated.pages[0].edges[0];
+
+    expect(nextEdge.target).toEqual({ nodeId: target.id, port: 'left', point: undefined });
+    expect(edgeRoute(nextEdge, source, target)[0]).toEqual({ x: 180, y: 44 });
   });
 
   it('supports page lifecycle commands', () => {

@@ -701,6 +701,14 @@ function offsetEndpoint(endpoint: DiagramEdge['source'], nodeIds: Map<string, st
   return endpoint.point ? { ...endpoint, offset: undefined, point: { x: endpoint.point.x + offset.x, y: endpoint.point.y + offset.y } } : { ...endpoint };
 }
 
+/** Keep attached endpoints node-relative and free endpoints point-relative. */
+function mergeEndpoint(current: DiagramEdge['source'], patch: DiagramEdge['source']): DiagramEdge['source'] {
+  const endpoint = { ...current, ...patch };
+  if (endpoint.nodeId) return { ...endpoint, point: undefined };
+  if (endpoint.point) return { ...endpoint, port: undefined, offset: undefined };
+  return endpoint;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -724,8 +732,8 @@ export class UpdateEdgeCommand implements DocumentCommand {
         ? {
           ...edge,
           ...this.changes,
-          source: this.changes.source ? { ...edge.source, ...this.changes.source } : edge.source,
-          target: this.changes.target ? { ...edge.target, ...this.changes.target } : edge.target,
+          source: this.changes.source ? mergeEndpoint(edge.source, this.changes.source) : edge.source,
+          target: this.changes.target ? mergeEndpoint(edge.target, this.changes.target) : edge.target,
           style: this.changes.style ? { ...edge.style, ...this.changes.style } : edge.style,
           data: this.changes.data ? { ...edge.data, ...this.changes.data } : edge.data,
           waypoints: this.changes.waypoints ? this.changes.waypoints.map((point) => ({ ...point })) : edge.waypoints,
