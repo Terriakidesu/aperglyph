@@ -36,6 +36,22 @@ describe('AperGlyph document model', () => {
     expect(parsed.pages[0].edges[0].source).toEqual({ point: { x: 80, y: 90 } });
   });
 
+  it('round trips orthogonal routing intent without persisting a generated route', () => {
+    const document = createDocument('Routing intent');
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 0 });
+    document.pages[0].nodes.push(source, target);
+    document.pages[0].edges.push(createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, {
+      type: 'orthogonal',
+      routing: { mode: 'manual', constraints: [{ axis: 'y', value: 120, strength: 'hard' }] },
+      style: { cornerRadius: 8 },
+    }));
+    const parsed = parseProject(serializeProject(document));
+    expect(parsed.pages[0].edges[0].routing).toEqual({ mode: 'manual', constraints: [{ axis: 'y', value: 120, strength: 'hard' }] });
+    expect(parsed.pages[0].edges[0].style.cornerRadius).toBe(8);
+    expect(parsed.pages[0].edges[0]).not.toHaveProperty('computedRoute');
+  });
+
   it('restores semantic defaults for legacy DFD pages', () => {
     const document = createDocument('Legacy DFD', 'dfd');
     delete (document.pages[0] as { data?: unknown }).data;

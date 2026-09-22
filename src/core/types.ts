@@ -65,9 +65,27 @@ export interface EdgeStyle {
   labelColor: string;
   opacity?: number;
   jumpStyle?: 'arc' | 'gap' | 'none';
+  /** Visual corner radius for orthogonal paths. The route itself stays rectilinear. */
+  cornerRadius?: number;
 }
 
 export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
+
+export type PortDirection = 'north' | 'east' | 'south' | 'west';
+export type OrthogonalRoutingMode = 'auto' | 'simple' | 'manual';
+
+export interface RouteConstraint {
+  axis: 'x' | 'y';
+  value: number;
+  strength: 'soft' | 'hard';
+}
+
+/** Persisted user intent for orthogonal routing; generated routes remain runtime data. */
+export interface EdgeRoutingSettings {
+  mode: OrthogonalRoutingMode;
+  constraints?: RouteConstraint[];
+  lane?: number;
+}
 
 export interface Endpoint {
   /** Attached node. Omit this for a free-standing canvas endpoint. */
@@ -114,6 +132,7 @@ export interface DiagramEdge {
   waypoints: Point[];
   style: EdgeStyle;
   data: Record<string, unknown>;
+  routing?: EdgeRoutingSettings;
 }
 
 export type GuideOrientation = 'horizontal' | 'vertical';
@@ -134,7 +153,7 @@ export interface SnapSettings {
   ports: boolean;
 }
 
-export type EdgePatch = Partial<Pick<DiagramEdge, 'type' | 'source' | 'target' | 'waypoints'>> & {
+export type EdgePatch = Partial<Pick<DiagramEdge, 'type' | 'source' | 'target' | 'waypoints' | 'routing'>> & {
   style?: Partial<EdgeStyle>;
   data?: Record<string, unknown>;
 };

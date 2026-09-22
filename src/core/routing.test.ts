@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, pointsToPath } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, NODE_CLEARANCE, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -66,6 +66,24 @@ describe('connector routing', () => {
     const route = edgeRoute(edge, source, target);
     expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
     expect(pointsToPath(route)).toContain('L');
+  });
+
+  it('treats an explicit port as authoritative for the first and last segment', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: -180 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal' });
+    const route = edgeRoute(edge, source, target);
+    expect(route[1].x - route[0].x).toBeGreaterThanOrEqual(PORT_STUB_LENGTH);
+    expect(route[1].y).toBe(route[0].y);
+    expect(route.at(-1)!.x - route.at(-2)!.x).toBeGreaterThanOrEqual(PORT_STUB_LENGTH);
+    expect(route.at(-1)!.y).toBe(route.at(-2)!.y);
+  });
+
+  it('normalizes cardinal port aliases and keeps node clearance separate from stubs', () => {
+    expect(portDirection('right')).toBe('east');
+    expect(portDirection('east')).toBe('east');
+    expect(portDirection('center')).toBeUndefined();
+    expect(NODE_CLEARANCE).not.toBe(PORT_STUB_LENGTH);
   });
 
   it('routes around an intervening node instead of crossing its bounds', () => {

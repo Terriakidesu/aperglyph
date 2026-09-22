@@ -1,12 +1,23 @@
 import { nodeCenter, nodeConnectionPoint } from './geometry';
 import { connectionAnchorPoints, entityFieldAnchors } from './anchors';
 import { normalizeEntityFields } from './erd';
-import type { DiagramEdge, DiagramNode, Endpoint, Point } from './types';
+import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, Point, PortDirection } from './types';
 
-const ROUTE_PADDING = 18;
+export const NODE_CLEARANCE = 16;
+export const PORT_STUB_LENGTH = 24;
 const EPSILON = 0.001;
 const JUMP_HALF_LENGTH = 8;
 const JUMP_HEIGHT = 7;
+
+export interface RoutingEndpoint {
+  point: Point;
+  direction?: PortDirection;
+}
+
+export interface RouteOptions {
+  nodeClearance?: number;
+  portStubLength?: number;
+}
 
 export interface RouteJump {
   segmentIndex: number;
@@ -45,7 +56,7 @@ export function parallelEdgeOffset(edge: DiagramEdge, edges: DiagramEdge[]): num
  * visibility-grid search so bends stay outside node rectangles instead of
  * taking a dogleg through a nearby shape.
  */
-export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: DiagramNode, obstacles: DiagramNode[] = []): Point[] {
+export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: DiagramNode, obstacles: DiagramNode[] = [], options: RouteOptions = {}): Point[] {
   const sourceEndpoint = semanticFieldEndpoint(edge, edge.source, source, 'source');
   const targetEndpoint = semanticFieldEndpoint(edge, edge.target, target, 'target');
   const start = resolveEndpointPoint(sourceEndpoint, source, targetEndpoint.point ?? (target ? nodeCenter(target) : undefined));
@@ -56,13 +67,17 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   if (routing !== 'orthogonal') return routing === 'straight' && Number.isFinite(edge.data?.parallelOffset) && Number(edge.data?.parallelOffset) !== 0
     ? parallelRoute(start, end, Number(edge.data?.parallelOffset))
     : [start, end];
-  if (obstacles.length === 0) return legacyOrthogonalRoute(start, end, edge.waypoints);
+  if (!source && !target && obstacles.length === 0) return legacyOrthogonalRoute(start, end, edge.waypoints);
 
-  const rectangles = obstacles.map((node) => inflate(node, ROUTE_PADDING));
-  const startDirection = source ? exitDirection(source, start, end) : cardinalDirection(start, end);
-  const endDirection = target ? exitDirection(target, end, start) : cardinalDirection(end, start);
-  const startExit = source ? shift(start, startDirection, ROUTE_PADDING) : start;
-  const endEntry = target ? shift(end, endDirection, ROUTE_PADDING) : end;
+  const nodeClearance = options.nodeClearance ?? NODE_CLEARANCE;
+  const requestedStub = options.portStubLength ?? PORT_STUB_LENGTH;
+  const rectangles = obstacles.map((node) => inflate(node, nodeClearance));
+  const startDirection = source ? routingDirection(sourceEndpoint, source, start, end) : cardinalDirection(start, end);
+  const endDirection = target ? routingDirection(targetEndpoint, target, end, start) : cardinalDirection(end, start);
+  const startStub = Math.max(requestedStub, markerTerminalLength(edge.style.startMarker));
+  const endStub = Math.max(requestedStub, markerTerminalLength(edge.style.endMarker));
+  const startExit = source ? shift(start, startDirection, startStub) : start;
+  const endEntry = target ? shift(end, endDirection, endStub) : end;
   const route: Point[] = [start];
   appendPoint(route, startExit);
 
@@ -352,6 +367,38 @@ function inflate(node: DiagramNode, padding: number): Rect {
     top: node.position.y - padding,
     bottom: node.position.y + node.size.height + padding,
   };
+}
+
+export function portDirection(port?: string): PortDirection | undefined {
+  if (port === 'top' || port === 'north') return 'north';
+  if (port === 'right' || port === 'east') return 'east';
+  if (port === 'bottom' || port === 'south') return 'south';
+  if (port === 'left' || port === 'west') return 'west';
+  return undefined;
+}
+
+function routingDirection(endpoint: Endpoint, node: DiagramNode, boundary: Point, fallbackTarget: Point): Point {
+  const explicit = portDirection(endpoint.port);
+  if (!explicit) return exitDirection(node, boundary, fallbackTarget);
+  const radians = node.rotation * Math.PI / 180;
+  const local = explicit === 'north' ? { x: 0, y: -1 } : explicit === 'east' ? { x: 1, y: 0 } : explicit === 'south' ? { x: 0, y: 1 } : { x: -1, y: 0 };
+  return {
+    x: Math.round(local.x * Math.cos(radians) - local.y * Math.sin(radians)),
+    y: Math.round(local.x * Math.sin(radians) + local.y * Math.cos(radians)),
+  };
+}
+
+function markerTerminalLength(marker: EdgeMarker): number {
+  switch (marker) {
+    case 'arrow': return 14;
+    case 'bar': return 10;
+    case 'crowfoot': return 18;
+    case 'circle-bar': return 22;
+    case 'bar-crowfoot': return 24;
+    case 'circle-crowfoot': return 26;
+    case 'circle': return 12;
+    default: return 0;
+  }
 }
 
 function exitDirection(node: DiagramNode, boundary: Point, fallbackTarget: Point): Point {

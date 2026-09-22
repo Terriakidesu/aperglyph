@@ -8,6 +8,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added authoritative orthogonal port directions, separate node-clearance and port-stub geometry, terminal marker clearance, and persisted route intent/constraint metadata.
 - Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.
 - Added a reproducible `npm run build:wasm` pipeline and automatic WASM generation before development and production builds.
 - Added undoable page creation, deletion, renaming, duplication, reordering, and settings updates.
@@ -25,6 +26,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added richer ERD field metadata/paste tools, DFD process numbering checks, and UML use-case/package validation and relationship shapes.
 
 ### Changed
+- Orthogonal routing now preserves semantic endpoint intent while keeping generated routes runtime-only and export-compatible.
 
 - Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.
 - Added configurable Vite base-path handling for root and GitHub Pages project deployments.

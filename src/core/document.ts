@@ -139,7 +139,7 @@ export function createNode(
 export function createEdge(
   source: DiagramEdge['source'],
   target: DiagramEdge['target'],
-  options: Partial<Pick<DiagramEdge, 'type' | 'data'>> & { style?: Partial<EdgeStyle> } = {},
+  options: Partial<Pick<DiagramEdge, 'type' | 'data' | 'routing'>> & { style?: Partial<EdgeStyle> } = {},
 ): DiagramEdge {
   return {
     id: createId('edge'),
@@ -149,6 +149,7 @@ export function createEdge(
     waypoints: [],
     style: { ...defaultEdgeStyle, ...options.style },
     data: options.data ?? {},
+    ...(options.routing ? { routing: structuredClone(options.routing) } : {}),
   };
 }
 
@@ -397,12 +398,31 @@ function validateEdge(value: unknown, path: string, ids: Set<string>, nodeIds: S
     finiteInRange(value.style.strokeWidth, `${path}.style.strokeWidth`, 0, 100, errors);
     if (value.style.opacity !== undefined) finiteInRange(value.style.opacity, `${path}.style.opacity`, 0, 1, errors);
     if (value.style.jumpStyle !== undefined && (typeof value.style.jumpStyle !== 'string' || !edgeJumpStyles.has(value.style.jumpStyle))) errors.push(`${path}.style.jumpStyle is invalid`);
+    if (value.style.cornerRadius !== undefined) finiteInRange(value.style.cornerRadius, `${path}.style.cornerRadius`, 0, 100, errors);
     if (typeof value.style.dash !== 'string' || !edgeDashes.has(value.style.dash)) errors.push(`${path}.style.dash is invalid`);
     if (typeof value.style.startMarker !== 'string' || !edgeMarkers.has(value.style.startMarker)) errors.push(`${path}.style.startMarker is invalid`);
     if (typeof value.style.endMarker !== 'string' || !edgeMarkers.has(value.style.endMarker)) errors.push(`${path}.style.endMarker is invalid`);
     isBoundedString(value.style.labelColor, `${path}.style.labelColor`, 1, 64, errors);
   }
+  validateEdgeRouting(value.routing, `${path}.routing`, errors);
   validateData(value.data, `${path}.data`, errors);
+}
+
+function validateEdgeRouting(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
+  if (value.mode !== 'auto' && value.mode !== 'simple' && value.mode !== 'manual') errors.push(`${path}.mode is invalid`);
+  if (value.lane !== undefined) finiteInRange(value.lane, `${path}.lane`, -1000, 1000, errors);
+  if (value.constraints !== undefined) {
+    if (!Array.isArray(value.constraints) || value.constraints.length > MAX_WAYPOINTS_PER_EDGE) errors.push(`${path}.constraints exceeds the maximum size`);
+    (Array.isArray(value.constraints) ? value.constraints : []).forEach((constraint, index) => {
+      const constraintPath = `${path}.constraints[${index}]`;
+      if (!isRecord(constraint)) { errors.push(`${constraintPath} must be an object`); return; }
+      if (constraint.axis !== 'x' && constraint.axis !== 'y') errors.push(`${constraintPath}.axis is invalid`);
+      finiteInRange(constraint.value, `${constraintPath}.value`, -100000000, 100000000, errors);
+      if (constraint.strength !== 'soft' && constraint.strength !== 'hard') errors.push(`${constraintPath}.strength is invalid`);
+    });
+  }
 }
 
 function validateEndpoint(value: unknown, path: string, nodeIds: Set<string>, errors: string[]): void {
