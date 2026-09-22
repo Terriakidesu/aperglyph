@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, NODE_CLEARANCE, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -106,6 +106,25 @@ describe('connector routing', () => {
     const previous = edgeRoute(edge, source, target, [source, target]);
     const next = edgeRoute(edge, source, target, [source, target], { previousRoute: previous });
     expect(next).toEqual(previous);
+  });
+
+  it('honors hard route constraints and simple routing mode', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 });
+    const target = createNode('rectangle', { x: 300, y: 180 });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, {
+      type: 'orthogonal',
+      routing: { mode: 'manual', constraints: [{ axis: 'y', value: 140, strength: 'hard' }] },
+    });
+    const route = edgeRoute(edge, source, target);
+    expect(route.some((point) => point.y === 140)).toBe(true);
+    const simple = edgeRoute({ ...edge, routing: { mode: 'simple' }, }, source, target);
+    expect(simple.length).toBeLessThanOrEqual(5);
+  });
+
+  it('normalizes duplicate and collinear points and rounds orthogonal corners', () => {
+    expect(normalizeRoute([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 20 }])).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 20 }]);
+    expect(MIN_SEGMENT_LENGTH).toBe(12);
+    expect(pointsToPath([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], [], 8)).toContain('Q 100 0');
   });
 
   it('routes around an intervening node instead of crossing its bounds', () => {

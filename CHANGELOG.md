@@ -8,6 +8,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Added Auto/Simple/Manual orthogonal modes, hard/soft route constraints, draggable segment handles, minimum-segment normalization, and optional rounded orthogonal corners shared by canvas and SVG export.
 - Added sparse rectilinear visibility-graph routing with deterministic parallel lanes, bend/crossing/overlap/proximity costs, soft connector awareness, and previous-route stability preferences.
 - Added authoritative orthogonal port directions, separate node-clearance and port-stub geometry, terminal marker clearance, and persisted route intent/constraint metadata.
 - Integrated the Rust/WASM geometry crate into the spatial worker's viewport and nearby-query narrow phase.

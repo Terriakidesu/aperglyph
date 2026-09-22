@@ -9,10 +9,10 @@ import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
-import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, Size, Viewport } from '../core/types';
+import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, RouteConstraint, Size, Viewport } from '../core/types';
 import { connectionOffset, nearestConnectionPort, nodeCenter, nodeConnectionPoint } from '../core/geometry';
 import type { ConnectionPort } from '../core/geometry';
 import { pluginManager } from '../plugins';
@@ -30,7 +30,7 @@ interface ContextMenuState { x: number; y: number; target: { kind: 'canvas' | 'n
 interface TextEditState { kind: 'node' | 'edge'; id: string; value: string }
 
 interface DragSession {
-  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'resize' | 'endpoint' | 'connector' | 'label';
+  mode: 'drag' | 'pan' | 'marquee' | 'waypoint' | 'segment' | 'resize' | 'endpoint' | 'connector' | 'label';
   pointerId: number;
   startWorld: Point;
   startClient: Point;
@@ -40,6 +40,9 @@ interface DragSession {
   initialViewport?: Viewport;
   edgeId?: string;
   waypointIndex?: number;
+  segmentIndex?: number;
+  segmentAxis?: 'x' | 'y';
+  initialSegmentValue?: number;
   nodeId?: string;
   resizeHandle?: ResizeHandle;
   initialNode?: { position: Point; size: Size };
@@ -54,6 +57,20 @@ interface EndpointPreview {
   endpoint: 'source' | 'target';
   anchor: Endpoint;
   point: Point;
+}
+
+interface SegmentPreview {
+  edgeId: string;
+  segmentIndex: number;
+  axis: 'x' | 'y';
+  value: number;
+}
+
+function edgeWithSegmentConstraint(edge: DiagramEdge, axis: 'x' | 'y', value: number, previousValue?: number): DiagramEdge {
+  const routing = edge.routing ?? { mode: orthogonalRoutingMode(edge) };
+  const constraints = (routing.constraints ?? []).filter((constraint) => !(constraint.axis === axis && (Math.abs(constraint.value - value) < 2 || (previousValue !== undefined && Math.abs(constraint.value - previousValue) < 2))));
+  const nextConstraint: RouteConstraint = { axis, value, strength: 'hard' };
+  return { ...edge, routing: { ...routing, mode: 'manual', constraints: [...constraints, nextConstraint] } };
 }
 
 interface ConnectorDragPreview {
@@ -296,6 +313,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [waypointPreview, setWaypointPreview] = useState<{ edgeId: string; index: number; point: Point } | null>(null);
+  const [segmentPreview, setSegmentPreview] = useState<SegmentPreview | null>(null);
   const [labelPreview, setLabelPreview] = useState<{ edgeId: string; point: Point } | null>(null);
   const [endpointPreview, setEndpointPreview] = useState<EndpointPreview | null>(null);
   const endpointPreviewRef = useRef<EndpointPreview | null>(null);
@@ -436,6 +454,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setQuickCreateSearch('');
     setEndpointPreview(null);
     setWaypointPreview(null);
+    setSegmentPreview(null);
     setLabelPreview(null);
     setResizePreview(null);
     setGuidePreview(null);
@@ -1081,6 +1100,29 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     svgRef.current?.setPointerCapture(event.pointerId);
   };
 
+  const beginSegmentInteraction = (event: ReactPointerEvent<SVGLineElement>, edge: DiagramEdge, index: number, start: Point, end: Point) => {
+    if (activeTool !== 'select' || spacePressed || event.button === 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dismissCanvasHint();
+    setContextMenu(null);
+    setSelection([edge.id], edge.id);
+    const axis = Math.abs(end.x - start.x) > Math.abs(end.y - start.y) ? 'y' : 'x';
+    const point = worldPoint(event);
+    dragRef.current = {
+      mode: 'segment',
+      pointerId: event.pointerId,
+      startWorld: point,
+      startClient: screenPoint(event),
+      edgeId: edge.id,
+      segmentIndex: index,
+      segmentAxis: axis,
+      initialSegmentValue: axis === 'x' ? start.x : start.y,
+    };
+    setSegmentPreview({ edgeId: edge.id, segmentIndex: index, axis, value: axis === 'x' ? point.x : point.y });
+    svgRef.current?.setPointerCapture(event.pointerId);
+  };
+
   const beginEndpointInteraction = (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => {
     if (activeTool !== 'select' || spacePressed || event.button === 1) return;
     event.preventDefault();
@@ -1197,11 +1239,18 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
        setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey, session.resizeMinimum) });
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
-       const gridSize = page?.settings.gridSize ?? 16;
-       const nextPoint = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
+      const gridSize = page?.settings.gridSize ?? 16;
+      const nextPoint = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
         ? { x: Math.round(point.x / gridSize) * gridSize, y: Math.round(point.y / gridSize) * gridSize }
         : point;
       setWaypointPreview({ edgeId: session.edgeId, index: session.waypointIndex, point: nextPoint });
+    } else if (session.mode === 'segment' && session.edgeId && session.segmentIndex !== undefined && session.segmentAxis) {
+      const gridSize = page?.settings.gridSize ?? 16;
+      const rawValue = session.segmentAxis === 'x' ? point.x : point.y;
+      const value = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
+        ? Math.round(rawValue / gridSize) * gridSize
+        : rawValue;
+      setSegmentPreview({ edgeId: session.edgeId, segmentIndex: session.segmentIndex, axis: session.segmentAxis, value });
     } else if (session.mode === 'drag' && session.initialPositions) {
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
       const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
@@ -1275,6 +1324,12 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         updateEdge(session.edgeId, { data: { labelPosition: preview.point } }, 'Move connector label');
       }
       setLabelPreview(null);
+    } else if (session.mode === 'segment' && session.edgeId && session.segmentAxis && segmentPreview?.edgeId === session.edgeId && segmentPreview.axis === session.segmentAxis) {
+      const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
+      if (edge) {
+        updateEdge(edge.id, { routing: edgeWithSegmentConstraint(edge, session.segmentAxis, segmentPreview.value, session.initialSegmentValue).routing }, 'Move connector segment');
+      }
+      setSegmentPreview(null);
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined && waypointPreview?.edgeId === session.edgeId && waypointPreview.index === session.waypointIndex) {
       const edge = page?.edges.find((candidate) => candidate.id === session.edgeId);
       if (edge) {
@@ -1378,9 +1433,12 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
       const parallelOffset = parallelEdgeOffset(edge, page?.edges ?? renderedEdges);
       const routedEdge = parallelOffset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset } };
+      const previewEdge = segmentPreview?.edgeId === edge.id
+        ? edgeWithSegmentConstraint(routedEdge, segmentPreview.axis, segmentPreview.value)
+        : routedEdge;
       routes.push({
         id: edge.id,
-        points: edgeRoute(routedEdge, source, target, [...nodeMap.values()], {
+        points: edgeRoute(previewEdge, source, target, [...nodeMap.values()], {
           previousRoute: routeCacheRef.current.get(edge.id),
           otherRoutes: routes.map((route) => route.points),
           lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, page?.edges ?? renderedEdges) : undefined,
@@ -1388,7 +1446,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       });
     });
     return routes;
-  }, [nodeMap, page?.edges, renderedEdges]);
+  }, [nodeMap, page?.edges, renderedEdges, segmentPreview]);
   useEffect(() => {
     const currentIds = new Set(routeEntries.map((entry) => entry.id));
     routeEntries.forEach((entry) => routeCacheRef.current.set(entry.id, entry.points));
@@ -1488,7 +1546,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
             : previewEdge.waypoints;
           const preview = waypointPreview?.edgeId === edge.id ? { ...previewEdge, waypoints: previewWaypoints } : previewEdge;
           const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
-            return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} />;
+             return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} onSegmentPointerDown={beginSegmentInteraction} />;
         })}</g>
           <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={view.showPorts || activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
          {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
@@ -1521,7 +1579,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
    </div>;
 }
 
-function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps, background, selected, labelPointOverride, onPointerDown, onDoubleClick, onLabelPointerDown, onHover, onWaypointPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; jumps: RouteJump[]; background: string; selected: boolean; labelPointOverride?: Point; onPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, edge: DiagramEdge) => void; onLabelPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge, point: Point) => void; onHover: (edgeId: string | null) => void; onWaypointPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => void }) {
+function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps, background, selected, labelPointOverride, onPointerDown, onDoubleClick, onLabelPointerDown, onHover, onWaypointPointerDown, onSegmentPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; jumps: RouteJump[]; background: string; selected: boolean; labelPointOverride?: Point; onPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge) => void; onDoubleClick: (event: ReactMouseEvent<SVGGElement>, edge: DiagramEdge) => void; onLabelPointerDown: (event: ReactPointerEvent<SVGGElement>, edge: DiagramEdge, point: Point) => void; onHover: (edgeId: string | null) => void; onWaypointPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, index: number, point: Point) => void; onSegmentPointerDown: (event: ReactPointerEvent<SVGLineElement>, edge: DiagramEdge, index: number, start: Point, end: Point) => void }) {
   const route = providedRoute ?? edgeRoute(edge, source, target, obstacles);
   if (route.length < 2) return null;
   const start = route[0];
@@ -1535,20 +1593,28 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
   const jumpStyle = edge.style.jumpStyle ?? 'arc';
   const renderedJumps = jumpStyle === 'arc' ? jumps : [];
    const routing = edgeRouting(edge);
-   const path = routing === 'curved' && route.length <= 2 ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps);
+    const path = routing === 'curved' && route.length <= 2 ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps, routing === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0);
    const masks = routing === 'orthogonal' && jumpStyle !== 'none' ? jumpMaskPaths(route, jumps) : [];
-   const waypointHandles = selected && routing === 'orthogonal'
+    const waypointHandles = selected && routing === 'orthogonal'
       ? edge.waypoints.length > 0
         ? edge.waypoints.map((point, index) => <circle key={`waypoint-${index}`} className="edge-waypoint" data-waypoint-index={index} cx={point.x} cy={point.y} r="5" onPointerDown={(event) => onWaypointPointerDown(event, edge, index, point)} />)
       : route.slice(1, -1).map((point, index) => <circle key={`auto-waypoint-${point.x}-${point.y}-${index}`} className="edge-waypoint auto" cx={point.x} cy={point.y} r="5" onPointerDown={(event) => onWaypointPointerDown(event, edge, index, point)} />)
-    : null;
+     : null;
+   const segmentHandles = selected && routing === 'orthogonal'
+     ? <g className="edge-segment-handles">{route.slice(0, -1).map((point, index) => {
+       const endPoint = route[index + 1];
+       if (distanceBetween(point, endPoint) < 0.001) return null;
+       return <line key={`segment-${index}`} className="edge-segment-handle" data-segment-index={index} x1={point.x} y1={point.y} x2={endPoint.x} y2={endPoint.y} stroke="transparent" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} style={{ cursor: Math.abs(endPoint.x - point.x) > Math.abs(endPoint.y - point.y) ? 'ns-resize' : 'ew-resize' }} pointerEvents="stroke" onPointerDown={(event) => onSegmentPointerDown(event, edge, index, point, endPoint)} />;
+     })}</g>
+     : null;
   return <g className={`canvas-edge ${selected ? 'selected' : ''}`} data-edge-id={edge.id} onPointerEnter={() => onHover(edge.id)} onPointerLeave={() => onHover(null)} onPointerDown={(event) => onPointerDown(event, edge)} onDoubleClick={(event) => onDoubleClick(event, edge)}>
     <path className="edge-shadow" d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" pointerEvents="none" />
     {selected && <path className="edge-selection" d={path} fill="none" stroke="#a28fff" strokeWidth={edge.style.strokeWidth + 5} opacity="0.22" pointerEvents="none" />}
     {masks.map((mask, index) => <path key={`jump-mask-${index}`} d={mask} fill="none" stroke={background} strokeWidth={edge.style.strokeWidth + 4} strokeLinecap="round" pointerEvents="none" />)}
      <path className="edge-visible" d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} opacity={edge.style.opacity ?? 1} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
     <path className="edge-hit-area" d={path} fill="none" stroke="#ffffff" strokeOpacity="0" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} pointerEvents="stroke" />
-    {waypointHandles}
+     {segmentHandles}
+     {waypointHandles}
       {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="all" onPointerDown={(event) => onLabelPointerDown(event, edge, labelPoint)}><rect x={-Math.max(28, label.length * 3.5 + 9)} y={-12} width={Math.max(56, label.length * 7 + 18)} height={22} rx={11} fill={typeof edge.data.labelBackground === 'string' ? edge.data.labelBackground : background} stroke={selected ? '#7968c5' : '#3a4258'} opacity={edge.style.opacity ?? 1} /><text className="edge-label" textAnchor="middle" y="4" style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{label}</text></g>}
   </g>;
 }

@@ -250,7 +250,7 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
     const jumps = routeJumps.get(edge.id) ?? [];
     const renderedJumps = edge.style.jumpStyle === 'arc' || edge.style.jumpStyle === undefined ? jumps : [];
      const routing = edgeRouting(edge);
-     const path = routing === 'curved' ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps);
+      const path = routing === 'curved' ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps, routing === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0);
      const masks = routing === 'orthogonal' && edge.style.jumpStyle !== 'none'
       ? jumpMaskPaths(route, jumps).map((mask) => `<path d="${mask}" fill="none" stroke="${escapeXml(exportBackground)}" stroke-width="${edge.style.strokeWidth + 4}" stroke-linecap="round"/>`).join('')
       : '';

@@ -163,6 +163,9 @@ button:disabled { cursor: default; opacity: .35; }
 .edge-label-group:active { cursor: grabbing; }
 .edge-hit-area { cursor: pointer; }
 .edge-waypoint { fill: #b4a6ff; stroke: #171229; stroke-width: 1.5; }
+.edge-segment-handle { cursor: ns-resize; opacity: 0; }
+.edge-segment-handle[data-segment-index] { vector-effect: non-scaling-stroke; }
+.edge-segment-handle:hover { opacity: .18; stroke: #b4a6ff; }
 .edge-endpoint-layer { pointer-events: none; }
 .edge-endpoint-handle { pointer-events: all; fill: #f1efff; stroke: #6657b4; stroke-width: 2; cursor: crosshair; }
 .edge-endpoint-handle:hover { fill: #fff; stroke: #a896ff; stroke-width: 2.5; }

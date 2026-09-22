@@ -876,9 +876,10 @@ export class ResetEdgeCommand implements DocumentCommand {
       page.edges = page.edges.map((edge) => edge.id !== this.edgeId ? edge : {
         ...edge,
         type: relationship || this.diagramType === 'dfd' ? 'orthogonal' : 'straight',
-        source: { ...edge.source, port: undefined, anchorId: undefined, offset: undefined },
-        target: { ...edge.target, port: undefined, anchorId: undefined, offset: undefined },
-        waypoints: [],
+         source: { ...edge.source, port: undefined, anchorId: undefined, offset: undefined },
+         target: { ...edge.target, port: undefined, anchorId: undefined, offset: undefined },
+         waypoints: [],
+         routing: { mode: 'auto' },
         style: {
           ...edge.style,
           dash: 'solid',

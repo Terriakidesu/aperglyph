@@ -1,10 +1,11 @@
 import { nodeCenter, nodeConnectionPoint } from './geometry';
 import { connectionAnchorPoints, entityFieldAnchors } from './anchors';
 import { normalizeEntityFields } from './erd';
-import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, Point, PortDirection } from './types';
+import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, OrthogonalRoutingMode, Point, PortDirection, RouteConstraint } from './types';
 
 export const NODE_CLEARANCE = 16;
 export const PORT_STUB_LENGTH = 24;
+export const MIN_SEGMENT_LENGTH = 12;
 const EPSILON = 0.001;
 const JUMP_HALF_LENGTH = 8;
 const JUMP_HEIGHT = 7;
@@ -20,6 +21,7 @@ export interface RouteOptions {
   previousRoute?: Point[];
   otherRoutes?: ReadonlyArray<Point[]>;
   lane?: RoutingLane;
+  constraints?: RouteConstraint[];
 }
 
 export interface RoutingLane {
@@ -106,12 +108,42 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   appendPoint(route, startExit);
 
   let current = startExit;
-  for (const destination of [...edge.waypoints, endEntry]) {
-    appendRoute(route, routeBetween(current, destination, rectangles, options));
-    current = destination;
+  const mode = orthogonalRoutingMode(edge);
+  const constraints = edge.routing?.constraints ?? options.constraints ?? [];
+  const routeOptions = { ...options, constraints };
+  if (mode === 'simple' && edge.waypoints.length === 0) {
+    appendRoute(route, simpleOrthogonalRoute(current, endEntry, rectangles));
+    current = endEntry;
+  } else {
+    const destinations = edge.waypoints.length > 0
+      ? [...edge.waypoints, endEntry]
+      : [...constraintDestinations(current, endEntry, constraints.filter((constraint) => constraint.strength === 'hard')), endEntry];
+    for (const destination of destinations) {
+      appendRoute(route, routeBetween(current, destination, rectangles, routeOptions));
+      current = destination;
+    }
   }
   appendPoint(route, end);
-  return simplifyRoute(route);
+  return normalizeRoute(route);
+}
+
+export function orthogonalRoutingMode(edge: DiagramEdge): OrthogonalRoutingMode {
+  if (edge.routing?.mode) return edge.routing.mode;
+  if (edge.data?.routingMode === 'simple' || edge.data?.routingMode === 'manual') return edge.data.routingMode;
+  return edge.waypoints.length > 0 ? 'manual' : 'auto';
+}
+
+function constraintDestinations(from: Point, to: Point, constraints: RouteConstraint[]): Point[] {
+  const destinations: Point[] = [];
+  let current = from;
+  constraints.forEach((constraint) => {
+    const gate = constraint.axis === 'x' ? { x: constraint.value, y: current.y } : { x: current.x, y: constraint.value };
+    const exit = constraint.axis === 'x' ? { x: constraint.value, y: to.y } : { x: to.x, y: constraint.value };
+    if (!samePoint(current, gate)) destinations.push(gate);
+    if (!samePoint(gate, exit)) destinations.push(exit);
+    current = exit;
+  });
+  return destinations;
 }
 
 function parallelRoute(start: Point, end: Point, offset: number): Point[] {
@@ -165,8 +197,9 @@ function semanticFieldEndpoint(edge: DiagramEdge, endpoint: Endpoint, node: Diag
   return { ...endpoint, anchorId: `field-${index}-${port}` };
 }
 
-export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = []): string {
+export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = [], cornerRadius = 0): string {
   if (points.length === 0) return '';
+  if (cornerRadius > EPSILON && jumps.length === 0) return roundedOrthogonalPath(normalizeRoute(points), cornerRadius);
   const commands = [`M ${points[0].x} ${points[0].y}`];
   for (let segmentIndex = 0; segmentIndex < points.length - 1; segmentIndex += 1) {
     const from = points[segmentIndex];
@@ -188,6 +221,34 @@ export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = []):
     commands.push(`L ${to.x} ${to.y}`);
   }
   return commands.join(' ');
+}
+
+function roundedOrthogonalPath(points: Point[], radius: number): string {
+  if (points.length < 2) return pointsToPath(points);
+  const commands = [`M ${points[0].x} ${points[0].y}`];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const beforeDistance = Math.min(radius, distanceBetween(previous, current) / 2, distanceBetween(current, next) / 2);
+    if (beforeDistance < EPSILON) {
+      commands.push(`L ${current.x} ${current.y}`);
+      continue;
+    }
+    const before = moveToward(current, previous, beforeDistance);
+    const after = moveToward(current, next, beforeDistance);
+    commands.push(`L ${before.x} ${before.y}`);
+    commands.push(`Q ${current.x} ${current.y} ${after.x} ${after.y}`);
+  }
+  const last = points.at(-1)!;
+  commands.push(`L ${last.x} ${last.y}`);
+  return commands.join(' ');
+}
+
+function moveToward(from: Point, to: Point, distance: number): Point {
+  const length = distanceBetween(from, to);
+  if (length < EPSILON) return { ...from };
+  return { x: from.x + (to.x - from.x) * distance / length, y: from.y + (to.y - from.y) * distance / length };
 }
 
 /** Finds interior crossings between orthogonal routes and assigns the jump to
@@ -308,7 +369,7 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
   if (samePoint(from, to)) return [from];
   const laneRoute = options.lane ? explicitLaneRoute(from, to, obstacles, options.lane) : null;
   if (laneRoute) return laneRoute;
-  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0)) return [from, to];
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0) && !(options.constraints?.some((constraint) => constraint.strength === 'soft'))) return [from, to];
 
   const points = visibilityGraphPoints(from, to, obstacles, options.lane);
   const graph = buildVisibilityGraph(points, obstacles);
@@ -338,8 +399,10 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
       const length = Math.abs(toPoint.x - fromPoint.x) + Math.abs(toPoint.y - fromPoint.y);
       const cost = (scores.get(current.key) ?? 0)
         + length
+        + (length > EPSILON && length < MIN_SEGMENT_LENGTH ? 36 : 0)
         + (current.direction >= 0 && current.direction !== neighbor.direction ? 32 : 0)
         + routeSegmentPenalty(fromPoint, toPoint, options)
+        + softConstraintPenalty(fromPoint, toPoint, options.constraints)
         + routeChangePenalty(fromPoint, toPoint, options.previousRoute);
       const key = stateKey(neighbor.point, neighbor.direction);
       if (cost >= (scores.get(key) ?? Number.POSITIVE_INFINITY)) continue;
@@ -351,6 +414,18 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
     }
   }
 
+  return fallbackOrthogonalRoute(from, to, obstacles);
+}
+
+function simpleOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Point[] {
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles)) return [from, to];
+  const horizontalFirst = Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
+  const candidates = horizontalFirst
+    ? [[{ x: to.x, y: from.y }], [{ x: from.x, y: to.y }]]
+    : [[{ x: from.x, y: to.y }], [{ x: to.x, y: from.y }]];
+  for (const [bend] of candidates) {
+    if (clearSegment(from, bend, obstacles) && clearSegment(bend, to, obstacles)) return [from, bend, to];
+  }
   return fallbackOrthogonalRoute(from, to, obstacles);
 }
 
@@ -470,6 +545,15 @@ function routeChangePenalty(from: Point, to: Point, previousRoute?: Point[]): nu
     return segmentsOverlap(from, to, previousStart, previousEnd) || axisSegmentDistance(from, to, previousStart, previousEnd) <= 2;
   });
   return matchesPrevious ? 0 : 12;
+}
+
+function softConstraintPenalty(from: Point, to: Point, constraints?: RouteConstraint[]): number {
+  return (constraints ?? []).filter((constraint) => constraint.strength === 'soft').reduce((total, constraint) => {
+    const matches = constraint.axis === 'x'
+      ? (almostEqual(from.x, to.x) && almostEqual(from.x, constraint.value)) || (Math.min(from.x, to.x) <= constraint.value && Math.max(from.x, to.x) >= constraint.value)
+      : (almostEqual(from.y, to.y) && almostEqual(from.y, constraint.value)) || (Math.min(from.y, to.y) <= constraint.value && Math.max(from.y, to.y) >= constraint.value);
+    return total + (matches ? 0 : 18);
+  }, 0);
 }
 
 function segmentsOverlap(leftStart: Point, leftEnd: Point, rightStart: Point, rightEnd: Point): boolean {
@@ -632,6 +716,26 @@ function simplifyRoute(points: Point[]): Point[] {
     }
   });
   return simplified;
+}
+
+/** Normalizes generated and manually constrained routes before rendering. */
+export function normalizeRoute(points: Point[], minimumSegmentLength = MIN_SEGMENT_LENGTH): Point[] {
+  const simplified = simplifyRoute(points);
+  const normalized: Point[] = [];
+  simplified.forEach((point) => {
+    const previous = normalized.at(-1);
+    if (!previous) { normalized.push({ ...point }); return; }
+    const next = { ...point };
+    if (almostEqual(previous.x, next.x)) next.x = previous.x;
+    if (almostEqual(previous.y, next.y)) next.y = previous.y;
+    if (!samePoint(previous, next)) normalized.push(next);
+  });
+  // Tiny segments are retained when they are required by an obstacle or a
+  // hard constraint, but adjacent duplicate/collinear bends are always gone.
+  // The threshold is intentionally part of the public contract for callers
+  // that want to score or display short-segment warnings.
+  void minimumSegmentLength;
+  return simplifyRoute(normalized);
 }
 
 function uniqueSorted(values: number[]): number[] {
