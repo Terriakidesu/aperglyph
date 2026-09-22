@@ -496,6 +496,17 @@ test.describe('diagram editing workflow', () => {
     await expect(node.locator('.node-label')).toHaveText('Multiple words');
   });
 
+  test('preserves an explicitly sized shape when editing a shorter label', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Diamond onto the canvas').click();
+    const node = page.locator('[data-node-id]').first();
+    await node.click();
+    const height = page.getByRole('spinbutton', { name: 'Node height' });
+    const initialHeight = await height.inputValue();
+    await page.getByLabel('Label').fill('edited');
+    await expect(height).toHaveValue(initialHeight);
+  });
+
   test('aligns the inline editor with an ERD title', async ({ page }) => {
     await page.getByRole('button', { name: 'Entity relationship Model your data system 3 entities · 2 relations' }).click();
     const node = page.locator('[data-node-id]').first();

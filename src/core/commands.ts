@@ -712,14 +712,15 @@ function applyNodePatch(node: DiagramNode, changes: NodePatch): DiagramNode {
     data: changes.data ? { ...node.data, ...changes.data } : node.data,
   };
   const widthChanged = changes.size?.width !== undefined && changes.size.width !== node.size.width;
+  const heightChanged = changes.size?.height !== undefined && changes.size.height !== node.size.height;
   const textChanged = changes.data?.label !== undefined
     || changes.style?.textWrap !== undefined
     || changes.style?.autoHeight !== undefined
     || changes.style?.fontSize !== undefined
-    || changes.style?.fontWeight !== undefined
-    || widthChanged;
-  if (textChanged && next.type !== 'entity' && next.style.textWrap && next.style.autoHeight) {
-    next.size = { ...next.size, height: wrappedNodeHeight(next) };
+    || changes.style?.fontWeight !== undefined;
+  if (textChanged && !heightChanged && next.type !== 'entity' && next.style.textWrap && next.style.autoHeight) {
+    const requiredHeight = wrappedNodeHeight(next);
+    next.size = { ...next.size, height: changes.data?.label !== undefined ? Math.max(node.size.height, requiredHeight) : requiredHeight };
   }
   if (next.type === 'entity') {
     const minimum = entityMinimumSize(next.data.fields, next.data.entityVariant, next.data.columnHeaders === true);
