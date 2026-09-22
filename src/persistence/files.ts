@@ -227,6 +227,7 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
         points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
           lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
         }),
+        crossingPriority: edge.routing?.crossingPriority ?? 0,
       };
     });
   const routeJumps = calculateRouteJumps(routeEntries);

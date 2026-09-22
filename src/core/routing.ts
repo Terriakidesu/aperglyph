@@ -88,7 +88,7 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   const start = resolveEndpointPoint(sourceEndpoint, source, targetEndpoint.point ?? (target ? nodeCenter(target) : undefined));
   const end = resolveEndpointPoint(targetEndpoint, target, sourceEndpoint.point ?? (source ? nodeCenter(source) : undefined));
   if (!start || !end) return [];
-  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, sourceEndpoint.port);
+  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, sourceEndpoint.port, obstacles);
   const routing = edgeRouting(edge);
   if (routing !== 'orthogonal') return routing === 'straight' && Number.isFinite(edge.data?.parallelOffset) && Number(edge.data?.parallelOffset) !== 0
     ? parallelRoute(start, end, Number(edge.data?.parallelOffset))
@@ -153,19 +153,48 @@ function parallelRoute(start: Point, end: Point, offset: number): Point[] {
   return [start, { x: start.x + shift.x, y: start.y + shift.y }, { x: end.x + shift.x, y: end.y + shift.y }, end];
 }
 
-function selfLoopRoute(node: DiagramNode, start: Point, end: Point, port?: string): Point[] {
-  const side = port === 'left' || port === 'top' || port === 'bottom' || port === 'right' ? port : 'right';
+function selfLoopRoute(node: DiagramNode, start: Point, end: Point, port?: string, obstacles: DiagramNode[] = []): Point[] {
+  const explicitSide = port === 'left' || port === 'top' || port === 'bottom' || port === 'right' ? port : undefined;
+  const candidates: Array<'left' | 'top' | 'bottom' | 'right'> = explicitSide ? [explicitSide] : ['right', 'left', 'bottom', 'top'];
+  const sides = candidates.sort((left, right) => sideClearance(node, right, obstacles) - sideClearance(node, left, obstacles));
+  const side = sides.find((candidate) => selfLoopIsClear(buildSelfLoop(node, start, end, candidate), node, obstacles)) ?? sides[0];
+  return buildSelfLoop(node, start, end, side);
+}
+
+function buildSelfLoop(node: DiagramNode, start: Point, end: Point, side: 'left' | 'top' | 'bottom' | 'right'): Point[] {
   const gap = Math.max(44, Math.max(node.size.width, node.size.height) * 0.35);
   if (side === 'left' || side === 'right') {
     const direction = side === 'right' ? 1 : -1;
     const outer = (side === 'right' ? node.position.x + node.size.width : node.position.x) + direction * gap;
     const far = outer + direction * gap * 0.55;
-    return simplifyRoute([start, { x: outer, y: start.y }, { x: far, y: (start.y + end.y) / 2 }, { x: outer, y: end.y }, end]);
+    const span = Math.max(28, node.size.height * 0.45);
+    const top = Math.min(start.y, end.y) - span;
+    const bottom = Math.max(start.y, end.y) + span;
+    return simplifyRoute([start, { x: outer, y: start.y }, { x: outer, y: top }, { x: far, y: top }, { x: far, y: bottom }, { x: outer, y: bottom }, { x: outer, y: end.y }, end]);
   }
   const direction = side === 'bottom' ? 1 : -1;
   const outer = (side === 'bottom' ? node.position.y + node.size.height : node.position.y) + direction * gap;
   const far = outer + direction * gap * 0.55;
-  return simplifyRoute([start, { x: start.x, y: outer }, { x: (start.x + end.x) / 2, y: far }, { x: end.x, y: outer }, end]);
+  const span = Math.max(28, node.size.width * 0.45);
+  const left = Math.min(start.x, end.x) - span;
+  const right = Math.max(start.x, end.x) + span;
+  return simplifyRoute([start, { x: start.x, y: outer }, { x: left, y: outer }, { x: left, y: far }, { x: right, y: far }, { x: right, y: outer }, { x: end.x, y: outer }, end]);
+}
+
+function sideClearance(node: DiagramNode, side: 'left' | 'top' | 'bottom' | 'right', obstacles: DiagramNode[]): number {
+  const right = node.position.x + node.size.width;
+  const bottom = node.position.y + node.size.height;
+  const relevant = obstacles.filter((candidate) => candidate.id !== node.id).map((candidate) => inflate(candidate, NODE_CLEARANCE));
+  if (side === 'right') return Math.min(...relevant.filter((rect) => rect.bottom > node.position.y && rect.top < bottom && rect.left >= right).map((rect) => rect.left - right), 100000);
+  if (side === 'left') return Math.min(...relevant.filter((rect) => rect.bottom > node.position.y && rect.top < bottom && rect.right <= node.position.x).map((rect) => node.position.x - rect.right), 100000);
+  if (side === 'bottom') return Math.min(...relevant.filter((rect) => rect.right > node.position.x && rect.left < right && rect.top >= bottom).map((rect) => rect.top - bottom), 100000);
+  return Math.min(...relevant.filter((rect) => rect.right > node.position.x && rect.left < right && rect.bottom <= node.position.y).map((rect) => node.position.y - rect.bottom), 100000);
+}
+
+function selfLoopIsClear(route: Point[], node: DiagramNode, obstacles: DiagramNode[]): boolean {
+  const rectangles = obstacles.filter((candidate) => candidate.id !== node.id).map((candidate) => inflate(candidate, NODE_CLEARANCE));
+  return route.every((point) => !blockedPoint(point, rectangles))
+    && route.slice(0, -1).every((point, index) => clearSegment(point, route[index + 1], rectangles));
 }
 
 /** Resolves an endpoint to its current world-space location. */
@@ -253,7 +282,7 @@ function moveToward(from: Point, to: Point, distance: number): Point {
 
 /** Finds interior crossings between orthogonal routes and assigns the jump to
  * the later route so the wire order stays deterministic. */
-export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: Point[] }>): Map<string, RouteJump[]> {
+export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: Point[]; crossingPriority?: number }>): Map<string, RouteJump[]> {
   const jumps = new Map<string, RouteJump[]>();
   routes.forEach((route) => jumps.set(route.id, []));
   for (let leftIndex = 0; leftIndex < routes.length; leftIndex += 1) {
@@ -264,10 +293,18 @@ export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: 
         for (let rightSegment = 0; rightSegment < right.points.length - 1; rightSegment += 1) {
           const crossing = orthogonalCrossing(left.points[leftSegment], left.points[leftSegment + 1], right.points[rightSegment], right.points[rightSegment + 1]);
           if (!crossing) continue;
-          const routeJumps = jumps.get(right.id) ?? [];
+          const leftWins = (left.crossingPriority ?? 0) > (right.crossingPriority ?? 0)
+            || ((left.crossingPriority ?? 0) === (right.crossingPriority ?? 0) && left.id.localeCompare(right.id) > 0);
+          const jumper = leftWins ? left : right;
+          const jumperSegment = leftWins ? leftSegment : rightSegment;
+          const jumperCrossing = leftWins
+            ? orthogonalCrossing(right.points[rightSegment], right.points[rightSegment + 1], left.points[leftSegment], left.points[leftSegment + 1])
+            : crossing;
+          if (!jumperCrossing) continue;
+          const routeJumps = jumps.get(jumper.id) ?? [];
           if (!routeJumps.some((jump) => distanceBetween(jump.point, crossing.point) < JUMP_HALF_LENGTH * 2)) {
-            routeJumps.push({ segmentIndex: rightSegment, point: crossing.point, orientation: crossing.orientation });
-            jumps.set(right.id, routeJumps);
+            routeJumps.push({ segmentIndex: jumperSegment, point: jumperCrossing.point, orientation: jumperCrossing.orientation });
+            jumps.set(jumper.id, routeJumps);
           }
         }
       }

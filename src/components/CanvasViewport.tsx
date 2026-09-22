@@ -1427,7 +1427,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       ? { nodeId: endpointPreview.anchor.nodeId, point: endpointPreview.point }
       : null;
   const routeEntries = useMemo(() => {
-    const routes: Array<{ id: string; points: Point[] }> = [];
+    const routes: Array<{ id: string; points: Point[]; crossingPriority?: number }> = [];
     renderedEdges.forEach((edge) => {
       const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
       const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
@@ -1443,10 +1443,11 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
           otherRoutes: routes.map((route) => route.points),
           lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, page?.edges ?? renderedEdges) : undefined,
         }),
+        crossingPriority: selectedIds.includes(edge.id) ? 1000000 : edge.routing?.crossingPriority ?? 0,
       });
     });
     return routes;
-  }, [nodeMap, page?.edges, renderedEdges, segmentPreview]);
+  }, [nodeMap, page?.edges, renderedEdges, segmentPreview, selectedIds]);
   useEffect(() => {
     const currentIds = new Set(routeEntries.map((entry) => entry.id));
     routeEntries.forEach((entry) => routeCacheRef.current.set(entry.id, entry.points));

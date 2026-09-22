@@ -156,6 +156,14 @@ describe('connector routing', () => {
     expect(route.some((point) => point.x > 220)).toBe(true);
   });
 
+  it('chooses a free side for an automatic self-loop', () => {
+    const node = createNode('rectangle', { x: 100, y: 100 }, { size: { width: 120, height: 70 } });
+    const blocker = createNode('rectangle', { x: 260, y: 90 }, { size: { width: 100, height: 90 } });
+    const edge = createEdge({ nodeId: node.id }, { nodeId: node.id }, { type: 'orthogonal' });
+    const route = edgeRoute(edge, node, node, [node, blocker]);
+    expect(route.some((point) => point.x < node.position.x)).toBe(true);
+  });
+
   it('keeps free endpoint marker directions outside the connector', () => {
     const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } });
     const route = edgeRoute(edge);
@@ -180,6 +188,16 @@ describe('connector routing', () => {
     expect(jumps.get('vertical')).toEqual([{ segmentIndex: 0, point: { x: 50, y: 50 }, orientation: 'vertical' }]);
     expect(pointsToPath(routes[1].points, jumps.get('vertical'))).toContain('Q 57 50 50 58');
     expect(jumpMaskPaths(routes[1].points, jumps.get('vertical') ?? [])).toEqual(['M 50 42 L 50 58']);
+  });
+
+  it('keeps the higher-priority connector continuous at a crossing', () => {
+    const routes = [
+      { id: 'horizontal', crossingPriority: 10, points: [{ x: 0, y: 50 }, { x: 100, y: 50 }] },
+      { id: 'vertical', crossingPriority: 0, points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] },
+    ];
+    const jumps = calculateRouteJumps(routes);
+    expect(jumps.get('horizontal')).toEqual([{ segmentIndex: 0, point: { x: 50, y: 50 }, orientation: 'horizontal' }]);
+    expect(jumps.get('vertical')).toHaveLength(0);
   });
 });
 

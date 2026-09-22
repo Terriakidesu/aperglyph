@@ -413,6 +413,7 @@ function validateEdgeRouting(value: unknown, path: string, errors: string[]): vo
   if (!isRecord(value)) { errors.push(`${path} must be an object`); return; }
   if (value.mode !== 'auto' && value.mode !== 'simple' && value.mode !== 'manual') errors.push(`${path}.mode is invalid`);
   if (value.lane !== undefined) finiteInRange(value.lane, `${path}.lane`, -1000, 1000, errors);
+  if (value.crossingPriority !== undefined) finiteInRange(value.crossingPriority, `${path}.crossingPriority`, -1000000, 1000000, errors);
   if (value.constraints !== undefined) {
     if (!Array.isArray(value.constraints) || value.constraints.length > MAX_WAYPOINTS_PER_EDGE) errors.push(`${path}.constraints exceeds the maximum size`);
     (Array.isArray(value.constraints) ? value.constraints : []).forEach((constraint, index) => {

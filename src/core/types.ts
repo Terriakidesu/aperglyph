@@ -85,6 +85,7 @@ export interface EdgeRoutingSettings {
   mode: OrthogonalRoutingMode;
   constraints?: RouteConstraint[];
   lane?: number;
+  crossingPriority?: number;
 }
 
 export interface Endpoint {
