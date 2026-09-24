@@ -432,6 +432,7 @@ function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Po
 }
 
 interface CanvasViewportProps {
+  fitOnMount?: boolean;
   onImportFile?: (file: File, point: Point) => void | Promise<void>;
   view?: CanvasViewOptions;
   isolatedGroupId?: string | null;
@@ -450,7 +451,7 @@ interface CanvasViewOptions {
 
 const DEFAULT_CANVAS_VIEW: CanvasViewOptions = { rulers: true, guides: true, minimap: true, showPorts: false, connectionHints: true };
 
-export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isolatedGroupId = null, onEnterGroup, onExitGroup, onCreateTemplate }: CanvasViewportProps) {
+export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAULT_CANVAS_VIEW, isolatedGroupId = null, onEnterGroup, onExitGroup, onCreateTemplate }: CanvasViewportProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const viewportGroupRef = useRef<SVGGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -502,6 +503,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
   const wheelGestureRef = useRef<WheelGesture>({ frame: null, idleTimer: null, camera: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
   const touchPointersRef = useRef(new Map<number, Point>());
   const touchGestureRef = useRef<TouchGesture | null>(null);
+  const previousCanvasSizeRef = useRef<CanvasSize>({ width: 900, height: 700 });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -517,6 +519,15 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
     if (view.connectionHints && !previousHintsPreference.current) setShowCanvasHint(true);
     previousHintsPreference.current = view.connectionHints;
   }, [view.connectionHints]);
+
+  useEffect(() => {
+    const dismissOnShapeDrag = (event: DragEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('.shape-item')) setOnboardingDismissed(true);
+    };
+    globalThis.document?.addEventListener('dragstart', dismissOnShapeDrag);
+    return () => globalThis.document?.removeEventListener('dragstart', dismissOnShapeDrag);
+  }, []);
 
   // Shape definitions are an external, HMR-aware catalog. Subscribing here
   // makes updated anchor resolvers visible without restarting the editor.
@@ -614,15 +625,17 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
     if ((page?.nodes.length ?? 0) + (page?.edges.length ?? 0) > 0) setShowCanvasHint(false);
   }, [page?.edges.length, page?.nodes.length]);
 
-  const fitViewport = useCallback((scope: 'page' | 'selection') => {
+  const fitViewport = useCallback((scope: 'page' | 'selection' | 'content') => {
     if (!page || size.width <= 0 || size.height <= 0) return;
     const selectedNodes = page.nodes.filter((node) => !node.hidden && selectedIds.includes(node.id));
-    const bounds = scope === 'selection' && selectedNodes.length > 0
+    const contentNodes = page.nodes.filter((node) => !node.hidden && !node.container);
+    const fitNodes = scope === 'content' && contentNodes.length > 0 ? contentNodes : selectedNodes;
+    const bounds = (scope === 'selection' && selectedNodes.length > 0) || (scope === 'content' && contentNodes.length > 0)
       ? {
-        x: Math.min(...selectedNodes.map((node) => node.position.x)),
-        y: Math.min(...selectedNodes.map((node) => node.position.y)),
-        width: Math.max(...selectedNodes.map((node) => node.position.x + node.size.width)) - Math.min(...selectedNodes.map((node) => node.position.x)),
-        height: Math.max(...selectedNodes.map((node) => node.position.y + node.size.height)) - Math.min(...selectedNodes.map((node) => node.position.y)),
+        x: Math.min(...fitNodes.map((node) => node.position.x)),
+        y: Math.min(...fitNodes.map((node) => node.position.y)),
+        width: Math.max(...fitNodes.map((node) => node.position.x + node.size.width)) - Math.min(...fitNodes.map((node) => node.position.x)),
+        height: Math.max(...fitNodes.map((node) => node.position.y + node.size.height)) - Math.min(...fitNodes.map((node) => node.position.y)),
       }
       : { x: -page.settings.width / 2, y: -page.settings.height / 2, width: page.settings.width, height: page.settings.height };
     const padding = 72;
@@ -631,6 +644,29 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
   }, [page, selectedIds, size.height, size.width, updateViewport]);
 
   useEffect(() => editorEvents.on('viewport:fit', ({ scope }) => fitViewport(scope)), [fitViewport]);
+
+  const initialFitPendingRef = useRef(fitOnMount);
+  useEffect(() => {
+    if (!initialFitPendingRef.current || !page) return;
+    if (page.nodes.length === 0) {
+      initialFitPendingRef.current = false;
+      return;
+    }
+    const measured = stageRef.current?.getBoundingClientRect();
+    if (measured && (Math.abs(measured.width - size.width) > 1 || Math.abs(measured.height - size.height) > 1)) {
+      setSize({ width: Math.max(1, measured.width), height: Math.max(1, measured.height) });
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      initialFitPendingRef.current = false;
+      fitViewport('content');
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fitViewport, page, size.height, size.width]);
+
+  useEffect(() => editorEvents.on('document:opened', ({ document: openedDocument }) => {
+    if ((openedDocument.pages[0]?.nodes.length ?? 0) > 0) requestAnimationFrame(() => editorEvents.emit('viewport:fit', { scope: 'content' }));
+  }), []);
 
   useEffect(() => {
     if (textEdit) {
@@ -682,6 +718,17 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
   }, []);
 
   useLayoutEffect(() => {
+    const previous = previousCanvasSizeRef.current;
+    const sizeDelta = { x: (size.width - previous.width) / 2, y: (size.height - previous.height) / 2 };
+    if (wheelGestureRef.current.camera) {
+      wheelGestureRef.current.camera.x += sizeDelta.x;
+      wheelGestureRef.current.camera.y += sizeDelta.y;
+    }
+    if (touchGestureRef.current?.camera) {
+      touchGestureRef.current.camera.x += sizeDelta.x;
+      touchGestureRef.current.camera.y += sizeDelta.y;
+    }
+    previousCanvasSizeRef.current = size;
     const camera = touchGestureRef.current?.camera ?? wheelGestureRef.current.camera ?? cameraFromViewport(size, viewport);
     viewportGroupRef.current?.setAttribute('transform', cameraTransform(camera));
   }, [size.height, size.width, viewport]);
@@ -715,8 +762,15 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
   const screenPoint = useCallback((event: { clientX: number; clientY: number }) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  }, []);
+    // ResizeObserver reports the SVG's user-space size while the browser may
+    // paint a fractional CSS size. Normalize pointer coordinates into that
+    // same user space so zooming around a pointer remains exact at fractional
+    // panel widths.
+    return {
+      x: (event.clientX - rect.left) * (size.width / Math.max(1, rect.width)),
+      y: (event.clientY - rect.top) * (size.height / Math.max(1, rect.height)),
+    };
+  }, [size.height, size.width]);
 
   const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera?: Viewport) => {
     const screen = screenPoint(event);
@@ -1097,6 +1151,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
     if (!payload && !Array.from(event.dataTransfer.types).includes(SHAPE_DRAG_MIME)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    setOnboardingDismissed(true);
     setShapeDragPreview({ payload: payload ?? { libraryId: 'general', type: 'rectangle', label: 'Drop shape', defaultSize: { width: 180, height: 88 } }, point: worldPoint(event), disableSnapping: event.altKey });
   };
 
@@ -1106,6 +1161,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
       event.preventDefault();
       void onImportFile(file, worldPoint(event));
       setShapeDragPreview(null);
+      globalThis.document?.body.classList.remove('shape-dragging');
       return;
     }
     const payload = parseShapeDrop(event.dataTransfer);
@@ -1125,6 +1181,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
     const owner = containerAtPoint({ x: position.x + shapeSize.width / 2, y: position.y + shapeSize.height / 2 });
     addNode(owner && owner.id !== node.id ? { ...node, containerId: owner.id } : node);
     setShapeDragPreview(null);
+    globalThis.document?.body.classList.remove('shape-dragging');
     setTool('select');
   };
 
@@ -1995,7 +2052,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isola
       };
       return {
         left: anchorScreen.x - (isBoundary ? 0 : width / 2),
-        top: anchorScreen.y - 20,
+        top: anchorScreen.y - (isEntity ? 18 : 20),
         width,
         textAlign: isBoundary ? 'left' as const : 'center' as const,
       };
@@ -2129,7 +2186,8 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
   if (route.length < 2) return null;
   const start = route[0];
   const end = route[route.length - 1];
-  const label = typeof edge.data?.label === 'string' ? edge.data.label : null;
+  const label = edge.data?.relationship === 'foreign-key' ? null : typeof edge.data?.label === 'string' ? edge.data.label : null;
+  const cardinality = edgeCardinality(edge);
   const labelPoint = labelPointOverride ?? labelPointForEdge(edge, route);
   const startDirection = endpointDirection(start, route[1], source);
   const endDirection = endpointDirection(end, route.at(-2) ?? start, target);
@@ -2161,7 +2219,29 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
      {segmentHandles}
      {waypointHandles}
       {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="all" onPointerDown={(event) => onLabelPointerDown(event, edge, labelPoint)}><rect x={-Math.max(28, label.length * 3.5 + 9)} y={-12} width={Math.max(56, label.length * 7 + 18)} height={22} rx={11} fill={typeof edge.data.labelBackground === 'string' ? edge.data.labelBackground : background} stroke={selected ? '#7968c5' : '#3a4258'} opacity={edge.style.opacity ?? 1} /><text className="edge-label" textAnchor="middle" y="4" style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{label}</text></g>}
+      {cardinality && <><EdgeCardinalityLabel point={start} neighbor={route[1]} value={cardinality.start} edge={edge} /><EdgeCardinalityLabel point={end} neighbor={route.at(-2) ?? start} value={cardinality.end} edge={edge} /></>}
   </g>;
+}
+
+function edgeCardinality(edge: DiagramEdge): { start: string; end: string } | null {
+  if (edge.data?.relationship !== 'foreign-key') return null;
+  const value = edge.data.cardinality;
+  if (value && typeof value === 'object') {
+    const candidate = value as { source?: unknown; target?: unknown };
+    if (typeof candidate.source === 'string' && typeof candidate.target === 'string') return { start: candidate.source, end: candidate.target };
+  }
+  const optional = edge.style.startMarker === 'circle' || edge.style.startMarker === 'circle-crowfoot' || edge.style.startMarker === 'circle-bar';
+  return { start: optional ? '0..N' : 'N', end: '1' };
+}
+
+function EdgeCardinalityLabel({ point, neighbor, value, edge }: { point: Point; neighbor: Point; value: string; edge: DiagramEdge }) {
+  const direction = directionBetween(point, neighbor);
+  const horizontal = Math.abs(direction.x) >= Math.abs(direction.y);
+  const position = horizontal
+    ? { x: point.x + direction.x * 22, y: point.y - 10 }
+    : { x: point.x + 11, y: point.y + direction.y * 22 + 4 };
+  const textAnchor = horizontal && direction.x < 0 ? 'end' : 'start';
+  return <text className="edge-cardinality" x={position.x} y={position.y} textAnchor={textAnchor} style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{value}</text>;
 }
 
 function EdgeMarkersView({ edge, source, target, obstacles, route: providedRoute, markerFill }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; markerFill: string }) {

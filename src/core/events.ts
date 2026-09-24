@@ -7,7 +7,7 @@ export interface EditorEventMap {
   'viewport:changed': Viewport;
   'viewport:preview': Viewport | null;
   'pointer:changed': Point | null;
-  'viewport:fit': { scope: 'page' | 'selection' };
+  'viewport:fit': { scope: 'page' | 'selection' | 'content' };
   'interaction:cancel': undefined;
   'text:edit': { kind: 'node' | 'edge'; id: string };
   'ui:shortcuts': undefined;

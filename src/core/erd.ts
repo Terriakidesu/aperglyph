@@ -82,6 +82,26 @@ export function entityMinimumSize(fields: unknown, variant: unknown = 'key-field
 }
 
 /**
+ * Natural width for imported tables.  The editor still lets a user resize an
+ * entity freely, but generated schemas should not inherit a large generic
+ * rectangle just because the source format did not provide geometry.
+ */
+export function entityAutoWidth(fields: unknown, variant: unknown = 'key-field-type', compact = false): number {
+  const normalized = normalizeEntityFields(fields);
+  const columns = columnsForVariant(variant);
+  const keyWidth = columns.includes('key') ? (compact ? 30 : 38) : 0;
+  const nullableWidth = columns.includes('nullable') ? (compact ? 58 : 62) : 0;
+  const longestField = Math.max(1, ...normalized.map((field) => field.name.length));
+  const longestType = Math.max(1, ...normalized.map((field) => field.type.length));
+  const fieldWidth = columns.includes('field') ? Math.max(compact ? 72 : 48, longestField * (compact ? 6.1 : 6.6) + (compact ? 15 : 18)) : 0;
+  const typeWidth = columns.includes('type') ? Math.max(compact ? 64 : 58, Math.min(compact ? 132 : 150, longestType * (compact ? 5.6 : 6) + (compact ? 15 : 18))) : 0;
+  const natural = keyWidth + fieldWidth + typeWidth + nullableWidth;
+  const minimum = compact ? 220 : 120;
+  const maximum = compact ? 400 : Number.POSITIVE_INFINITY;
+  return Math.round(Math.min(maximum, Math.max(minimum, natural)));
+}
+
+/**
  * Keep a manually resized entity table filled instead of leaving unused space
  * below its fixed-height rows. Natural-sized entities retain the established
  * 27px row height; extra height is distributed evenly across their fields.
@@ -97,11 +117,11 @@ export function entityLayoutMetrics(fields: unknown, height: number, columnHeade
   };
 }
 
-export function entityColumns(variant: unknown, width: number): EntityColumn[] {
+export function entityColumns(variant: unknown, width: number, compact = false): EntityColumn[] {
   const ids = columnsForVariant(variant);
-  const keyWidth = ids.includes('key') ? 38 : 0;
-  const typeWidth = ids.includes('type') ? Math.min(82, Math.max(58, width * 0.3)) : 0;
-  const nullableWidth = ids.includes('nullable') ? 62 : 0;
+  const keyWidth = ids.includes('key') ? (compact ? 30 : 38) : 0;
+  const typeWidth = ids.includes('type') ? Math.min(compact ? 132 : 82, Math.max(compact ? 82 : 58, width * (compact ? 0.28 : 0.3))) : 0;
+  const nullableWidth = ids.includes('nullable') ? (compact ? 58 : 62) : 0;
   const fieldWidth = Math.max(48, width - keyWidth - typeWidth - nullableWidth);
   const widths: Record<EntityColumnId, number> = { key: keyWidth, field: fieldWidth, type: typeWidth, nullable: nullableWidth };
   let x = 0;
@@ -265,8 +285,8 @@ export function relationshipForForeignKey(page: DiagramDocument['pages'][number]
     { nodeId: target.id, port: 'left', ...(targetField ? { anchorId: `field-${targetFields.indexOf(targetField)}-left` } : {}), ...(targetField ? { offset: entityFieldPortOffset(targetFields, targetFields.indexOf(targetField), target.data.columnHeaders === true, target.size.height) } : {}) },
     {
       type: 'orthogonal',
-      style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-bar' : 'bar', endMarker: 'bar-crowfoot' },
-      data: { label: field.nullable ? '0..N : 0..1' : '1 : N', relationship: 'foreign-key', sourceFieldId: field.id, targetFieldId: targetField?.id, sourceFieldIds, targetFieldIds },
+      style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
+      data: { cardinality: { source: field.nullable ? '0..N' : 'N', target: '1' }, relationship: 'foreign-key', sourceFieldId: field.id, targetFieldId: targetField?.id, sourceFieldIds, targetFieldIds },
     },
   );
 }

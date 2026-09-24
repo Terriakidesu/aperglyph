@@ -1,5 +1,5 @@
 import { createDocument, createEdge, createNode } from './document';
-import { entityAutoHeight, normalizeEntityFields, normalizeEntityIndexes, type EntityField, type EntityIndex } from './erd';
+import { entityAutoHeight, entityAutoWidth, normalizeEntityFields, normalizeEntityIndexes, type EntityField, type EntityIndex } from './erd';
 import type { DiagramDocument, DiagramNode } from './types';
 
 const MAX_SQL_LENGTH = 10 * 1024 * 1024;
@@ -24,8 +24,9 @@ export function parseErdSql(sql: string, name = 'Imported SQL schema'): DiagramD
     const parsed = parseTableBody(entry.body);
     const node = createNode('entity', { x: (index % 4) * 330 - 420, y: Math.floor(index / 4) * 260 - 180 }, {
       library: 'erd',
-      size: { width: 250, height: entityAutoHeight(parsed.fields, 'key-field-type', false) },
-      data: { label: entry.name, fields: parsed.fields, indexes: parsed.indexes, striped: true, headerFill: '#272147' },
+      size: { width: entityAutoWidth(parsed.fields, 'key-field-type', true), height: entityAutoHeight(parsed.fields, 'key-field-type', false) },
+      style: { fontSize: 10, fontWeight: 500, radius: 4 },
+      data: { label: entry.name, fields: parsed.fields, indexes: parsed.indexes, striped: true, compact: true, columnHeaders: false, headerFill: '#272147' },
     });
     page.nodes.push(node);
     addTableAliases(tables, entry.name, node);
@@ -85,10 +86,10 @@ export function parseErdSql(sql: string, name = 'Imported SQL schema'): DiagramD
       { nodeId: target.id, port: 'left', ...(firstTarget ? { anchorId: `field-${targetFields.indexOf(firstTarget)}-left` } : {}) },
       {
         type: 'orthogonal',
-        style: { startMarker: firstSource?.nullable ? 'circle-bar' : 'bar', endMarker: 'bar-crowfoot' },
+        style: { startMarker: firstSource?.nullable ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
         data: {
-          label: firstSource?.nullable ? '0..N : 0..1' : '1 : N',
           relationship: 'foreign-key',
+          cardinality: { source: firstSource?.nullable ? '0..N' : 'N', target: '1' },
           sourceFieldId: firstSource?.id,
           targetFieldId: firstTarget?.id,
           sourceFieldIds,

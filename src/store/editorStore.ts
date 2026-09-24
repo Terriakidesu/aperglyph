@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   AlignNodesCommand,
+  ApplyImportedPageCommand,
   CommandManager,
   ChangeNodeShapeCommand,
   CreateEdgeCommand,
@@ -45,7 +46,7 @@ import {
 } from '../core/commands';
 import { createDocument, createEdge, createNode, createPage as buildPage, defaultNodeStyle } from '../core/document';
 import { editorEvents } from '../core/events';
-import type { Alignment, DistributionAxis, ZOrderAction } from '../core/commands';
+import type { Alignment, DistributionAxis, ImportedPageMode, ZOrderAction } from '../core/commands';
 import type { DocumentCommand } from '../core/commands';
 import { layoutNodes } from '../core/layout';
 import type { LayoutMode } from '../core/layout';
@@ -125,6 +126,7 @@ interface EditorStore {
   ungroupSelection: () => void;
   autoLayout: (mode?: LayoutMode) => Promise<void>;
   createPage: (name?: string) => void;
+  applyImportedDocument: (document: DiagramDocument, mode: ImportedPageMode) => void;
   renameDocument: (name: string) => void;
   createDfdChildPage: (processId: string) => void;
   deletePage: (pageId?: string) => void;
@@ -649,6 +651,18 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, 'Create page');
       duplicateChain = null;
       set({ activePageId: page.id, selectedIds: [], primarySelectedId: null });
+    },
+    applyImportedDocument: (importedDocument, mode) => {
+      const importedPage = importedDocument.pages[0];
+      if (!importedPage) return;
+      const { document, activePageId } = get();
+      const command = new ApplyImportedPageCommand(activePageId, importedPage, importedDocument.diagramType, mode);
+      const next = manager.execute(command, document);
+      updateDocument(next, command.label);
+      duplicateChain = null;
+      const nextPageId = mode === 'new-page' ? command.pageId : activePageId;
+      set({ activePageId: nextPageId, selectedIds: [], primarySelectedId: null });
+      get().setSelection([...command.nodeIds, ...command.edgeIds], command.edgeIds.at(-1) ?? command.nodeIds.at(-1) ?? null);
     },
     renameDocument: (name) => {
       const trimmed = name.trim();

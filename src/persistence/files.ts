@@ -1,6 +1,8 @@
 import { createDocument, createNode, parseProject, serializeProject } from '../core/document';
+import { importDiagramCode } from '../core/codeImport';
+import type { CodeLanguage } from '../core/diagramIR';
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
-import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
+import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields } from '../core/erd';
 import { nodeCenter, nodeFlipTransform } from '../core/geometry';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
@@ -138,10 +140,29 @@ export function readDiagramFile(file: File): Promise<DiagramDocument> {
   const mimeType = file.type.split(';', 1)[0].trim().toLowerCase();
   if (name.endsWith('.mmd') || name.endsWith('.mermaid')) return file.text().then((text) => parseDiagramText(text, 'mermaid'));
   if (name.endsWith('.puml') || name.endsWith('.plantuml')) return file.text().then((text) => parseDiagramText(text, 'plantuml'));
-  if (name.endsWith('.sql')) return file.text().then((text) => parseErdSql(text, file.name.replace(/\.sql$/i, '') || 'Imported SQL schema'));
+  if (name.endsWith('.sql')) return readCodeDocument(file, 'sql');
+  const codeLanguage = codeLanguageForFile(name);
+  if (codeLanguage) return readCodeDocument(file, codeLanguage);
   if (name.endsWith('.svg') || mimeType === 'image/svg+xml') return file.text().then((text) => createImageDocument(file.name, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sanitizeSvg(text))}`));
   if (mimeType.startsWith('image/') && !mimeType.includes('svg')) return file.arrayBuffer().then((buffer) => createImageDocument(file.name, `data:${mimeType};base64,${bytesToBase64(new Uint8Array(buffer))}`));
   return readProjectFile(file);
+}
+
+/** Import one of the source formats without uploading or executing it remotely. */
+export function readCodeDocument(file: File, language: CodeLanguage): Promise<DiagramDocument> {
+  return file.text().then((text) => {
+    const imported = importDiagramCode(text, language, { name: file.name.replace(/\.[^.]+$/, '') || undefined });
+    if (!imported.document) throw new Error(imported.diagnostics[0]?.message ?? `Unable to parse ${language} source.`);
+    return imported.document;
+  });
+}
+
+function codeLanguageForFile(name: string): CodeLanguage | null {
+  if (name.endsWith('.dot') || name.endsWith('.gv')) return 'dot';
+  if (name.endsWith('.dbml')) return 'dbml';
+  if (name.endsWith('.csv')) return 'csv';
+  if (name.endsWith('.json')) return 'json';
+  return null;
 }
 
 export function sanitizeSvg(value: string): string {
@@ -257,8 +278,12 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
       ? jumpMaskPaths(route, jumps).map((mask) => `<path d="${mask}" fill="none" stroke="${escapeXml(exportBackground)}" stroke-width="${edge.style.strokeWidth + 4}" stroke-linecap="round"/>`).join('')
       : '';
     const edgeStroke = outlineOnly ? '#000000' : edge.style.stroke;
-     const line = `<path d="${path}" fill="none" stroke="${escapeXml(edgeStroke)}" stroke-width="${edge.style.strokeWidth}" opacity="${edge.style.opacity ?? 1}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
-      return `${masks}${line}${svgEndpointMarker(start, startMarkerDirection, edge.style.startMarker, edgeStroke, exportBackground, 'start', edge.style.opacity ?? 1)}${svgEndpointMarker(end, endMarkerDirection, edge.style.endMarker, edgeStroke, exportBackground, 'end', edge.style.opacity ?? 1)}`;
+      const line = `<path d="${path}" fill="none" stroke="${escapeXml(edgeStroke)}" stroke-width="${edge.style.strokeWidth}" opacity="${edge.style.opacity ?? 1}"${edge.style.dash === 'dashed' ? ' stroke-dasharray="8 6"' : edge.style.dash === 'dotted' ? ' stroke-dasharray="2 5"' : ''}/>`;
+      const cardinality = svgEdgeCardinality(edge);
+      const cardinalityMarkup = cardinality
+        ? `${svgCardinalityLabel(start, route[1], cardinality.start, edge, outlineOnly)}${svgCardinalityLabel(end, route.at(-2) ?? start, cardinality.end, edge, outlineOnly)}`
+        : '';
+      return `${masks}${line}${svgEndpointMarker(start, startMarkerDirection, edge.style.startMarker, edgeStroke, exportBackground, 'start', edge.style.opacity ?? 1)}${svgEndpointMarker(end, endMarkerDirection, edge.style.endMarker, edgeStroke, exportBackground, 'end', edge.style.opacity ?? 1)}${cardinalityMarkup}`;
   }).join('');
   const nodeMarkup = nodes.map((node) => renderNode(node, outlineOnly)).join('');
   const viewBox = options.viewBox ?? { x: 0, y: 0, width, height };
@@ -304,6 +329,26 @@ function markerDirection(point: Point, neighbor: Point): Point {
 function directionBetween(from: Point, to: Point): Point {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
   return length > 0.001 ? { x: (to.x - from.x) / length, y: (to.y - from.y) / length } : { x: 1, y: 0 };
+}
+
+function svgEdgeCardinality(edge: DiagramEdge): { start: string; end: string } | null {
+  if (edge.data?.relationship !== 'foreign-key') return null;
+  const value = edge.data.cardinality;
+  if (value && typeof value === 'object') {
+    const candidate = value as { source?: unknown; target?: unknown };
+    if (typeof candidate.source === 'string' && typeof candidate.target === 'string') return { start: candidate.source, end: candidate.target };
+  }
+  const optional = edge.style.startMarker === 'circle' || edge.style.startMarker === 'circle-crowfoot' || edge.style.startMarker === 'circle-bar';
+  return { start: optional ? '0..N' : 'N', end: '1' };
+}
+
+function svgCardinalityLabel(point: Point, neighbor: Point, value: string, edge: DiagramEdge, outlineOnly: boolean): string {
+  const direction = directionBetween(point, neighbor);
+  const horizontal = Math.abs(direction.x) >= Math.abs(direction.y);
+  const x = horizontal ? point.x + direction.x * 22 : point.x + 11;
+  const y = horizontal ? point.y - 10 : point.y + direction.y * 22 + 4;
+  const anchor = horizontal && direction.x < 0 ? 'end' : 'start';
+  return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${escapeXml(outlineOnly ? '#000000' : edge.style.labelColor)}" font-family="monospace" font-size="9" font-weight="600" opacity="${edge.style.opacity ?? 1}">${escapeXml(value)}</text>`;
 }
 
 function directionAngle(direction: Point): number {

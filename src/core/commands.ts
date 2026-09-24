@@ -338,6 +338,69 @@ export class CreatePageCommand implements DocumentCommand {
   }
 }
 
+export type ImportedPageMode = 'replace' | 'insert' | 'new-page';
+
+/**
+ * Applies a compiler-produced page as one undoable document operation. Source
+ * imports must not bypass history: generated objects are ordinary editable
+ * objects, and replacing/inserting them should feel like any other edit.
+ */
+export class ApplyImportedPageCommand implements DocumentCommand {
+  readonly label: string;
+  readonly pageId: string;
+  readonly nodeIds: string[];
+  readonly edgeIds: string[];
+  private readonly importedPage: DiagramPage;
+  private readonly payload: ClipboardPayload | null;
+
+  constructor(
+    private readonly targetPageId: string,
+    page: DiagramPage,
+    private readonly importedType: DiagramDocument['diagramType'],
+    private readonly mode: ImportedPageMode,
+    offset: Point = { x: 48, y: 48 },
+  ) {
+    this.label = mode === 'replace' ? 'Replace page with generated diagram' : mode === 'insert' ? 'Insert generated diagram' : 'Create generated diagram page';
+    if (mode === 'new-page') {
+      this.importedPage = clonePageWithNewIds(page, page.name || 'Imported diagram');
+      this.pageId = this.importedPage.id;
+      this.payload = null;
+    } else if (mode === 'insert') {
+      this.importedPage = structuredClone(page);
+      this.pageId = targetPageId;
+      this.payload = offsetClipboard({ nodes: page.nodes, edges: page.edges }, offset);
+    } else {
+      this.importedPage = structuredClone(page);
+      this.pageId = targetPageId;
+      this.payload = null;
+    }
+    this.nodeIds = this.mode === 'insert' ? this.payload?.nodes.map((node) => node.id) ?? [] : this.importedPage.nodes.map((node) => node.id);
+    this.edgeIds = this.mode === 'insert' ? this.payload?.edges.map((edge) => edge.id) ?? [] : this.importedPage.edges.map((edge) => edge.id);
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    if (this.mode === 'replace') {
+      next.pages = next.pages.map((page) => page.id === this.targetPageId
+        ? { ...structuredClone(this.importedPage), id: page.id, name: this.importedPage.name || page.name }
+        : page);
+      next.diagramType = this.importedType;
+    } else if (this.mode === 'new-page') {
+      next.pages.push(structuredClone(this.importedPage));
+      next.diagramType = this.importedType;
+    } else {
+      const page = next.pages.find((candidate) => candidate.id === this.targetPageId);
+      if (page && this.payload) {
+        page.nodes.push(...structuredClone(this.payload.nodes));
+        page.edges.push(...structuredClone(this.payload.edges));
+      }
+      if (this.importedType !== 'general') next.diagramType = this.importedType;
+    }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 /** Creates a levelled DFD child page and links the selected process to it. */
 export class CreateDfdChildPageCommand implements DocumentCommand {
   readonly label = 'Create child DFD page';

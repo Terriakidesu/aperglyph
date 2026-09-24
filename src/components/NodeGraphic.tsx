@@ -30,7 +30,8 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
     if (renderer === 'entity') {
       if (preview) return <CompactEntityPreview node={node} />;
       const fields = normalizeEntityFields(node.data.fields);
-      const columns = entityColumns(node.data.entityVariant, width);
+      const compact = node.data.compact === true;
+      const columns = entityColumns(node.data.entityVariant, width, compact);
       const striped = node.data.striped !== false;
       const isWeak = node.data.weak === true;
       const isView = node.data.view === true;

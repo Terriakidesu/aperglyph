@@ -219,6 +219,38 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
   });
 
+  test('generates a native diagram from the Code panel on a new page', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByRole('tab', { name: 'Code' }).click();
+    await expect(page.getByText('CODE', { exact: true })).toBeVisible();
+    const editor = page.getByRole('textbox', { name: 'Mermaid source' });
+    await editor.fill('flowchart LR\n  A[Request] --> B{Approved?}\n  B -->|Yes| C[Complete]');
+    await page.getByRole('button', { name: 'Generate diagram' }).click();
+    await expect(page.getByRole('button', { name: /Open page 2:/ })).toBeVisible();
+    await expect(page.locator('[data-node-id]')).toHaveCount(3);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(2);
+    await expect(page.locator('[data-node-id]').filter({ hasText: 'Approved?' })).toBeVisible();
+  });
+
+  test('opens Code as a workspace without the Inspector', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByRole('tab', { name: 'Code' }).click();
+    await page.getByRole('button', { name: 'Open Code workspace' }).click();
+    await expect(page.getByRole('img', { name: /generated diagram preview/i })).toBeVisible();
+    await expect(page.getByText('Properties', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Close Code workspace' }).click();
+    await expect(page.getByText('Properties', { exact: true })).toBeVisible();
+  });
+
+  test('shows source diagnostics before generating malformed code', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByRole('tab', { name: 'Code' }).click();
+    await page.getByRole('textbox', { name: 'Mermaid source' }).fill('flowchart LR\n  A[Unclosed --> B');
+    await expect(page.getByText(/fix the source before generating/)).toBeVisible();
+    await expect(page.getByText(/Malformed Mermaid node syntax/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Generate diagram' })).toBeDisabled();
+  });
+
   test('searches and inserts a shape with the keyboard', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.keyboard.press('s');
@@ -273,7 +305,9 @@ test.describe('diagram editing workflow', () => {
     await rectangle.click();
     await page.getByLabel('Node width').fill('260');
     await rectangle.click();
-    await page.locator('svg.diagram-canvas').click({ position: { x: 640, y: 520 } });
+    const canvasBox = await page.locator('svg.diagram-canvas').boundingBox();
+    expect(canvasBox).not.toBeNull();
+    await page.locator('svg.diagram-canvas').click({ position: { x: Math.min(640, (canvasBox?.width ?? 700) - 20), y: Math.min(520, (canvasBox?.height ?? 600) - 20) } });
     await page.keyboard.press('Control+a');
     await expect(page.getByTitle('Match selected widths')).toBeVisible();
     await page.getByTitle('Match selected widths').click();
@@ -367,7 +401,7 @@ test.describe('diagram editing workflow', () => {
     const canvas = page.locator('svg.diagram-canvas');
     const point = await canvas.evaluate((element) => {
       const rect = element.getBoundingClientRect();
-      return { clientX: rect.left + rect.width * 0.72, clientY: rect.top + rect.height * 0.38 };
+      return { clientX: Math.round(rect.left + rect.width * 0.72), clientY: Math.round(rect.top + rect.height * 0.38) };
     });
     const readWorldPoint = () => page.evaluate(({ clientX, clientY }) => {
       const root = document.querySelector<SVGGElement>('svg.diagram-canvas > g');

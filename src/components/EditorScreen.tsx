@@ -1,10 +1,12 @@
-import { PanelLeftOpen, PanelRightOpen, Shapes, SlidersHorizontal } from 'lucide-react';
+import { Code2, PanelLeftOpen, PanelRightOpen, Shapes, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { createNode as buildNode } from '../core/document';
 import { createTemplateDocument } from '../core/templates';
+import { detectDiagramCode } from '../core/codeImport';
+import type { CodeLanguage } from '../core/diagramIR';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
 import { getActivePage, useEditorStore } from '../store/editorStore';
@@ -20,6 +22,8 @@ import { OutlinePanel } from './OutlinePanel';
 import { PreferencesDialog } from './PreferencesDialog';
 import { ShapeLibrary } from './ShapeLibrary';
 import { StatusBar } from './StatusBar';
+import { CodePanel } from './CodePanel';
+import type { LeftPanelId } from './DockHeader';
 
 interface EditorScreenProps { onExit: () => void }
 
@@ -68,9 +72,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const page = getActivePage(document, activePageId);
   const [leftOpen, setLeftOpen] = useState(() => readStoredBoolean('aperglyph.editor.left-open', true));
   const [rightOpen, setRightOpen] = useState(() => readStoredBoolean('aperglyph.editor.right-open', true));
-  const [leftWidth, setLeftWidth] = useState(() => readStoredNumber('aperglyph.editor.left-width', 228, 'left'));
+  const [leftWidth, setLeftWidth] = useState(() => readStoredNumber('aperglyph.editor.left-width', 320, 'left'));
+  const [dockWidth, setDockWidth] = useState(() => readStoredNumber('aperglyph.editor.dock-width', DEFAULT_DOCK_PANEL_WIDTH, 'dock'));
   const [rightWidth, setRightWidth] = useState(() => readStoredNumber('aperglyph.editor.right-width', 288, 'right'));
-  const [leftPanel, setLeftPanel] = useState<'shapes' | 'outline'>(() => readStoredPanel());
+  const [leftPanel, setLeftPanel] = useState<LeftPanelId>(() => readStoredPanel());
   const [viewPreferences, setViewPreferences] = useState<ViewPreferences>(() => readViewPreferences());
   const [focusMode, setFocusMode] = useState(false);
   const [presentationMode, setPresentationMode] = useState(false);
@@ -84,9 +89,30 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const [showPalette, setShowPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteIndex, setPaletteIndex] = useState(0);
+  const [detectedCode, setDetectedCode] = useState<{ source: string; language: CodeLanguage; reason: string } | null>(null);
+  const [codeWorkspaceOpen, setCodeWorkspaceOpen] = useState(false);
   const paletteInputRef = useRef<HTMLInputElement>(null);
   const lastPointerWorldRef = useRef<Point | null>(null);
-  const panelResizeRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+  const panelResizeRef = useRef<{ side: 'left' | 'right'; panel: 'code' | 'dock'; startX: number; startWidth: number } | null>(null);
+  const codeWorkspaceRestoreRightOpen = useRef<boolean | null>(null);
+  const canvasMountedRef = useRef(false);
+
+  const setCodeWorkspace = (open: boolean) => {
+    if (open) {
+      if (codeWorkspaceRestoreRightOpen.current === null) codeWorkspaceRestoreRightOpen.current = rightOpen;
+      setRightOpen(false);
+      setCodeWorkspaceOpen(true);
+      return;
+    }
+    setCodeWorkspaceOpen(false);
+    if (codeWorkspaceRestoreRightOpen.current !== null) setRightOpen(codeWorkspaceRestoreRightOpen.current);
+    codeWorkspaceRestoreRightOpen.current = null;
+  };
+
+  const changeLeftPanel = (panel: LeftPanelId) => {
+    if (codeWorkspaceOpen && panel !== 'code') setCodeWorkspace(false);
+    setLeftPanel(panel);
+  };
 
   const paletteCommands: PaletteCommand[] = [
     { id: 'add-rectangle', label: 'Add rectangle', hint: 'Canvas', run: () => addNode(buildNode('rectangle', { x: -viewport.x - 90, y: -viewport.y - 44 }, { data: { label: 'Rectangle' } })) },
@@ -112,6 +138,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'new-page', label: 'Add page', hint: 'Pages', run: () => createPage() },
     { id: 'auto-layout', label: 'Auto layout', hint: 'Arrange', run: () => { void autoLayout(); } },
     { id: 'toggle-outline', label: 'Show outline', hint: 'Workspace', run: () => { setLeftPanel('outline'); setLeftOpen(true); } },
+    { id: 'toggle-code', label: 'Open Code to Diagram', hint: 'Workspace', run: () => { setLeftPanel('code'); setLeftOpen(true); } },
     { id: 'toggle-focus', label: focusMode ? 'Exit focus mode' : 'Enter focus mode', hint: 'Workspace', run: () => setFocusMode((value) => !value) },
     { id: 'toggle-presentation', label: presentationMode ? 'Exit presentation mode' : 'Enter presentation mode', hint: 'Workspace', run: () => setPresentationMode((value) => !value) },
     { id: 'diagnostics', label: 'Open diagnostics', hint: 'Validation', run: () => setShowDiagnostics(true) },
@@ -147,6 +174,17 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     }
   };
 
+  const pasteDetectedCodeAsText = (source: string) => {
+    const point = lastPointerWorldRef.current ?? { x: -viewport.x + 40, y: -viewport.y + 40 };
+    addNode(buildNode('text', point, {
+      library: 'general',
+      size: { width: 380, height: 180 },
+      style: { fill: '#151925', stroke: '#59627a', radius: 8, textAlign: 'left', verticalAlign: 'top', autoHeight: false, textWrap: true },
+      data: { label: source },
+    }));
+    setDetectedCode(null);
+  };
+
   const writeSystemClipboard = async () => {
     const payload = copySelection();
     if (!payload) return;
@@ -167,27 +205,39 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   };
 
   const readSystemClipboard = async (point?: Point) => {
+    const openDetectedCode = (text: string): boolean => {
+      const detected = detectDiagramCode(text);
+      if (!detected) return false;
+      setDetectedCode({ source: text, language: detected.language, reason: detected.reason });
+      setLeftPanel('code');
+      setLeftOpen(true);
+      return true;
+    };
     try {
       if (navigator.clipboard?.read) {
         const items = await navigator.clipboard.read();
         for (const item of items) {
           if (!item.types.includes(CLIPBOARD_MIME)) continue;
           const blob = await item.getType(CLIPBOARD_MIME);
-          const payload = parseClipboardPayload(await blob.text());
+          const text = await blob.text();
+          const payload = parseClipboardPayload(text);
           if (payload) {
             if (point) pastePayloadAt(payload, point);
             else pastePayload(payload);
             return;
           }
+          if (openDetectedCode(text)) return;
         }
       }
       if (navigator.clipboard?.readText) {
-        const payload = parseClipboardPayload(await navigator.clipboard.readText());
+        const text = await navigator.clipboard.readText();
+        const payload = parseClipboardPayload(text);
         if (payload) {
           if (point) pastePayloadAt(payload, point);
           else pastePayload(payload);
           return;
         }
+        if (openDetectedCode(text)) return;
       }
     } catch {
       // Fall back to the last in-app copy below.
@@ -198,6 +248,22 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   useEffect(() => editorEvents.on('pointer:changed', (point) => {
     lastPointerWorldRef.current = point;
   }), []);
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return;
+      const source = event.clipboardData?.getData('text/plain') ?? '';
+      const detected = detectDiagramCode(source);
+      if (!detected) return;
+      event.preventDefault();
+      setDetectedCode({ source, language: detected.language, reason: detected.reason });
+      setLeftPanel('code');
+      setLeftOpen(true);
+    };
+    globalThis.document?.addEventListener('paste', handlePaste);
+    return () => globalThis.document?.removeEventListener('paste', handlePaste);
+  }, []);
 
   useEffect(() => {
     if (showPalette) {
@@ -212,20 +278,26 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       globalThis.localStorage?.setItem('aperglyph.editor.right-open', JSON.stringify(rightOpen));
       globalThis.localStorage?.setItem('aperglyph.editor.left-panel', leftPanel);
       globalThis.localStorage?.setItem('aperglyph.editor.left-width', String(leftWidth));
+      globalThis.localStorage?.setItem('aperglyph.editor.dock-width', String(dockWidth));
       globalThis.localStorage?.setItem('aperglyph.editor.right-width', String(rightWidth));
       globalThis.localStorage?.setItem(VIEW_PREFERENCES_KEY, JSON.stringify(viewPreferences));
     } catch {
       // Local UI preferences are optional.
     }
-  }, [leftOpen, leftPanel, leftWidth, rightOpen, rightWidth, viewPreferences]);
+  }, [dockWidth, leftOpen, leftPanel, leftWidth, rightOpen, rightWidth, viewPreferences]);
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
       const resize = panelResizeRef.current;
       if (!resize) return;
       const delta = event.clientX - resize.startX;
-      if (resize.side === 'left') setLeftWidth(clampPanelWidth(resize.startWidth + delta, 'left'));
-      else setRightWidth(clampPanelWidth(resize.startWidth - delta, 'right'));
+      if (resize.side === 'left') {
+        const next = resize.startWidth + delta;
+        if (resize.panel === 'code') setLeftWidth(clampPanelWidth(next, 'left'));
+        else setDockWidth(clampPanelWidth(next, 'dock'));
+      } else {
+        setRightWidth(clampPanelWidth(resize.startWidth - delta, 'right'));
+      }
     };
     const end = () => {
       if (!panelResizeRef.current) return;
@@ -244,8 +316,17 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
 
   const beginPanelResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
-    panelResizeRef.current = { side, startX: event.clientX, startWidth: side === 'left' ? leftWidth : rightWidth };
+    panelResizeRef.current = { side, panel: leftPanel === 'code' ? 'code' : 'dock', startX: event.clientX, startWidth: side === 'left' ? (leftPanel === 'code' ? leftWidth : dockWidth) : rightWidth };
     globalThis.document?.body.classList.add('panel-resizing');
+  };
+
+  const updatePanelWidthsFromPreferences = (side: 'left' | 'right', value: number) => {
+    if (side === 'left') {
+      setLeftWidth(clampPanelWidth(value, 'left'));
+      setDockWidth(clampPanelWidth(value, 'dock'));
+    } else {
+      setRightWidth(clampPanelWidth(value, 'right'));
+    }
   };
 
   const viewportKey = `${document.id}:${activePageId}`;
@@ -341,22 +422,30 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     return () => { unsubscribeShortcuts(); unsubscribeDiagnostics(); unsubscribePalette(); unsubscribePreferences(); unsubscribeProperties(); unsubscribeSettings(); };
   }, []);
 
-  const workspaceStyle = { '--left-panel-width': `${leftWidth}px`, '--right-panel-width': `${rightWidth}px` } as CSSProperties;
+  const codeWorkspaceActive = codeWorkspaceOpen && leftOpen && leftPanel === 'code';
+  const fitCanvasOnMount = !canvasMountedRef.current;
+  useEffect(() => {
+    if (!codeWorkspaceActive) canvasMountedRef.current = true;
+  }, [codeWorkspaceActive]);
+  const activeLeftWidth = leftPanel === 'code' ? leftWidth : dockWidth;
+  const workspaceStyle = { '--left-panel-width': `${activeLeftWidth}px`, '--code-panel-width': `${leftWidth}px`, '--dock-panel-width': `${dockWidth}px`, '--right-panel-width': `${rightWidth}px` } as CSSProperties;
   return <main className={`editor-shell ${focusMode ? 'focus-mode' : ''} ${presentationMode ? 'presentation-mode' : ''}`}>
      <EditorTopBar onExit={onExit} onOpenDocument={openDocument} onOpenPreferences={() => setShowPreferences(true)} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} onTogglePresentation={() => setPresentationMode((value) => !value)} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />
-    <div className="editor-workspace" style={workspaceStyle}>
-      <EditorToolbar />
-       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} onEnterGroup={setIsolatedGroupId} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
-      {leftOpen && <PanelResizeHandle side="left" width={leftWidth} onWidthChange={(value) => setLeftWidth(clampPanelWidth(value, 'left'))} onPointerDown={(event) => beginPanelResize('left', event)} />}
-        <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} isolatedGroupId={isolatedGroupId} onEnterGroup={setIsolatedGroupId} onExitGroup={() => setIsolatedGroupId(null)} onCreateTemplate={(type) => { if (type === 'blank') return; openDocument(createTemplateDocument(`Untitled ${type} diagram`, type)); }} /><PageTabs /><StatusBar /></section>
-      {rightOpen && <PanelResizeHandle side="right" width={rightWidth} onWidthChange={(value) => setRightWidth(clampPanelWidth(value, 'right'))} onPointerDown={(event) => beginPanelResize('right', event)} />}
-       {rightOpen && <PropertiesPanel />}
-       <div className="mobile-dock-actions" aria-label="Workspace panels"><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} aria-label="Open shapes" title="Open shapes"><Shapes size={16} /></button><button onClick={() => setRightOpen(true)} aria-label="Open properties" title="Open properties"><SlidersHorizontal size={16} /></button></div>
-       {!leftOpen && <DockReopenButton side="left" onClick={() => setLeftOpen(true)} />}
-       {!rightOpen && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
+     <div className={`editor-workspace ${codeWorkspaceActive ? 'code-workspace-active' : ''}`} style={workspaceStyle}>
+       <EditorToolbar />
+        {codeWorkspaceActive ? <CodePanel expanded activePanel={leftPanel} onPanelChange={changeLeftPanel} onExpandedChange={setCodeWorkspace} onCollapse={() => setCodeWorkspace(false)} detectedCode={detectedCode} onDetectedCodeConsumed={() => setDetectedCode(null)} onPasteAsText={pasteDetectedCodeAsText} /> : <>
+          {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={changeLeftPanel} onCollapse={() => setLeftOpen(false)} onEnterGroup={setIsolatedGroupId} /> : leftPanel === 'code' ? <CodePanel expanded={false} activePanel={leftPanel} onPanelChange={changeLeftPanel} onExpandedChange={setCodeWorkspace} onCollapse={() => setLeftOpen(false)} detectedCode={detectedCode} onDetectedCodeConsumed={() => setDetectedCode(null)} onPasteAsText={pasteDetectedCodeAsText} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={changeLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
+          {leftOpen && <PanelResizeHandle side="left" panel={leftPanel === 'code' ? 'code' : 'dock'} width={activeLeftWidth} onWidthChange={(value) => leftPanel === 'code' ? setLeftWidth(clampPanelWidth(value, 'left')) : setDockWidth(clampPanelWidth(value, 'dock'))} onPointerDown={(event) => beginPanelResize('left', event)} onReset={() => leftPanel === 'code' ? setLeftWidth(DEFAULT_LEFT_PANEL_WIDTH) : setDockWidth(DEFAULT_DOCK_PANEL_WIDTH)} />}
+          <section className="canvas-column"><CanvasViewport fitOnMount={fitCanvasOnMount} onImportFile={importFileAtPoint} view={viewPreferences} isolatedGroupId={isolatedGroupId} onEnterGroup={setIsolatedGroupId} onExitGroup={() => setIsolatedGroupId(null)} onCreateTemplate={(type) => { if (type === 'blank') return; openDocument(createTemplateDocument(`Untitled ${type} diagram`, type)); }} /><PageTabs /><StatusBar /></section>
+          {rightOpen && <PanelResizeHandle side="right" width={rightWidth} onWidthChange={(value) => setRightWidth(clampPanelWidth(value, 'right'))} onPointerDown={(event) => beginPanelResize('right', event)} onReset={() => setRightWidth(DEFAULT_RIGHT_PANEL_WIDTH)} />}
+          {rightOpen && <PropertiesPanel />}
+        </>}
+         <div className="mobile-dock-actions" aria-label="Workspace panels"><button onClick={() => { changeLeftPanel('shapes'); setLeftOpen(true); }} aria-label="Open shapes" title="Open shapes"><Shapes size={16} /></button><button onClick={() => { changeLeftPanel('code'); setLeftOpen(true); }} aria-label="Open Code to Diagram" title="Open Code to Diagram"><Code2 size={16} /></button><button onClick={() => setRightOpen(true)} aria-label="Open properties" title="Open properties"><SlidersHorizontal size={16} /></button></div>
+        {!leftOpen && <DockReopenButton side="left" onClick={() => setLeftOpen(true)} />}
+        {!rightOpen && !codeWorkspaceActive && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
       </div>
       {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
-      {showPreferences && <PreferencesDialog view={viewPreferences} onViewChange={updateViewPreferences} pageSettings={page?.settings} onPageSettingsChange={(changes) => updatePageSettings(changes, activePageId, 'Update preferences')} leftWidth={leftWidth} rightWidth={rightWidth} onWidthChange={(side, value) => side === 'left' ? setLeftWidth(clampPanelWidth(value, 'left')) : setRightWidth(clampPanelWidth(value, 'right'))} snapshotLimit={snapshotLimit} onSnapshotLimitChange={(value) => { const next = setSnapshotLimit(normalizeSnapshotLimit(value)); setSnapshotLimitState(next); }} onRestoreDefaults={() => { setViewPreferences(DEFAULT_VIEW_PREFERENCES); setLeftWidth(228); setRightWidth(288); setSnapshotLimitState(setSnapshotLimit(31)); if (page) updatePageSettings({ gridSize: 16, snapSettings: { grid: true, objects: true, guides: true, ports: true } }, page.id, 'Restore editor defaults'); }} onClose={() => setShowPreferences(false)} />}
+      {showPreferences && <PreferencesDialog view={viewPreferences} onViewChange={updateViewPreferences} pageSettings={page?.settings} onPageSettingsChange={(changes) => updatePageSettings(changes, activePageId, 'Update preferences')} leftWidth={leftWidth} rightWidth={rightWidth} onWidthChange={updatePanelWidthsFromPreferences} snapshotLimit={snapshotLimit} onSnapshotLimitChange={(value) => { const next = setSnapshotLimit(normalizeSnapshotLimit(value)); setSnapshotLimitState(next); }} onRestoreDefaults={() => { setViewPreferences(DEFAULT_VIEW_PREFERENCES); setLeftWidth(DEFAULT_LEFT_PANEL_WIDTH); setDockWidth(DEFAULT_DOCK_PANEL_WIDTH); setRightWidth(DEFAULT_RIGHT_PANEL_WIDTH); setSnapshotLimitState(setSnapshotLimit(31)); if (page) updatePageSettings({ gridSize: 16, snapSettings: { grid: true, objects: true, guides: true, ports: true } }, page.id, 'Restore editor defaults'); }} onClose={() => setShowPreferences(false)} />}
       {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan tool" /><Shortcut keys="Space + drag" label="Temporarily pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="S" label="Search and insert shape" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ 0" label="Fit page" /><Shortcut keys="⌘ 1" label="Zoom to 100%" /><Shortcut keys="⌘ ⇧ F" label="Fit selection" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
    </main>;
@@ -388,15 +477,16 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
-function readStoredPanel(): 'shapes' | 'outline' {
+function readStoredPanel(): LeftPanelId {
   try {
-    return globalThis.localStorage?.getItem('aperglyph.editor.left-panel') === 'outline' ? 'outline' : 'shapes';
+    const value = globalThis.localStorage?.getItem('aperglyph.editor.left-panel');
+    return value === 'outline' || value === 'code' ? value : 'shapes';
   } catch {
     return 'shapes';
   }
 }
 
-function readStoredNumber(key: string, fallback: number, side: 'left' | 'right'): number {
+function readStoredNumber(key: string, fallback: number, side: 'left' | 'right' | 'dock'): number {
   try {
     const stored = globalThis.localStorage?.getItem(key);
     if (stored === null || stored === undefined || stored.trim() === '') return fallback;
@@ -407,8 +497,19 @@ function readStoredNumber(key: string, fallback: number, side: 'left' | 'right')
   }
 }
 
-function clampPanelWidth(value: number, side: 'left' | 'right' = 'left'): number {
-  return side === 'right' ? Math.min(400, Math.max(220, Math.round(value))) : Math.min(360, Math.max(180, Math.round(value)));
+const DEFAULT_LEFT_PANEL_WIDTH = 320;
+const DEFAULT_DOCK_PANEL_WIDTH = 228;
+const DEFAULT_RIGHT_PANEL_WIDTH = 288;
+
+function leftPanelMaximum(): number {
+  const viewportWidth = typeof globalThis.innerWidth === 'number' && Number.isFinite(globalThis.innerWidth) ? globalThis.innerWidth : 1280;
+  return Math.max(260, Math.min(720, Math.floor(viewportWidth * .45)));
+}
+
+function clampPanelWidth(value: number, side: 'left' | 'right' | 'dock' = 'left'): number {
+  if (side === 'right') return Math.min(400, Math.max(220, Math.round(value)));
+  if (side === 'dock') return Math.min(360, Math.max(180, Math.round(value)));
+  return Math.min(leftPanelMaximum(), Math.max(260, Math.round(value)));
 }
 
 function readViewPreferences(): ViewPreferences {
@@ -427,9 +528,9 @@ function readViewPreferences(): ViewPreferences {
   }
 }
 
-function PanelResizeHandle({ side, width, onWidthChange, onPointerDown }: { side: 'left' | 'right'; width: number; onWidthChange: (width: number) => void; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void }) {
-  const minimum = side === 'right' ? 220 : 180;
-  const maximum = side === 'right' ? 400 : 360;
+function PanelResizeHandle({ side, panel = 'code', width, onWidthChange, onPointerDown, onReset }: { side: 'left' | 'right'; panel?: 'code' | 'dock'; width: number; onWidthChange: (width: number) => void; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void; onReset: () => void }) {
+  const minimum = side === 'right' ? 220 : panel === 'code' ? 260 : 180;
+  const maximum = side === 'right' ? 400 : panel === 'code' ? leftPanelMaximum() : 360;
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const step = event.shiftKey ? 40 : 10;
     const direction = event.key === 'ArrowRight' ? (side === 'left' ? 1 : -1) : event.key === 'ArrowLeft' ? (side === 'left' ? -1 : 1) : 0;
@@ -444,7 +545,7 @@ function PanelResizeHandle({ side, width, onWidthChange, onPointerDown }: { side
       onWidthChange(maximum);
     }
   };
-  return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" tabIndex={0} aria-label={`Resize ${side} panel`} aria-orientation="vertical" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={width} aria-valuetext={`${width}px`} onKeyDown={onKeyDown} onPointerDown={onPointerDown} />;
+  return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" tabIndex={0} aria-label={`Resize ${side} panel`} aria-orientation="vertical" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={width} aria-valuetext={`${width}px`} title="Drag to resize · double-click to reset" onKeyDown={onKeyDown} onPointerDown={onPointerDown} onDoubleClick={onReset} />;
 }
 
 function DockReopenButton({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
