@@ -101,10 +101,19 @@ interface GuideDrag {
   isNew: boolean;
 }
 
+interface WheelGesture {
+  frame: number | null;
+  panX: number;
+  panY: number;
+  zoomFactor: number;
+  zoomPoint: Point | null;
+}
+
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const ENDPOINT_SNAP_DISTANCE = 24;
 const DOUBLE_CLICK_WINDOW_MS = 600;
+const WHEEL_ZOOM_STEP = 1.08;
 
 interface RulerMark {
   value: number;
@@ -334,6 +343,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
   });
   const previousHintsPreference = useRef(view.connectionHints);
+  const wheelGestureRef = useRef<WheelGesture>({ frame: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -466,6 +476,11 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   }), []);
 
   useEffect(() => () => spatialClient.terminate(), [spatialClient]);
+
+  useEffect(() => () => {
+    const frame = wheelGestureRef.current.frame;
+    if (frame !== null) cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1379,12 +1394,47 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   };
 
   const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
-    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, viewport.zoom * (event.deltaY > 0 ? 0.92 : 1.08)));
-    const before = worldPoint(event);
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect || nextZoom === viewport.zoom) return;
-    const screen = screenPoint(event);
-    updateViewport({ zoom: nextZoom, x: (screen.x - size.width / 2) / nextZoom - before.x, y: (screen.y - size.height / 2) / nextZoom - before.y });
+    if (!rect) return;
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(size.width, size.height) : 1;
+    const deltaX = Number.isFinite(event.deltaX) ? event.deltaX * scale : 0;
+    const deltaY = Number.isFinite(event.deltaY) ? event.deltaY * scale : 0;
+    if (deltaX === 0 && deltaY === 0) return;
+    const gesture = wheelGestureRef.current;
+    if (event.ctrlKey || event.metaKey) {
+      const boundedDelta = Math.max(-240, Math.min(240, deltaY));
+      gesture.zoomFactor = Math.max(.25, Math.min(4, gesture.zoomFactor * Math.pow(WHEEL_ZOOM_STEP, -boundedDelta / 100)));
+      gesture.zoomPoint = screenPoint(event);
+    } else {
+      // Two-finger trackpad scrolling moves the canvas. A modifier-based wheel
+      // gesture is reserved for zooming so normal scrolling never jumps scale.
+      gesture.panX += deltaX;
+      gesture.panY += deltaY;
+    }
+    if (gesture.frame !== null) return;
+    gesture.frame = requestAnimationFrame(() => {
+      const pending = wheelGestureRef.current;
+      pending.frame = null;
+      const current = useEditorStore.getState().viewport;
+      let nextX = current.x - pending.panX / current.zoom;
+      let nextY = current.y - pending.panY / current.zoom;
+      let nextZoom = current.zoom;
+      if (pending.zoomFactor !== 1 && pending.zoomPoint) {
+        const zoomPoint = pending.zoomPoint;
+        const worldAtPointer = {
+          x: (zoomPoint.x - size.width / 2) / current.zoom - nextX,
+          y: (zoomPoint.y - size.height / 2) / current.zoom - nextY,
+        };
+        nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.zoom * pending.zoomFactor));
+        nextX = (zoomPoint.x - size.width / 2) / nextZoom - worldAtPointer.x;
+        nextY = (zoomPoint.y - size.height / 2) / nextZoom - worldAtPointer.y;
+      }
+      pending.panX = 0;
+      pending.panY = 0;
+      pending.zoomFactor = 1;
+      pending.zoomPoint = null;
+      if (nextX !== current.x || nextY !== current.y || nextZoom !== current.zoom) updateViewport({ x: nextX, y: nextY, zoom: nextZoom });
+    });
   };
 
   const transform = `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
@@ -1521,7 +1571,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const quickCreateMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(quickCreateSearch.trim().toLowerCase())).slice(0, 8);
 
     return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef} onPointerLeave={clearPointerPosition}>
-      {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">H</span> Pan tool <span className="hint-separator">·</span> <span className="hint-key">Space</span> + drag to pan <span className="hint-separator">·</span> <span className="hint-key">Scroll</span> to zoom</div>}
+      {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">H</span> Pan tool <span className="hint-separator">·</span> <span className="hint-key">Two fingers</span> to pan <span className="hint-separator">·</span> <span className="hint-key">Pinch / Ctrl+scroll</span> to zoom</div>}
       {view.rulers && <><div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}</div><div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}</div></>}
     <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>

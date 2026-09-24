@@ -149,6 +149,24 @@ test.describe('diagram editing workflow', () => {
     await expect(page.getByRole('dialog', { name: 'Snap settings' })).toHaveCount(0);
   });
 
+  test('uses trackpad scrolling for smooth pan and pinch for zoom', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const root = canvas.locator('g').first();
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const clientX = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+    const clientY = (box?.y ?? 0) + (box?.height ?? 0) / 2;
+    const beforePan = await root.getAttribute('transform');
+    const beforeZoom = await page.getByLabel('Zoom percentage').textContent();
+    await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaX: 80, deltaY: 40, deltaMode: 0, clientX, clientY });
+    await expect.poll(() => root.getAttribute('transform')).not.toBe(beforePan);
+    await expect(page.getByLabel('Zoom percentage')).toHaveText(beforeZoom ?? '100%');
+
+    await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX, clientY });
+    await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
+  });
+
   test('Alt-drag duplicates without applying grid snapping', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
