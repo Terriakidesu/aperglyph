@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { Lock, Ruler, Trash2, Unlock } from 'lucide-react';
 import { createEdge, createId, createNode as buildNode } from '../core/document';
@@ -103,6 +103,8 @@ interface GuideDrag {
 
 interface WheelGesture {
   frame: number | null;
+  idleTimer: number | null;
+  camera: Viewport | null;
   panX: number;
   panY: number;
   zoomFactor: number;
@@ -113,7 +115,11 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const ENDPOINT_SNAP_DISTANCE = 24;
 const DOUBLE_CLICK_WINDOW_MS = 600;
-const WHEEL_ZOOM_STEP = 1.08;
+const WHEEL_ZOOM_STEP = 1.18;
+
+function viewportTransform(size: CanvasSize, viewport: Viewport): string {
+  return `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
+}
 
 interface RulerMark {
   value: number;
@@ -307,6 +313,7 @@ const DEFAULT_CANVAS_VIEW: CanvasViewOptions = { rulers: true, guides: true, min
 
 export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: CanvasViewportProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const viewportGroupRef = useRef<SVGGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSession | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -343,7 +350,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
   });
   const previousHintsPreference = useRef(view.connectionHints);
-  const wheelGestureRef = useRef<WheelGesture>({ frame: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
+  const wheelGestureRef = useRef<WheelGesture>({ frame: null, idleTimer: null, camera: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -478,9 +485,15 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   useEffect(() => () => spatialClient.terminate(), [spatialClient]);
 
   useEffect(() => () => {
-    const frame = wheelGestureRef.current.frame;
-    if (frame !== null) cancelAnimationFrame(frame);
+    const gesture = wheelGestureRef.current;
+    if (gesture.frame !== null) cancelAnimationFrame(gesture.frame);
+    if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
   }, []);
+
+  useLayoutEffect(() => {
+    const camera = wheelGestureRef.current.camera ?? viewport;
+    viewportGroupRef.current?.setAttribute('transform', viewportTransform(size, camera));
+  }, [size.height, size.width, viewport]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -514,7 +527,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }, []);
 
-  const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera = viewport) => {
+  const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera = wheelGestureRef.current.camera ?? viewport) => {
     const screen = screenPoint(event);
     return {
       x: (screen.x - size.width / 2) / camera.zoom - camera.x,
@@ -1401,6 +1414,19 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     editorEvents.emit('pointer:changed', null);
   };
 
+  const commitWheelGesture = useCallback(() => {
+    const gesture = wheelGestureRef.current;
+    gesture.idleTimer = null;
+    if (gesture.frame !== null) {
+      gesture.idleTimer = window.setTimeout(commitWheelGesture, 16);
+      return;
+    }
+    const camera = gesture.camera;
+    if (!camera) return;
+    gesture.camera = null;
+    updateViewport(camera);
+  }, [updateViewport]);
+
   const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -1409,6 +1435,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     const deltaY = Number.isFinite(event.deltaY) ? event.deltaY * scale : 0;
     if (deltaX === 0 && deltaY === 0) return;
     const gesture = wheelGestureRef.current;
+    if (!gesture.camera) gesture.camera = { ...useEditorStore.getState().viewport };
     if (event.ctrlKey || event.metaKey) {
       const boundedDelta = Math.max(-240, Math.min(240, deltaY));
       gesture.zoomFactor = Math.max(.25, Math.min(4, gesture.zoomFactor * Math.pow(WHEEL_ZOOM_STEP, -boundedDelta / 100)));
@@ -1419,11 +1446,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       gesture.panX += deltaX;
       gesture.panY += deltaY;
     }
+    if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
+    gesture.idleTimer = window.setTimeout(commitWheelGesture, 90);
     if (gesture.frame !== null) return;
     gesture.frame = requestAnimationFrame(() => {
       const pending = wheelGestureRef.current;
       pending.frame = null;
-      const current = useEditorStore.getState().viewport;
+      const current = pending.camera ?? useEditorStore.getState().viewport;
       let nextX = current.x - pending.panX / current.zoom;
       let nextY = current.y - pending.panY / current.zoom;
       let nextZoom = current.zoom;
@@ -1441,11 +1470,12 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       pending.panY = 0;
       pending.zoomFactor = 1;
       pending.zoomPoint = null;
-      if (nextX !== current.x || nextY !== current.y || nextZoom !== current.zoom) updateViewport({ x: nextX, y: nextY, zoom: nextZoom });
+      pending.camera = { x: nextX, y: nextY, zoom: nextZoom };
+      viewportGroupRef.current?.setAttribute('transform', viewportTransform(size, pending.camera));
     });
   };
 
-  const transform = `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
+  const transform = viewportTransform(size, viewport);
   const gridSize = page?.settings.gridSize ?? 16;
   const canvasBackground = page?.settings.background ?? '#10131c';
   const canvasGridColor = page?.settings.canvasTheme === 'light' ? '#cbd2df' : '#2c3346';
