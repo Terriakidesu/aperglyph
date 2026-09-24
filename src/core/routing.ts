@@ -7,6 +7,7 @@ export const NODE_CLEARANCE = 16;
 export const PORT_STUB_LENGTH = 24;
 export const MIN_SEGMENT_LENGTH = 12;
 export const ROUTING_LANE_SPACING = 16;
+export const CARDINALITY_MARKER_GAP = 8;
 const EPSILON = 0.001;
 const JUMP_HALF_LENGTH = 8;
 const JUMP_HEIGHT = 7;
@@ -38,6 +39,11 @@ export interface RouteJump {
 }
 
 export type EdgeRouting = 'straight' | 'orthogonal' | 'curved';
+
+/** Inset bar-bearing cardinality glyphs so the connector remains visible on both sides. */
+export function endpointMarkerOffset(marker: EdgeMarker): number {
+  return marker === 'bar' || marker === 'circle-bar' || marker === 'bar-crowfoot' ? CARDINALITY_MARKER_GAP : 0;
+}
 
 /** Resolve a plugin connector's semantic type to its geometric route mode. */
 export function edgeRouting(edge: DiagramEdge): EdgeRouting {

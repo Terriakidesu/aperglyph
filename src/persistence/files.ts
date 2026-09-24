@@ -4,7 +4,7 @@ import type { CodeLanguage } from '../core/diagramIR';
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields } from '../core/erd';
 import { nodeCenter, nodeFlipTransform } from '../core/geometry';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
@@ -299,6 +299,8 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
 function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, endpoint: 'start' | 'end', opacity = 1): string {
   if (marker === 'none') return '';
   const angle = directionAngle(direction);
+  const markerOffset = endpointMarkerOffset(marker);
+  const markerPoint = { x: point.x + direction.x * markerOffset, y: point.y + direction.y * markerOffset };
   const line = `fill="none" stroke="${escapeXml(stroke)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`;
   const circle = (center = 6) => `<circle cx="${center}" cy="0" r="6" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="1.6"/>`;
   const bar = (offset = 0) => `<path d="M ${offset} -7 L ${offset} 7" ${line}/>`;
@@ -312,7 +314,7 @@ function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, s
             : marker === 'bar-crowfoot' ? `${bar(16)}${crowfoot()}`
               : `${circle(18)}${crowfoot()}`;
   const opacityMarkup = opacity === 1 ? '' : ` opacity="${opacity}"`;
-  return `<g transform="translate(${point.x} ${point.y}) rotate(${angle})"${opacityMarkup}>${glyph}</g>`;
+  return `<g transform="translate(${markerPoint.x} ${markerPoint.y}) rotate(${angle})"${opacityMarkup}>${glyph}</g>`;
 }
 
 function outwardDirection(point: Point, neighbor: Point): Point {

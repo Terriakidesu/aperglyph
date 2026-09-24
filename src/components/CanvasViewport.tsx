@@ -9,7 +9,7 @@ import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, RouteConstraint, Size, Viewport } from '../core/types';
@@ -2347,6 +2347,8 @@ function directionAngle(direction: Point): number {
 function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, key: string, opacity = 1) {
   if (marker === 'none') return null;
   const angle = directionAngle(direction);
+  const markerOffset = endpointMarkerOffset(marker);
+  const markerPoint = { x: point.x + direction.x * markerOffset, y: point.y + direction.y * markerOffset };
   const strokeWidth = 1.6;
   const lineProps = { fill: 'none', stroke, strokeWidth, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   // The connector terminates at the shape boundary. The glyph's +X axis
@@ -2364,7 +2366,7 @@ function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker
           : marker === 'circle-bar' ? <>{circle(18)}{bar()}</>
               : marker === 'bar-crowfoot' ? <>{bar(16)}{crowfoot()}</>
                 : <>{circle(18)}{crowfoot()}</>;
-  return <g key={key} className="edge-marker" transform={`translate(${point.x} ${point.y}) rotate(${angle})`} opacity={opacity} pointerEvents="none">{glyph}</g>;
+  return <g key={key} className="edge-marker" transform={`translate(${markerPoint.x} ${markerPoint.y}) rotate(${angle})`} opacity={opacity} pointerEvents="none">{glyph}</g>;
 }
 
 function sameEndpoint(left: Endpoint, right: Endpoint): boolean {

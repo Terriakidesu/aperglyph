@@ -91,7 +91,7 @@ describe('native file helpers', () => {
   it('turns every endpoint notation with the connector tangent', () => {
     const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 220 } }, { style: { startMarker: 'bar', endMarker: 'crowfoot' } });
     const svg = documentToSvg([], [edge], '#10131c', 400, 300);
-    expect(svg).toContain('translate(40 80) rotate(28.30075576600638)');
+    expect(svg).toContain('translate(47.0437687993774 83.79279858428013) rotate(28.30075576600638)');
     expect(svg).toContain('translate(300 220) rotate(-151.69924423399362)');
   });
 
