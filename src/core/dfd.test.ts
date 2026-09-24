@@ -43,4 +43,17 @@ describe('DFD semantic validation', () => {
     expect(result!.document.pages[0].nodes[0].data.childPageId).toBe(result!.childPageId);
     expect(result!.document.pages[1].data?.parentProcessId).toBe(process.id);
   });
+
+  it('validates duplicate and blank data dictionary entries', () => {
+    const document = createDocument('DFD', 'dfd');
+    document.pages[0].data = {
+      dfdLevel: 0,
+      dataDictionary: [{ name: 'Order details' }, { name: 'order details', type: 'Order' }, { name: '' }],
+    };
+    const diagnostics = validateDfd(document);
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'dfd.duplicate-data-dictionary-entry', severity: 'error' }),
+      expect.objectContaining({ code: 'dfd.missing-data-dictionary-name', severity: 'error' }),
+    ]));
+  });
 });

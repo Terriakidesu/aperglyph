@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 import { edgeRoute } from './routing';
 
@@ -235,6 +235,16 @@ describe('command history', () => {
     expect(withGuide.pages[0].guides).toEqual([{ id: 'guide-1', orientation: 'vertical', position: 120 }]);
     const reordered = manager.execute(new ReorderNodesCommand(pageId, [second.id], first.id), withGuide);
     expect(reordered.pages[0].nodes.map((node) => node.id)).toEqual([second.id, first.id]);
+  });
+
+  it('updates semantic page data and preserves unrelated page metadata', () => {
+    const document = createDocument('DFD', 'dfd');
+    const pageId = document.pages[0].id;
+    const manager = new CommandManager();
+    const updated = manager.execute(new UpdatePageDataCommand(pageId, { dataDictionary: [{ name: 'Order details' }] }), document);
+    expect(updated.pages[0].data).toEqual({ dfdLevel: 0, dataDictionary: [{ name: 'Order details' }] });
+    const restored = manager.undo(updated);
+    expect(restored?.pages[0].data).toEqual({ dfdLevel: 0, dataDictionary: [] });
   });
 
   it('preserves locked objects during outline reorder', () => {

@@ -31,6 +31,19 @@ export function validateDfd(document: DiagramDocument): DfdDiagnostic[] {
     const storeNumbers = new Map<string, string>();
     const incoming = new Map<string, number>();
     const outgoing = new Map<string, number>();
+    const dictionary = dataDictionary(page);
+    const dictionaryNames = new Map<string, number>();
+    dictionary.forEach((entry, index) => {
+      const normalizedName = entry.name.toLowerCase();
+      if (!normalizedName) {
+        diagnostics.push({ severity: 'error', code: 'dfd.missing-data-dictionary-name', message: 'Data dictionary entries need a name.', pageId: page.id });
+      } else if (dictionaryNames.has(normalizedName)) {
+        diagnostics.push({ severity: 'error', code: 'dfd.duplicate-data-dictionary-entry', message: `Data dictionary entry “${entry.name}” is defined more than once.`, pageId: page.id });
+      } else {
+        dictionaryNames.set(normalizedName, index);
+      }
+    });
+    const definedDictionaryNames = new Set(dictionaryNames.keys());
 
     dfdNodes.forEach((node) => {
       const label = nodeLabel(node);
@@ -74,9 +87,8 @@ export function validateDfd(document: DiagramDocument): DfdDiagnostic[] {
         diagnostics.push({ severity: 'warning', code: 'dfd.external-store-flow', message: 'An External Entity and Data Store should be connected through a Process.', pageId: page.id, edgeId: edge.id });
       }
       if (!flowLabel(edge)) diagnostics.push({ severity: 'warning', code: 'dfd.missing-flow-label', message: 'Data flows should have a name.', pageId: page.id, edgeId: edge.id });
-      const dictionary = dataDictionary(page);
       const label = flowLabel(edge);
-      if (label && dictionary.length > 0 && !dictionary.some((entry) => entry.name.toLowerCase() === label.toLowerCase())) diagnostics.push({ severity: 'info', code: 'dfd.unknown-data-dictionary-entry', message: `Flow “${label}” is not defined in the data dictionary.`, pageId: page.id, edgeId: edge.id });
+      if (label && definedDictionaryNames.size > 0 && !definedDictionaryNames.has(label.toLowerCase())) diagnostics.push({ severity: 'info', code: 'dfd.unknown-data-dictionary-entry', message: `Flow “${label}” is not defined in the data dictionary.`, pageId: page.id, edgeId: edge.id });
     });
 
     dfdNodes.forEach((node) => {
@@ -113,7 +125,6 @@ export function dataDictionary(page: DiagramDocument['pages'][number]): DfdDataD
     if (typeof entry === 'string' && entry.trim()) return [{ name: entry.trim() }];
     if (!entry || typeof entry !== 'object' || typeof (entry as { name?: unknown }).name !== 'string') return [];
     const value = entry as { name: string; type?: unknown; description?: unknown };
-    if (!value.name.trim()) return [];
     return [{ name: value.name.trim(), ...(typeof value.type === 'string' ? { type: value.type } : {}), ...(typeof value.description === 'string' ? { description: value.description } : {}) }];
   });
 }

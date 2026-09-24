@@ -1,7 +1,7 @@
 import { AlignCenter, ArrowLeftRight, Brush, ChevronDown, Clipboard, ClipboardPaste, Copy, GitBranch, KeyRound, Link2, Lock, Palette, Plus, RotateCcw, RotateCw, Save, Trash2, Unlock } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { validateDfd } from '../core/dfd';
+import { dataDictionary, validateDfd } from '../core/dfd';
 import { createEntityField, entityAutoHeight, entityVariantOptions, foreignKeyForRelationship, normalizeEntityFields, normalizeEntityIndexes, parseEntityFields, relationshipForForeignKey, validateErd } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
@@ -11,6 +11,7 @@ import { edgeRouting, orthogonalRoutingMode, resolveEndpointPoint } from '../cor
 import { pluginManager } from '../plugins';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { EntityField, EntityReference, EntityVariant, ReferentialAction } from '../core/erd';
+import type { DfdDataDictionaryEntry } from '../core/dfd';
 import { InspectorDockHeader } from './DockHeader';
 import type { LayoutMode } from '../core/layout';
 
@@ -64,7 +65,8 @@ function EmptyProperties({ document, page }: { document: DiagramDocument; page?:
   const settings = page?.settings;
   return <aside className="properties-panel empty-properties">
      <InspectorHeading />
-     {page && <div className="page-summary"><strong>{page.name}</strong><span>Page settings · nothing selected</span></div>}
+      {page && <div className="page-summary"><strong>{page.name}</strong><span>{document.diagramType === 'dfd' ? `DFD level ${typeof page.data?.dfdLevel === 'number' ? page.data.dfdLevel : 0} · ${dataDictionary(page).length} dictionary entries` : 'Page settings · nothing selected'}</span></div>}
+      {document.diagramType === 'dfd' && page && <DfdPageProperties document={document} page={page} />}
      {settings && <>
        <InspectorSection id="page.canvas" title="Canvas"><label className="field-label">Background<div className="page-background-field"><input aria-label="Page background" type="color" value={/^#[0-9a-f]{6}$/i.test(settings.background) ? settings.background : '#10131c'} onChange={(event) => updatePageSettings({ background: event.target.value }, page?.id, 'Change page background')} /><span>{settings.background}</span></div></label><div className="coordinate-grid"><label className="field-label">Width<input aria-label="Page width" type="number" min="320" value={settings.width} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 320) updatePageSettings({ width: value }, page?.id, 'Change page width'); }} /></label><label className="field-label">Height<input aria-label="Page height" type="number" min="240" value={settings.height} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 240) updatePageSettings({ height: value }, page?.id, 'Change page height'); }} /></label></div><label className="field-label">Theme<select className="inspector-select" aria-label="Page theme" value={settings.canvasTheme} onChange={(event) => updatePageSettings({ canvasTheme: event.target.value as DiagramPage['settings']['canvasTheme'] }, page?.id, 'Change page theme')}><option value="dark">Dark canvas</option><option value="light">Light canvas</option></select></label></InspectorSection>
        <InspectorSection id="page.grid" title="Grid"><label className="field-label">Grid size<input aria-label="Grid size" type="number" min="1" max="240" value={settings.gridSize} onChange={(event) => updatePageSettings({ gridSize: Math.max(1, Number(event.target.value) || settings.gridSize) }, page?.id, 'Change grid size')} /></label><div className="empty-setting-toggles"><div className="entity-style-toggle"><span>Show grid</span><button className={settings.gridVisible ? 'toggle-button active' : 'toggle-button'} aria-label="Toggle page grid" aria-pressed={settings.gridVisible} onClick={() => updatePageSettings({ gridVisible: !settings.gridVisible }, page?.id, 'Toggle grid')}><span /></button></div><div className="entity-style-toggle"><span>Snap to grid</span><button className={getSnapSettings(settings).grid ? 'toggle-button active' : 'toggle-button'} aria-label="Toggle page snapping" aria-pressed={getSnapSettings(settings).grid} onClick={() => updatePageSettings({ snapSettings: { grid: !getSnapSettings(settings).grid } }, page?.id, 'Toggle grid snapping')}><span /></button></div></div></InspectorSection>
@@ -72,7 +74,29 @@ function EmptyProperties({ document, page }: { document: DiagramDocument; page?:
      </>}
      <InspectorSection id="page.shortcuts" title="Shortcuts"><div className="empty-shortcuts"><span><kbd>V</kbd> Select</span><span><kbd>C</kbd> Connector</span><span><kbd>Space</kbd> Pan</span><span><kbd>⌘ K</kbd> Commands</span></div></InspectorSection>
    </aside>;
- }
+  }
+
+function DfdPageProperties({ document, page }: { document: DiagramDocument; page: DiagramPage }) {
+  const updatePageData = useEditorStore((state) => state.updatePageData);
+  const setActivePage = useEditorStore((state) => state.setActivePage);
+  const entries = dataDictionary(page);
+  const parentPageId = typeof page.data?.parentPageId === 'string' ? page.data.parentPageId : undefined;
+  const parentPage = parentPageId ? document.pages.find((candidate) => candidate.id === parentPageId) : undefined;
+  const parentProcessId = typeof page.data?.parentProcessId === 'string' ? page.data.parentProcessId : undefined;
+  const parentProcess = parentPage?.nodes.find((node) => node.id === parentProcessId);
+  const updateEntry = (index: number, changes: Partial<DfdDataDictionaryEntry>) => {
+    updatePageData({ dataDictionary: entries.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry) }, page.id, 'Edit data dictionary');
+  };
+  const addEntry = () => updatePageData({ dataDictionary: [...entries, { name: `new_data_${entries.length + 1}`, type: '', description: '' }] }, page.id, 'Add data dictionary entry');
+  const removeEntry = (index: number) => updatePageData({ dataDictionary: entries.filter((_, entryIndex) => entryIndex !== index) }, page.id, 'Delete data dictionary entry');
+  return <>
+    <InspectorSection id="page.dfd" title="DFD page"><div className="dfd-page-meta"><span>Level <strong>{typeof page.data?.dfdLevel === 'number' ? page.data.dfdLevel : 0}</strong></span>{parentPage && <span>Child of <strong>{parentProcess ? nodeLabel(parentProcess) : parentPage.name}</strong></span>}</div>{parentPage && <button className="secondary-button dfd-parent-button" onClick={() => setActivePage(parentPage.id)}>Open parent page</button>}<span className="inspector-hint">Page level and parent links are maintained by process decomposition.</span></InspectorSection>
+    <InspectorSection id="page.dfd-dictionary" title="Data dictionary" action={<button className="property-add" title="Add data dictionary entry" aria-label="Add data dictionary entry" onClick={addEntry}><Plus size={13} /></button>}>
+      {entries.length === 0 ? <span className="inspector-hint">Define the named data carried by your flows. Flow labels are checked against these entries.</span> : <div className="dfd-dictionary-list">{entries.map((entry, index) => <div className="dfd-dictionary-entry" key={`${index}-${entry.name}`}><div className="dfd-dictionary-row"><input aria-label={`Data dictionary entry ${index + 1} name`} value={entry.name} placeholder="Name" onChange={(event) => updateEntry(index, { name: event.target.value })} /><input aria-label={`Data dictionary entry ${index + 1} type`} value={entry.type ?? ''} placeholder="Type" onChange={(event) => updateEntry(index, { type: event.target.value })} /><button className="field-delete" title={`Delete data dictionary entry ${index + 1}`} aria-label={`Delete data dictionary entry ${index + 1}`} onClick={() => removeEntry(index)}><Trash2 size={11} /></button></div><textarea aria-label={`Data dictionary entry ${index + 1} description`} value={entry.description ?? ''} placeholder="Description" rows={2} onChange={(event) => updateEntry(index, { description: event.target.value })} /></div>)}</div>}
+      <span className="inspector-hint">Use one entry per flow name; type and description are optional documentation.</span>
+    </InspectorSection>
+  </>;
+}
 
 function EntityAdvancedFields({ fields, entities, indexes, updateFields, updateIndexes, onCreateRelationship }: { fields: EntityField[]; entities: DiagramNode[]; indexes: ReturnType<typeof normalizeEntityIndexes>; updateFields: (fields: EntityField[], action?: string) => void; updateIndexes: (indexes: ReturnType<typeof normalizeEntityIndexes>, action?: string) => void; onCreateRelationship: (fieldId: string) => void }) {
   const [pasteText, setPasteText] = useState('');

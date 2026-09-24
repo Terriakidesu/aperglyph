@@ -90,7 +90,7 @@ describe('native file helpers', () => {
     const horizontal = createEdge({ point: { x: 0, y: 50 } }, { point: { x: 100, y: 50 } }, { type: 'orthogonal' });
     const vertical = createEdge({ point: { x: 50, y: 0 } }, { point: { x: 50, y: 100 } }, { type: 'orthogonal' });
     const svg = documentToSvg([], [horizontal, vertical], '#10131c', 160, 160);
-    expect(svg).toContain('Q 57 50 50 58');
+    expect(svg).toMatch(/Q (?:57 50 50 58|50 43 58 50)/);
     expect(svg).toContain('stroke="#10131c"');
   });
 

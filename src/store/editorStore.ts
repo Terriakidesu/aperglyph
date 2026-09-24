@@ -27,6 +27,7 @@ import {
   UpdateDocumentPaletteCommand,
   UpdateNodeCommand,
   UpdateNodeStylesCommand,
+  UpdatePageDataCommand,
   UpdateNodesCommand,
   UpdatePageGuidesCommand,
   UpdatePageSettingsCommand,
@@ -108,6 +109,7 @@ interface EditorStore {
   duplicatePage: (pageId?: string) => void;
   reorderPage: (pageId: string, toIndex: number) => void;
   updatePageSettings: (changes: PageSettingsPatch, pageId?: string, label?: string) => void;
+  updatePageData: (changes: Record<string, unknown>, pageId?: string, label?: string) => void;
   updateGuides: (guides: DiagramGuide[], pageId?: string, label?: string) => void;
   undo: () => void;
   redo: () => void;
@@ -485,6 +487,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     updatePageSettings: (changes, pageId = get().activePageId, label = 'Update page settings') => {
       const { document } = get();
       const next = manager.execute(new UpdatePageSettingsCommand(pageId, changes, label), document);
+      updateDocument(next, label);
+    },
+    updatePageData: (changes, pageId = get().activePageId, label = 'Update page data') => {
+      const { document } = get();
+      const next = manager.execute(new UpdatePageDataCommand(pageId, changes, label), document);
       updateDocument(next, label);
     },
     updateGuides: (guides, pageId = get().activePageId, label = 'Update guides') => {

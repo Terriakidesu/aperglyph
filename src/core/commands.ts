@@ -426,6 +426,22 @@ export class UpdatePageSettingsCommand implements DocumentCommand {
   }
 }
 
+export class UpdatePageDataCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly changes: Record<string, unknown>, label = 'Update page data') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.pages = next.pages.map((page) => page.id === this.pageId
+      ? { ...page, data: { ...(page.data ?? {}), ...structuredClone(this.changes) } }
+      : page);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class UpdateDocumentPaletteCommand implements DocumentCommand {
   readonly label = 'Update document palette';
   constructor(private readonly palette: string[]) {}

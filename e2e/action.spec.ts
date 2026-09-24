@@ -450,6 +450,19 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.diagnostics-panel')).toBeVisible();
   });
 
+  test('edits a DFD page data dictionary', async ({ page }) => {
+    await page.getByRole('button', { name: 'Data flow diagram See information in motion 3 elements · 2 flows' }).click();
+    await expect(page.getByText('DFD level 0 · 0 dictionary entries')).toBeVisible();
+    await page.getByRole('button', { name: 'Add data dictionary entry', exact: true }).click();
+    await page.getByLabel('Data dictionary entry 1 name').fill('Order details');
+    await page.getByLabel('Data dictionary entry 1 type').fill('Order');
+    await page.getByLabel('Data dictionary entry 1 description').fill('Customer order submitted for processing.');
+    await expect(page.getByText('DFD level 0 · 1 dictionary entries')).toBeVisible();
+    await expect(page.getByLabel('Data dictionary entry 1 name')).toHaveValue('Order details');
+    for (let index = 0; index < 4; index += 1) await page.getByTitle('Undo (⌘Z)').click();
+    await expect(page.getByText('DFD level 0 · 0 dictionary entries')).toBeVisible();
+  });
+
   test('creates an undoable child page from a DFD process', async ({ page }) => {
     await page.getByRole('button', { name: 'Data flow diagram See information in motion 3 elements · 2 flows' }).click();
     await page.locator('.canvas-node').filter({ hasText: 'Manage order' }).click();
