@@ -19,8 +19,8 @@ export const generalPlugin: DiagramPlugin = {
   shapes: [
     { id: 'rectangle', type: 'rectangle', label: 'Rectangle', icon: 'square', category: 'Basic', aliases: ['box', 'square'], renderer: 'rectangle' },
     { id: 'rounded-rectangle', type: 'rounded-rectangle', label: 'Rounded rectangle', icon: 'rounded-rectangle', category: 'Basic', aliases: ['rounded box', 'pill'], renderer: 'rounded-rectangle' },
-    { id: 'circle', type: 'circle', label: 'Circle', icon: 'circle', category: 'Basic', aliases: ['round'], defaultSize: { width: 112, height: 112 }, renderer: 'ellipse', boundary: 'ellipse' },
-    { id: 'ellipse', type: 'ellipse', label: 'Ellipse', icon: 'circle', category: 'Basic', aliases: ['oval', 'round rectangle'], defaultSize: { width: 160, height: 100 }, renderer: 'ellipse', boundary: 'ellipse' },
+    { id: 'circle', type: 'circle', label: 'Circle', icon: 'circle', category: 'Basic', aliases: ['round'], defaultSize: { width: 112, height: 112 }, renderer: 'ellipse', boundary: 'ellipse', aspectRatio: 1 },
+    { id: 'ellipse', type: 'ellipse', label: 'Ellipse', icon: 'circle', category: 'Basic', aliases: ['oval'], defaultSize: { width: 160, height: 100 }, renderer: 'ellipse', boundary: 'ellipse' },
     { id: 'diamond', type: 'diamond', label: 'Diamond', icon: 'diamond', category: 'Basic', aliases: ['rhombus'], defaultSize: { width: 160, height: 110 }, renderer: 'diamond', boundary: 'diamond' },
     { id: 'triangle', type: 'triangle', label: 'Triangle', icon: 'triangle', category: 'Basic', aliases: ['arrowhead'], defaultSize: { width: 150, height: 120 }, renderer: 'triangle' },
     { id: 'hexagon', type: 'hexagon', label: 'Hexagon', icon: 'hexagon', category: 'Basic', aliases: ['six-sided'], defaultSize: { width: 170, height: 100 }, renderer: 'hexagon' },

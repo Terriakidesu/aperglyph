@@ -42,6 +42,8 @@ export interface ShapeDefinition {
   renderer?: string;
   /** Controls connector intersection math for this shape. */
   boundary?: ShapeBoundary;
+  /** Optional intrinsic resize ratio, such as 1 for a circle. */
+  aspectRatio?: number;
   /** Marks the shape as an explicit owner for separately assigned children. */
   container?: boolean;
   /** Omit for the standard four cardinal perimeter anchors. */

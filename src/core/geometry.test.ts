@@ -57,4 +57,38 @@ describe('node connector geometry', () => {
     expect(point.x).toBeCloseTo(100, 1);
     expect(point.y).toBeCloseTo(100, 1);
   });
+
+  it.each(['database', 'cylinder', 'cloud', 'stored-data', 'manual-operation', 'delay', 'display'])('keeps %s connector intersections within the rendered bounds', (type) => {
+    const node = createNode(type, { x: 0, y: 0 }, { library: type === 'manual-operation' || type === 'delay' || type === 'display' ? 'flowchart' : 'general', size: { width: 180, height: 90 } });
+    const point = nodeConnectionPoint(node, { x: 360, y: 180 });
+    expect(point.x).toBeGreaterThanOrEqual(0);
+    expect(point.x).toBeLessThanOrEqual(180);
+    expect(point.y).toBeGreaterThanOrEqual(0);
+    expect(point.y).toBeLessThanOrEqual(90);
+  });
+
+  it('attaches corrected non-rectangular symbols from cardinal and diagonal directions', () => {
+    const shapes = [
+      ['ellipse', 'general'], ['diamond', 'general'], ['cloud', 'general'], ['cylinder', 'general'],
+      ['document', 'flowchart'], ['stored-data', 'flowchart'], ['manual-operation', 'flowchart'],
+      ['delay', 'flowchart'], ['display', 'flowchart'], ['off-page-connector', 'flowchart'],
+    ] as const;
+    const targets = [{ x: 90, y: -180 }, { x: 360, y: 45 }, { x: 90, y: 270 }, { x: -180, y: 45 }, { x: 360, y: 180 }];
+    shapes.forEach(([type, library]) => {
+      const node = createNode(type, { x: 0, y: 0 }, { library, size: { width: 180, height: 90 } });
+      targets.forEach((target) => {
+        const point = nodeConnectionPoint(node, target);
+        expect(point.x, `${library}/${type} x`).toBeGreaterThanOrEqual(0);
+        expect(point.x, `${library}/${type} x`).toBeLessThanOrEqual(180);
+        expect(point.y, `${library}/${type} y`).toBeGreaterThanOrEqual(0);
+        expect(point.y, `${library}/${type} y`).toBeLessThanOrEqual(90);
+      });
+    });
+  });
+
+  it('updates the DFD connector boundary with the selected notation', () => {
+    const process = createNode('process', { x: 0, y: 0 }, { library: 'dfd', size: { width: 120, height: 84 }, data: { notation: 'gane-sarson' } });
+    const point = nodeConnectionPoint(process, { x: 300, y: 42 });
+    expect(point).toEqual({ x: 120, y: 42 });
+  });
 });

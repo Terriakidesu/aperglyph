@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 import { edgeRoute } from './routing';
 
@@ -111,6 +111,29 @@ describe('command history', () => {
     expect(manager.undo(next)?.pages[0].nodes).toHaveLength(1);
   });
 
+  it('changes a shape in place and detaches children from a removed container', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const frame = createNode('frame', { x: 40, y: 60 }, { container: true });
+    const child = { ...createNode('rectangle', { x: 80, y: 100 }), containerId: frame.id };
+    const edgeTarget = createNode('circle', { x: 360, y: 60 });
+    const edge = createEdge({ nodeId: frame.id }, { nodeId: edgeTarget.id });
+    document.pages[0].nodes.push(frame, child, edgeTarget);
+    document.pages[0].edges.push(edge);
+
+    const next = new CommandManager().execute(new ChangeNodeShapeCommand(pageId, frame.id, {
+      library: 'flowchart',
+      type: 'decision',
+      boundary: 'diamond',
+      container: undefined,
+      data: { label: 'Keep this label' },
+    }, 'Decision'), document);
+
+    expect(next.pages[0].nodes.find((node) => node.id === frame.id)).toMatchObject({ library: 'flowchart', type: 'decision', boundary: 'diamond', position: frame.position, data: { label: 'Keep this label' } });
+    expect(next.pages[0].nodes.find((node) => node.id === child.id)?.containerId).toBeUndefined();
+    expect(next.pages[0].edges[0]).toMatchObject({ source: { nodeId: frame.id }, target: { nodeId: edgeTarget.id } });
+  });
+
   it('creates and offsets free endpoints', () => {
     const document = createDocument();
     const pageId = document.pages[0].id;
@@ -122,6 +145,17 @@ describe('command history', () => {
     const payload = selectionClipboard(next, pageId, [edge.id]);
     const offset = offsetClipboard(payload, { x: 24, y: 18 });
     expect(offset.edges[0].source.point).toEqual({ x: 44, y: 48 });
+  });
+
+  it('computes cursor paste bounds and repeat-duplicate spacing', () => {
+    const first = createNode('rectangle', { x: 10, y: 20 }, { size: { width: 100, height: 50 } });
+    const second = createNode('ellipse', { x: 160, y: 40 }, { size: { width: 80, height: 40 } });
+    const bounds = clipboardBounds({ nodes: [first, second], edges: [] });
+    expect(bounds).toEqual({ x: 10, y: 20, width: 230, height: 60 });
+    expect(inferDuplicateOffset([first, second], [first.id, second.id], {
+      [first.id]: { x: -10, y: 5 },
+      [second.id]: { x: 140, y: 25 },
+    })).toEqual({ x: 20, y: 15 });
   });
 
   it('clears stale free geometry when reconnecting an endpoint to a node', () => {

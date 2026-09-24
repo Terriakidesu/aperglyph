@@ -74,30 +74,8 @@ function shapePolygon(node: DiagramNode, renderer: string): Point[] | null {
   const sharedBoundary = silhouetteBoundaryPoints(renderer, node.size.width, node.size.height, node.style.radius);
   if (sharedBoundary) return offsetPoints(node, sharedBoundary.map((point) => [point.x, point.y]));
   switch (renderer) {
-    case 'diamond':
-    case 'decision':
-      return diamondPoints(node);
-    case 'manual-input':
-      return offsetPoints(node, [[18, 0], [node.size.width, 0], [node.size.width - 18, node.size.height], [0, node.size.height]]);
-    case 'preparation':
-      return offsetPoints(node, [[24, 0], [node.size.width - 24, 0], [node.size.width, node.size.height / 2], [node.size.width - 24, node.size.height], [24, node.size.height], [0, node.size.height / 2]]);
-    case 'off-page-connector':
-      return offsetPoints(node, [[0, 0], [node.size.width, 0], [node.size.width, node.size.height * .68], [node.size.width / 2, node.size.height], [0, node.size.height * .68]]);
-    case 'document':
-      return documentPoints(node);
-    case 'database':
-      return databasePoints(node);
-    case 'display':
-      return displayPoints(node);
-    case 'delay':
-      return delayPoints(node);
-    case 'stored-data':
-      return roundedRectanglePoints(node, 12);
     case 'boundary':
-    case 'predefined-process':
     case 'entity':
-    case 'dfd-store':
-    case 'store':
     case 'actor':
     case 'line':
       return roundedRectanglePoints(node, renderer === 'boundary' ? node.style.radius : 0);
@@ -136,78 +114,8 @@ function roundedRectanglePoints(node: DiagramNode, radius: number): Point[] {
   return points;
 }
 
-function documentPoints(node: DiagramNode): Point[] {
-  const { width, height } = node.size;
-  const points: Point[] = [{ x: node.position.x, y: node.position.y }, { x: node.position.x + width, y: node.position.y }, { x: node.position.x + width, y: node.position.y + height - 16 }];
-  appendQuadratic(points, { x: node.position.x + width, y: node.position.y + height - 16 }, { x: node.position.x + width * .75, y: node.position.y + height }, { x: node.position.x + width * .5, y: node.position.y + height - 16 });
-  appendQuadratic(points, { x: node.position.x + width * .5, y: node.position.y + height - 16 }, { x: node.position.x + width * .25, y: node.position.y + height - 32 }, { x: node.position.x, y: node.position.y + height - 16 });
-  points.push({ x: node.position.x, y: node.position.y });
-  return points;
-}
-
-function databasePoints(node: DiagramNode): Point[] {
-  const { width, height } = node.size;
-  const left = node.position.x;
-  const top = node.position.y;
-  const points: Point[] = [{ x: left, y: top + height * .18 }];
-  appendCubic(points, points[0], { x: left, y: top }, { x: left + width, y: top }, { x: left + width, y: top + height * .18 });
-  points.push({ x: left + width, y: top + height * .8 });
-  appendCubic(points, points.at(-1)!, { x: left + width, y: top + height + height * .02 }, { x: left, y: top + height + height * .02 }, { x: left, y: top + height * .8 });
-  points.push(points[0]);
-  return points;
-}
-
-function displayPoints(node: DiagramNode): Point[] {
-  const { width, height } = node.size;
-  const left = node.position.x;
-  const top = node.position.y;
-  const right = left + width - 28;
-  const points: Point[] = [{ x: left, y: top }, { x: right, y: top }];
-  appendQuadratic(points, points.at(-1)!, { x: left + width, y: top + height / 2 }, { x: right, y: top + height });
-  points.push({ x: left, y: top + height });
-  appendQuadratic(points, points.at(-1)!, { x: left + 28, y: top + height / 2 }, { x: left, y: top });
-  return points;
-}
-
-function delayPoints(node: DiagramNode): Point[] {
-  const { width, height } = node.size;
-  const left = node.position.x;
-  const top = node.position.y;
-  const radiusX = 28;
-  const centerX = left + width - radiusX;
-  const points: Point[] = [{ x: left, y: top }, { x: centerX, y: top }];
-  for (let index = 1; index <= 8; index += 1) {
-    const angle = -Math.PI / 2 + Math.PI * index / 8;
-    points.push({ x: centerX + Math.cos(angle) * radiusX, y: top + height / 2 + Math.sin(angle) * height / 2 });
-  }
-  points.push({ x: left, y: top + height });
-  return points;
-}
-
 function offsetPoints(node: DiagramNode, points: Array<[number, number]>): Point[] {
   return points.map(([x, y]) => ({ x: node.position.x + x, y: node.position.y + y }));
-}
-
-function appendQuadratic(points: Point[], from: Point, control: Point, to: Point): void {
-  for (let index = 1; index <= 8; index += 1) {
-    const t = index / 8;
-    const inverse = 1 - t;
-    points.push({
-      x: inverse * inverse * from.x + 2 * inverse * t * control.x + t * t * to.x,
-      y: inverse * inverse * from.y + 2 * inverse * t * control.y + t * t * to.y,
-    });
-  }
-}
-
-function appendCubic(points: Point[], from: Point, firstControl: Point, secondControl: Point, to: Point): void {
-  for (let index = 1; index <= 8; index += 1) {
-    const t = index / 8;
-    const inverse = 1 - t;
-    points.push({
-      x: inverse ** 3 * from.x + 3 * inverse ** 2 * t * firstControl.x + 3 * inverse * t ** 2 * secondControl.x + t ** 3 * to.x,
-      y: inverse ** 3 * from.y + 3 * inverse ** 2 * t * firstControl.y + 3 * inverse * t ** 2 * secondControl.y + t ** 3 * to.y,
-    });
-  }
 }
 
 function polygonIntersection(origin: Point, target: Point, polygon: Point[]): Point {

@@ -1,33 +1,15 @@
-import { ArrowRight, ChevronDown, Circle, Cloud, Database, Diamond, Hexagon, Package, Pentagon, RectangleHorizontal, Search, Square, Star, Table2, Triangle, Type, Workflow } from 'lucide-react';
+import { ChevronDown, Search, Star } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { pluginManager } from '../plugins';
-import type { ShapeDefinition, ShapeIconId } from '../plugins';
+import type { ShapeDefinition } from '../plugins';
 import { createNode } from '../core/document';
 import { SHAPE_DRAG_MIME, serializeShapeDrop } from '../core/shapeTransfer';
 import { useEditorStore } from '../store/editorStore';
 import { LeftDockHeader, type LeftPanelId } from './DockHeader';
+import { NodeGraphic } from './NodeGraphic';
 
 const FAVORITES_KEY = 'aperglyph.shape-library.favorites';
 const RECENT_KEY = 'aperglyph.shape-library.recent';
-
-const iconMap: Record<ShapeIconId, typeof Square> = {
-  square: Square,
-  'rounded-rectangle': RectangleHorizontal,
-  circle: Circle,
-  diamond: Diamond,
-  text: Type,
-  line: RectangleHorizontal,
-  database: Database,
-  table: Table2,
-  workflow: Workflow,
-  cloud: Cloud,
-  triangle: Triangle,
-  hexagon: Hexagon,
-  pentagon: Pentagon,
-  package: Package,
-  arrow: ArrowRight,
-  data: Database,
-};
 
 type LibraryFilter = 'all' | 'favorites' | 'recent';
 type LibraryScope = 'all' | string;
@@ -119,12 +101,25 @@ function groupShapes(shapes: ShapeDefinition[], fallback: string): Array<[string
 }
 
 function ShapeGroup({ title, shapes, open, onToggle, onAdd, libraryId, isFavorite, onToggleFavorite, isRecent }: { title: string; shapes: ShapeDefinition[]; open: boolean; onToggle: () => void; onAdd: (shape: ShapeDefinition) => void; libraryId: string; isFavorite: (libraryId: string, shape: ShapeDefinition) => boolean; onToggleFavorite: (libraryId: string, shape: ShapeDefinition) => void; isRecent: (shape: ShapeDefinition) => boolean }) {
-  return <div className="shape-group"><button className="group-heading" onClick={onToggle}><span>{title}</span><ChevronDown size={14} className={!open ? 'collapsed' : ''} /></button>{open && <div className="shape-list">{shapes.map((shape) => <div className={`shape-item-row ${isRecent(shape) ? 'recent' : ''}`} key={`${shape.id}-${shape.type}`}><button className="shape-item" draggable title={`Drag ${shape.label} onto the canvas`} onClick={() => onAdd(shape)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; const payload = serializeShapeDrop(libraryId, shape); event.dataTransfer.setData(SHAPE_DRAG_MIME, payload); event.dataTransfer.setData('text/plain', payload); }}>{shapeIcon(shape)}<span>{shape.label}</span><span className="shape-drag-hint">+</span></button><button className={isFavorite(libraryId, shape) ? 'shape-favorite active' : 'shape-favorite'} title={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} aria-label={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} onClick={() => onToggleFavorite(libraryId, shape)}><Star size={12} fill={isFavorite(libraryId, shape) ? 'currentColor' : 'none'} /></button></div>)}</div>}</div>;
+  return <div className="shape-group"><button className="group-heading" onClick={onToggle}><span>{title}</span><ChevronDown size={14} className={!open ? 'collapsed' : ''} /></button>{open && <div className="shape-list">{shapes.map((shape) => <div className={`shape-item-row ${isRecent(shape) ? 'recent' : ''}`} key={`${shape.id}-${shape.type}`}><button className="shape-item" draggable title={`Drag ${shape.label} onto the canvas`} onClick={() => onAdd(shape)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; const payload = serializeShapeDrop(libraryId, shape); event.dataTransfer.setData(SHAPE_DRAG_MIME, payload); event.dataTransfer.setData('text/plain', payload); }}>{shapeIcon(shape, libraryId)}<span>{shape.label}</span><span className="shape-drag-hint">+</span></button><button className={isFavorite(libraryId, shape) ? 'shape-favorite active' : 'shape-favorite'} title={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} aria-label={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} onClick={() => onToggleFavorite(libraryId, shape)}><Star size={12} fill={isFavorite(libraryId, shape) ? 'currentColor' : 'none'} /></button></div>)}</div>}</div>;
 }
 
-function shapeIcon(shape: ShapeDefinition) {
-  const Icon = iconMap[shape.icon] ?? Square;
-  return <div className={`shape-mini ${shape.type}`}><Icon size={16} /></div>;
+function shapeIcon(shape: ShapeDefinition, libraryId: string) {
+  const width = shape.aspectRatio === 1 ? 28 : 32;
+  const height = shape.aspectRatio === 1 ? 28 : 24;
+  const padding = 3;
+  const preview = createNode(shape.type, { x: 0, y: 0 }, {
+    library: libraryId,
+    size: { width, height },
+    boundary: shape.boundary,
+    container: shape.container,
+    // Palette geometry is a fixed stencil, not a text-bearing canvas node.
+    // Disable normal auto-height so a 24px preview is not expanded by its
+    // empty label before the silhouette is rendered.
+    style: { ...shape.defaultStyle, autoHeight: false, textWrap: false },
+    data: { ...(shape.defaultData ?? {}), label: '' },
+  });
+  return <div className={`shape-mini ${shape.type}`}><svg className="shape-preview-svg" viewBox={`${-padding} ${-padding} ${width + padding * 2} ${height + padding * 2}`} aria-hidden="true"><NodeGraphic node={preview} diagramType={libraryId} showLabel={false} preview /></svg></div>;
 }
 
 function readList(key: string): string[] {

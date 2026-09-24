@@ -360,14 +360,12 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
     const numberMarkup = renderer === 'gane-process' && typeof node.data.number === 'string'
       ? `<text x="${width / 2}" y="17" text-anchor="middle" fill="${textColor}" font-family="sans-serif" font-size="9" font-weight="600">${escapeXml(node.data.number)}</text>`
       : '';
-    const labelOptions = ['package', 'folded-note', 'system-boundary'].includes(renderer) ? { align: 'left' as const, vertical: 'top' as const, padding: 14 } : {};
+    const labelOptions = ['package', 'folded-note', 'system-boundary'].includes(renderer)
+      ? { align: 'left' as const, vertical: 'top' as const, padding: 14 }
+      : renderer === 'actor' ? { vertical: 'bottom' as const } : {};
     const labelMarkup = ['line', 'arrow-line'].includes(renderer) ? '' : svgTextMarkup(node, rawLabel, width, height, textColor, labelOptions);
     return `<g transform="${transform}">${primitiveMarkup}${numberMarkup}${labelMarkup}</g>`;
   }
-  if (renderer === 'database') return `<g transform="${transform}"><path d="M 0 ${height * .18} C 0 0 ${width} 0 ${width} ${height * .18} L ${width} ${height * .8} C ${width} ${height + height * .02} 0 ${height + height * .02} 0 ${height * .8} Z M 0 ${height * .18} C 0 ${height * .36} ${width} ${height * .36} ${width} ${height * .18}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-  if (renderer === 'document') return `<g transform="${transform}"><path d="M 0 0 H ${width} V ${height - 16} Q ${width * .75} ${height} ${width * .5} ${height - 16} Q ${width * .25} ${height - 32} 0 ${height - 16} Z" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-  if (renderer === 'manual-input') return `<g transform="${transform}"><polygon points="18,0 ${width},0 ${width - 18},${height} 0,${height}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-  if (renderer === 'preparation') return `<g transform="${transform}"><polygon points="24,0 ${width - 24},0 ${width},${height / 2} ${width - 24},${height} 24,${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
   if (renderer === 'entity') {
       const fields = normalizeEntityFields(node.data.fields);
       const columns = entityColumns(node.data.entityVariant, width);
@@ -398,25 +396,9 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
      }).join('');
          return `<g transform="${transform}" opacity="${node.style.opacity}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative || isView ? ' stroke-dasharray="5 3"' : ''}/>${isWeak ? `<rect x="4" y="4" width="${Math.max(0, width - 8)}" height="${Math.max(0, height - 8)}" rx="${Math.max(0, radius - 2)}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/>` : ''}<rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="${node.style.fontSize}" font-weight="${node.style.fontWeight}" text-anchor="middle">${label}</text></g>`;
    }
-    if (renderer === 'ellipse') {
-       return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-   }
-   if (renderer === 'dfd-store' || renderer === 'store') {
-        return `<g transform="${transform}"><line x1="0" y1="10" x2="${width}" y2="10" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/><line x1="0" y1="${height - 10}" x2="${width}" y2="${height - 10}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-   }
-   if (renderer === 'use-case') {
-        return `<g transform="${transform}"><ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-   }
-   if (renderer === 'actor') {
-    const center = width / 2;
-       return `<g transform="${transform}"><circle cx="${center}" cy="22" r="14" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/><path d="M${center} 36 L${center} 84 M${center - 22} 52 L${center + 22} 52 M${center} 84 L${center - 18} 116 M${center} 84 L${center + 18} 116" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round"/>${svgTextMarkup(node, rawLabel, width, height, textColor, { vertical: 'bottom' })}</g>`;
-  }
    if (renderer === 'boundary') {
        return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor, { align: 'left', vertical: 'top', padding: 18, fontFamily: 'monospace' })}</g>`;
   }
-   if (renderer === 'diamond' || renderer === 'decision') {
-        return `<g transform="${transform}"><polygon points="${width / 2},0 ${width},${height / 2} ${width / 2},${height} 0,${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
-   }
      return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor)}</g>`;
 }
 

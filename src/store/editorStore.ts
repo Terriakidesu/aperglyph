@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   AlignNodesCommand,
   CommandManager,
+  ChangeNodeShapeCommand,
   CreateEdgeCommand,
   CreateDfdChildPageCommand,
   CreateNodeAndEdgeCommand,
@@ -33,6 +34,8 @@ import {
   UpdatePageSettingsCommand,
   UpdateStylePresetsCommand,
   offsetClipboard,
+  clipboardBounds,
+  inferDuplicateOffset,
   selectionClipboard,
 } from '../core/commands';
 import { createDocument, createEdge, createNode, createPage as buildPage, defaultNodeStyle } from '../core/document';
@@ -44,6 +47,7 @@ import type { LayoutMode } from '../core/layout';
 import { LayoutWorkerClient } from '../spatial/layoutClient';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset, ToolId, Viewport } from '../core/types';
 import { pluginManager } from '../plugins';
+import type { ShapeDefinition } from '../plugins/types';
 
 interface EditorStore {
   document: DiagramDocument;
@@ -69,6 +73,7 @@ interface EditorStore {
   createNode: (node: DiagramNode) => void;
   createEdge: (edge: DiagramEdge) => void;
   createNodeAndEdge: (node: DiagramNode, edge: DiagramEdge) => void;
+  changeNodeShape: (nodeId: string, libraryId: string, shape: ShapeDefinition) => void;
   executeCommand: (command: DocumentCommand) => void;
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   resetEdge: (edgeId?: string) => void;
@@ -92,7 +97,9 @@ interface EditorStore {
   copySelection: () => ClipboardPayload | null;
   cutSelection: () => void;
   pasteClipboard: () => void;
+  pasteClipboardAt: (point?: Point) => void;
   pastePayload: (payload: ClipboardPayload, offset?: Point) => void;
+  pastePayloadAt: (payload: ClipboardPayload, point: Point) => void;
   duplicateSelection: (offset?: Point) => string[];
   rotateSelection: (degrees?: number) => void;
   alignSelection: (alignment: Alignment) => void;
@@ -125,8 +132,15 @@ function historySnapshot(manager: CommandManager) {
   };
 }
 
+interface DuplicateChain {
+  selectionIds: string[];
+  /** Position of each source item, keyed by its newly-created node id. */
+  sourcePositions: Record<string, Point>;
+}
+
 export const useEditorStore = create<EditorStore>((set, get) => {
   const manager = new CommandManager();
+  let duplicateChain: DuplicateChain | null = null;
   const updateDocument = (document: DiagramDocument, action: string) => {
     const history = historySnapshot(manager);
     set({ document, isDirty: true, ...history });
@@ -150,13 +164,20 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     commandManager: manager,
     setDocument: (document) => {
       manager.clear();
+      duplicateChain = null;
       set({ document, activePageId: document.pages[0]?.id ?? '', selectedIds: [], primarySelectedId: null, styleClipboard: null, formatPainter: null, isDirty: false, lastSavedAt: document.updatedAt, lastAction: null });
       editorEvents.emit('document:opened', { document });
       editorEvents.emit('history:changed', { canUndo: false, canRedo: false, lastAction: null });
     },
     markSaved: (savedAt = Date.now()) => set({ isDirty: false, lastSavedAt: savedAt }),
-    setActivePage: (pageId) => set({ activePageId: pageId, selectedIds: [], primarySelectedId: null }),
+    setActivePage: (pageId) => {
+      duplicateChain = null;
+      set({ activePageId: pageId, selectedIds: [], primarySelectedId: null });
+    },
     setSelection: (ids, primaryId = ids.at(-1) ?? null) => {
+      const current = get();
+      const sameSelection = current.selectedIds.length === ids.length && current.selectedIds.every((id, index) => id === ids[index]);
+      if (!sameSelection) duplicateChain = null;
       set({ selectedIds: ids, primarySelectedId: primaryId });
       editorEvents.emit('selection:changed', { ids });
     },
@@ -191,6 +212,22 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       get().setSelection([node.id, edge.id], edge.id);
       editorEvents.emit('node:created', { nodeId: node.id });
       editorEvents.emit('edge:created', { edgeId: edge.id });
+    },
+    changeNodeShape: (nodeId, libraryId, shape) => {
+      const { activePageId, document } = get();
+      const page = getActivePage(document, activePageId);
+      const node = page?.nodes.find((candidate) => candidate.id === nodeId);
+      if (!node || node.locked) return;
+      const label = typeof node.data.label === 'string' && node.data.label.trim() ? node.data.label : shape.label;
+      const data = { ...node.data, ...(shape.defaultData ?? {}), label };
+      const next = manager.execute(new ChangeNodeShapeCommand(activePageId, nodeId, {
+        library: libraryId,
+        type: shape.type,
+        boundary: shape.boundary,
+        container: shape.container,
+        data,
+      }, shape.label), document);
+      updateDocument(next, `Change shape · ${shape.label}`);
     },
     executeCommand: (command) => {
       const { document } = get();
@@ -356,23 +393,56 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (!clipboard || (clipboard.nodes.length === 0 && clipboard.edges.length === 0)) return;
       get().pastePayload(clipboard);
     },
-     pastePayload: (source, offset = { x: 24, y: 24 }) => {
+    pasteClipboardAt: (point) => {
+      if (!point) {
+        get().pasteClipboard();
+        return;
+      }
+      const { clipboard } = get();
+      if (!clipboard || (clipboard.nodes.length === 0 && clipboard.edges.length === 0)) return;
+      get().pastePayloadAt(clipboard, point);
+    },
+    pastePayloadAt: (source, point) => {
+      const bounds = clipboardBounds(source);
+      const offset = bounds
+        ? { x: point.x - (bounds.x + bounds.width / 2), y: point.y - (bounds.y + bounds.height / 2) }
+        : { x: point.x, y: point.y };
+      get().pastePayload(source, offset);
+    },
+    pastePayload: (source, offset = { x: 24, y: 24 }) => {
       const { document, activePageId } = get();
       if (source.nodes.length === 0 && source.edges.length === 0) return;
-       const payload = offsetClipboard(source, offset);
+      const payload = offsetClipboard(source, offset);
       const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
       updateDocument(next, 'Paste selection');
       get().setSelection([...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)]);
     },
-    duplicateSelection: (offset = { x: 24, y: 24 }) => {
+    duplicateSelection: (offset) => {
       const { document, activePageId, selectedIds } = get();
       const source = selectionClipboard(document, activePageId, selectedIds);
       if (source.nodes.length === 0 && source.edges.length === 0) return [];
-      const payload = offsetClipboard(source, offset);
+      const page = getActivePage(document, activePageId);
+      const selectionKey = selectedIds.slice().sort();
+      const chain = duplicateChain;
+      const chainMatches = Boolean(chain
+        && chain.selectionIds.length === selectionKey.length
+        && chain.selectionIds.every((id, index) => id === selectionKey[index]));
+      const inferred = offset === undefined && chainMatches && page && chain
+        ? inferDuplicateOffset(page.nodes, source.nodes.map((node) => node.id), chain.sourcePositions)
+        : null;
+      const payload = offsetClipboard(source, offset ?? inferred ?? { x: 24, y: 24 });
       const next = manager.execute(new DuplicateSelectionCommand(activePageId, payload), document);
       updateDocument(next, 'Duplicate selection');
       const ids = [...payload.nodes.map((node) => node.id), ...payload.edges.map((edge) => edge.id)];
+      const nextChain: DuplicateChain = {
+        selectionIds: ids.slice().sort(),
+        sourcePositions: Object.fromEntries(payload.nodes.map((node, index) => [node.id, { ...source.nodes[index].position }])),
+      };
       get().setSelection(ids);
+      // setSelection clears the chain for ordinary selection changes. Restore
+      // it after selecting the newly-created duplicate so Ctrl/Cmd+D can
+      // continue the user's spacing pattern after a manual move.
+      duplicateChain = nextChain;
       return ids;
     },
     rotateSelection: (degrees = 90) => {
@@ -436,6 +506,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       }
       const next = manager.execute(new CreatePageCommand(page), document);
       updateDocument(next, 'Create page');
+      duplicateChain = null;
       set({ activePageId: page.id, selectedIds: [], primarySelectedId: null });
     },
     renameDocument: (name) => {
@@ -452,6 +523,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const next = manager.execute(command, document);
       if (next.pages.length === document.pages.length) return;
       updateDocument(next, command.label);
+      duplicateChain = null;
       set({ activePageId: command.childPageId, selectedIds: [], primarySelectedId: null });
     },
     deletePage: (pageId = get().activePageId) => {
@@ -462,6 +534,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const next = manager.execute(new DeletePageCommand(pageId), document);
       updateDocument(next, 'Delete page');
       const nextPage = next.pages[Math.min(targetIndex, next.pages.length - 1)];
+      duplicateChain = null;
       set({ activePageId: nextPage?.id ?? activePageId, selectedIds: [], primarySelectedId: null });
     },
     renamePage: (pageId, name) => {
@@ -477,6 +550,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const command = new DuplicatePageCommand(page, pageIndex + 1);
       const next = manager.execute(command, document);
       updateDocument(next, 'Duplicate page');
+      duplicateChain = null;
       set({ activePageId: command.pageId, selectedIds: [], primarySelectedId: null });
     },
     reorderPage: (pageId, toIndex) => {
@@ -507,6 +581,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const removedEdgeIds = page?.edges.filter((edge) => selectedIds.includes(edge.id) || (edge.source.nodeId !== undefined && selectedNodeIds.includes(edge.source.nodeId)) || (edge.target.nodeId !== undefined && selectedNodeIds.includes(edge.target.nodeId))).map((edge) => edge.id) ?? [];
       const next = manager.execute(new DeleteNodesCommand(activePageId, selectedIds), document);
       updateDocument(next, 'Delete selection');
+      duplicateChain = null;
       set({ selectedIds: [], primarySelectedId: null });
       if (selectedNodeIds.length > 0) editorEvents.emit('node:removed', { nodeIds: selectedNodeIds });
       if (removedEdgeIds.length > 0) editorEvents.emit('edge:removed', { edgeIds: removedEdgeIds });
@@ -515,6 +590,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { document, activePageId } = get();
       const next = manager.undo(document);
       if (!next) return;
+      duplicateChain = null;
       const pageStillExists = next.pages.some((page) => page.id === activePageId);
       set({ document: next, activePageId: pageStillExists ? activePageId : next.pages[0]?.id ?? '', ...(pageStillExists ? {} : { selectedIds: [], primarySelectedId: null }), isDirty: true, lastAction: manager.lastAction });
       editorEvents.emit('document:changed', { document: next, action: 'Undo' });
@@ -524,6 +600,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const { document, activePageId } = get();
       const next = manager.redo(document);
       if (!next) return;
+      duplicateChain = null;
       const pageStillExists = next.pages.some((page) => page.id === activePageId);
       set({ document: next, activePageId: pageStillExists ? activePageId : next.pages[0]?.id ?? '', ...(pageStillExists ? {} : { selectedIds: [], primarySelectedId: null }), isDirty: true, lastAction: manager.lastAction });
       editorEvents.emit('document:changed', { document: next, action: 'Redo' });
@@ -532,6 +609,7 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     reset: (name = 'Untitled diagram', type = 'general') => {
       const document = createDocument(name, type);
       manager.clear();
+      duplicateChain = null;
       set({ document, activePageId: document.pages[0].id, selectedIds: [], primarySelectedId: null, styleClipboard: null, formatPainter: null, isDirty: true, lastSavedAt: null, lastAction: null, viewport: { x: 0, y: 0, zoom: 1 } });
       editorEvents.emit('document:opened', { document });
       editorEvents.emit('history:changed', { canUndo: false, canRedo: false, lastAction: null });

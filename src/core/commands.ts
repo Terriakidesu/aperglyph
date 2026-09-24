@@ -100,6 +100,45 @@ export class CreateNodeAndEdgeCommand implements DocumentCommand {
   }
 }
 
+/** Changes a node's visual/semantic shape without recreating its identity.
+ * Connections, position, size, style, and selection can therefore survive a
+ * shape correction. Children of a shape that stops being a container are
+ * detached rather than left with an invalid owner reference. */
+export class ChangeNodeShapeCommand implements DocumentCommand {
+  readonly label: string;
+
+  constructor(
+    private readonly pageId: string,
+    private readonly nodeId: string,
+    private readonly changes: Pick<DiagramNode, 'library' | 'type' | 'boundary' | 'container'> & { data: Record<string, unknown> },
+    shapeLabel = changes.type,
+  ) {
+    this.label = `Change shape · ${shapeLabel}`;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    const current = page?.nodes.find((node) => node.id === this.nodeId);
+    if (page && current && !current.locked) {
+      const patch: NodePatch = {
+        library: this.changes.library,
+        type: this.changes.type,
+        boundary: this.changes.boundary,
+        container: this.changes.container,
+        data: structuredClone(this.changes.data),
+      };
+      page.nodes = page.nodes.map((node) => {
+        if (node.id === this.nodeId) return applyNodePatch(node, patch);
+        if (node.containerId === this.nodeId && this.changes.container !== true) return { ...node, containerId: undefined };
+        return node;
+      });
+    }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class DeleteNodesCommand implements DocumentCommand {
   readonly label = 'Delete selection';
   constructor(private readonly pageId: string, private readonly selectionIds: string[]) {}
@@ -713,6 +752,45 @@ export function offsetClipboard(payload: ClipboardPayload, offset: Point = { x: 
     waypoints: edge.waypoints.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })),
   }));
   return { nodes, edges };
+}
+
+/** Bounds of the geometry carried by a clipboard payload. This includes free
+ * connector geometry so pasting a connector-only selection still lands at a
+ * useful cursor-relative location. */
+export function clipboardBounds(payload: ClipboardPayload): { x: number; y: number; width: number; height: number } | null {
+  const points: Point[] = [];
+  payload.nodes.forEach((node) => {
+    points.push(node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height });
+  });
+  payload.edges.forEach((edge) => {
+    if (edge.source.point) points.push(edge.source.point);
+    if (edge.target.point) points.push(edge.target.point);
+    points.push(...edge.waypoints);
+  });
+  if (points.length === 0) return null;
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+
+/** Infer the spacing for the next item in a duplicate chain. A median keeps a
+ * multi-node selection stable even when one member has a slightly different
+ * position because of container ownership or a prior manual adjustment. */
+export function inferDuplicateOffset(nodes: DiagramNode[], nodeIds: string[], sourcePositions: Record<string, Point>): Point | null {
+  const offsets = nodeIds.flatMap((id) => {
+    const node = nodes.find((candidate) => candidate.id === id);
+    const source = sourcePositions[id];
+    return node && source ? [{ x: node.position.x - source.x, y: node.position.y - source.y }] : [];
+  });
+  if (offsets.length === 0) return null;
+  const median = (values: number[]) => {
+    const sorted = values.slice().sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+  };
+  return { x: median(offsets.map((offset) => offset.x)), y: median(offsets.map((offset) => offset.y)) };
 }
 
 function normalizeRotation(rotation: number): number {

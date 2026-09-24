@@ -7,6 +7,7 @@ import { createNode as buildNode } from '../core/document';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
 import { getActivePage, useEditorStore } from '../store/editorStore';
+import type { Point } from '../core/types';
 import { getSnapshotLimit, normalizeSnapshotLimit, readDiagramFile, rememberActiveDocument, saveLocalTemplate, setSnapshotLimit } from '../persistence';
 import { CanvasViewport } from './CanvasViewport';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
@@ -33,8 +34,9 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const selectAll = useEditorStore((state) => state.selectAll);
   const copySelection = useEditorStore((state) => state.copySelection);
   const cutSelection = useEditorStore((state) => state.cutSelection);
-  const pasteClipboard = useEditorStore((state) => state.pasteClipboard);
+  const pasteClipboardAt = useEditorStore((state) => state.pasteClipboardAt);
   const pastePayload = useEditorStore((state) => state.pastePayload);
+  const pastePayloadAt = useEditorStore((state) => state.pastePayloadAt);
   const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
   const rotateSelection = useEditorStore((state) => state.rotateSelection);
   const groupSelection = useEditorStore((state) => state.groupSelection);
@@ -69,6 +71,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteIndex, setPaletteIndex] = useState(0);
   const paletteInputRef = useRef<HTMLInputElement>(null);
+  const lastPointerWorldRef = useRef<Point | null>(null);
   const panelResizeRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
 
   const paletteCommands: PaletteCommand[] = [
@@ -133,7 +136,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     }
   };
 
-  const readSystemClipboard = async () => {
+  const readSystemClipboard = async (point?: Point) => {
     try {
       if (navigator.clipboard?.read) {
         const items = await navigator.clipboard.read();
@@ -142,7 +145,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
           const blob = await item.getType(CLIPBOARD_MIME);
           const payload = parseClipboardPayload(await blob.text());
           if (payload) {
-            pastePayload(payload);
+            if (point) pastePayloadAt(payload, point);
+            else pastePayload(payload);
             return;
           }
         }
@@ -150,15 +154,20 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (navigator.clipboard?.readText) {
         const payload = parseClipboardPayload(await navigator.clipboard.readText());
         if (payload) {
-          pastePayload(payload);
+          if (point) pastePayloadAt(payload, point);
+          else pastePayload(payload);
           return;
         }
       }
     } catch {
       // Fall back to the last in-app copy below.
     }
-    pasteClipboard();
+    pasteClipboardAt(point);
   };
+
+  useEffect(() => editorEvents.on('pointer:changed', (point) => {
+    lastPointerWorldRef.current = point;
+  }), []);
 
   useEffect(() => {
     if (showPalette) {
@@ -264,7 +273,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (modifier && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); return; }
        if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); void writeSystemClipboard(); return; }
        if (modifier && event.key.toLowerCase() === 'x') { event.preventDefault(); void writeSystemClipboard().finally(cutSelection); return; }
-       if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); void readSystemClipboard(); return; }
+       if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); void readSystemClipboard(lastPointerWorldRef.current ?? undefined); return; }
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
@@ -281,7 +290,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboard, pastePayload, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
+    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
 
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));

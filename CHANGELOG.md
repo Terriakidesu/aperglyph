@@ -33,13 +33,19 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added explicit nested container ownership with Outline hierarchy controls, cycle validation, safe child movement, and ownership recovery when a container is deleted.
 - Added bounded local snapshots, named checkpoints, configurable retention, recovery timestamp preservation, and versioned full-workspace backup/restore.
 - Added richer ERD field metadata/paste tools, DFD process numbering checks, and UML use-case/package validation and relationship shapes.
+- Added geometry-backed shape-library thumbnails and a development-only `?shape-gallery=1` fixture for default, small, wide, and tall stencil inspection.
+- Added repeatable duplicate spacing, cursor-targeted paste, Shift-marquee additive selection, and in-context shape replacement without breaking node identity or connectors.
 
 ### Changed
+- Corrected authoritative flowchart silhouettes for internal storage, manual operation, stored data, collate, and sort; contained cloud/cylinder geometry; made UML actor/package geometry responsive; and aligned connector boundaries with the shared silhouettes.
+- Removed duplicated specialized canvas/export geometry so corrected silhouettes remain the source of truth across rendering, previews, hit testing, and SVG export.
+- Made circles aspect-ratio-aware during resizing and removed the misleading rounded-rectangle ellipse alias.
 - Reduced touchpad latency with D3-style normalized wheel deltas, transient canvas camera updates per animation frame, live zoom status previews, and a single final viewport commit after the gesture settles.
 - Added native two-pointer touchscreen pan/pinch handling and prevented pending gestures from overwriting explicit viewport commands.
 - Promoted common selection actions—fit, duplicate, group, lock, and delete—to a centered top-bar Quick actions cluster with selection-aware states.
 - Improved touchpad navigation: two-finger scrolling pans the canvas, pinch/Ctrl+scroll zooms around the pointer, and high-frequency wheel events are batched for smoother movement.
 - Improved editor control discoverability with explicit active-tool status, clearer snapping/grid states, keyboard-accessible panel resizing, consistent pan guidance, and dismissible page/zoom/snap menus.
+- Context-menu duplication now follows the same grouped clipboard path as keyboard duplication, and connector quick-create search accepts Enter to insert its first result.
 - Orthogonal routing now preserves semantic endpoint intent while keeping generated routes runtime-only and export-compatible.
 
 - Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.

@@ -134,4 +134,12 @@ describe('native file helpers', () => {
     expect(svg).toContain('>1.0</text>');
     expect(svg).toContain('M 18 0 H 160 V 64 H 18 Z');
   });
+
+  it('keeps responsive actor geometry in exported SVG', () => {
+    const small = createNode('actor', { x: 0, y: 0 }, { library: 'use-case', size: { width: 120, height: 140 }, data: { label: 'Small actor' } });
+    const large = createNode('actor', { x: 180, y: 0 }, { library: 'use-case', size: { width: 180, height: 210 }, data: { label: 'Large actor' } });
+    const svg = documentToSvg([small, large], [], '#10131c', 500, 300);
+    expect(svg).toContain('cx="60" cy="28" rx="12" ry="12"');
+    expect(svg).toContain('cx="90" cy="42" rx="18" ry="18"');
+  });
 });

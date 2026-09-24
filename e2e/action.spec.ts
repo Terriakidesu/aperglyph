@@ -56,6 +56,63 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('[data-node-id]')).toHaveCount(2);
   });
 
+  test('repeats manual duplicate spacing and pastes at the canvas cursor', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const first = page.locator('[data-node-id]').first();
+    const firstBox = await first.boundingBox();
+    expect(firstBox).not.toBeNull();
+
+    await page.keyboard.press('Control+d');
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+    const duplicate = page.locator('[data-node-id]').nth(1);
+    const duplicateBox = await duplicate.boundingBox();
+    expect(duplicateBox).not.toBeNull();
+    const duplicateCenter = { x: (duplicateBox?.x ?? 0) + (duplicateBox?.width ?? 0) / 2, y: (duplicateBox?.y ?? 0) + (duplicateBox?.height ?? 0) / 2 };
+    await page.mouse.move(duplicateCenter.x, duplicateCenter.y);
+    await page.mouse.down();
+    await page.mouse.move(duplicateCenter.x + 160, duplicateCenter.y, { steps: 5 });
+    await page.mouse.up();
+    const movedBox = await duplicate.boundingBox();
+    expect(movedBox).not.toBeNull();
+
+    await page.keyboard.press('Control+d');
+    await expect(page.locator('[data-node-id]')).toHaveCount(3);
+    const thirdBox = await page.locator('[data-node-id]').nth(2).boundingBox();
+    expect(thirdBox).not.toBeNull();
+    expect(Math.abs((thirdBox?.x ?? 0) - (movedBox?.x ?? 0) - ((movedBox?.x ?? 0) - (firstBox?.x ?? 0)))).toBeLessThan(3);
+
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox).not.toBeNull();
+    const pastePoint = { x: (canvasBox?.x ?? 0) + 380, y: (canvasBox?.y ?? 0) + 480 };
+    await page.mouse.move(pastePoint.x, pastePoint.y);
+    await page.keyboard.press('Control+c');
+    await page.keyboard.press('Control+v');
+    await expect(page.locator('[data-node-id]')).toHaveCount(4);
+    const pastedBox = await page.locator('[data-node-id]').nth(3).boundingBox();
+    expect(pastedBox).not.toBeNull();
+    expect(Math.abs(((pastedBox?.x ?? 0) + (pastedBox?.width ?? 0) / 2) - pastePoint.x)).toBeLessThan(4);
+    expect(Math.abs(((pastedBox?.y ?? 0) + (pastedBox?.height ?? 0) / 2) - pastePoint.y)).toBeLessThan(4);
+  });
+
+  test('changes a node shape without replacing its identity or label', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    const node = page.locator('[data-node-id]').first();
+    const id = await node.getAttribute('data-node-id');
+    const transform = await node.getAttribute('transform');
+    await node.click({ button: 'right' });
+    await page.getByRole('button', { name: 'Change shape…' }).click();
+    await page.getByLabel('Search replacement shapes').fill('Decision');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-node-id]')).toHaveCount(1);
+    await expect(page.locator('[data-node-id]').first()).toHaveAttribute('data-node-id', id ?? '');
+    await expect(page.locator('[data-node-id]').first()).toHaveAttribute('transform', transform ?? '');
+    await expect(page.locator('.node-label')).toHaveText('Rectangle');
+    await expect(page.locator('[data-node-id] polygon')).toHaveCount(1);
+  });
+
   test('makes grouped objects visible on the canvas', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     const shape = page.getByTitle('Drag Rectangle onto the canvas');
@@ -79,6 +136,21 @@ test.describe('diagram editing workflow', () => {
     await page.locator('.shape-item[title="Drag Rectangle onto the canvas"]').dragTo(canvas);
     await expect(page.locator('[data-node-id]')).toHaveCount(1);
     await expect(page.locator('.node-label')).toHaveText('Rectangle');
+  });
+
+  test('keeps shape library previews within their icon boxes', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const rectanglePreview = page.locator('.shape-item[title="Drag Rectangle onto the canvas"] .shape-preview-svg');
+    await expect(rectanglePreview).toHaveAttribute('viewBox', '-3 -3 38 30');
+    await expect(rectanglePreview.locator('rect')).toHaveAttribute('height', '24');
+
+    const circlePreview = page.locator('.shape-item[title="Drag Circle onto the canvas"] .shape-preview-svg');
+    await expect(circlePreview.locator('ellipse')).toHaveAttribute('rx', '14');
+    await expect(circlePreview.locator('ellipse')).toHaveAttribute('ry', '14');
+
+    await page.getByLabel('Shape library category').selectOption('erd');
+    await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg text')).toHaveCount(0);
+    await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg line')).toHaveCount(3);
   });
 
   test('supports keyboard nudging and the command palette', async ({ page }) => {
@@ -338,6 +410,15 @@ test.describe('diagram editing workflow', () => {
     const selectionBox = node.locator('.node-handles > rect').first();
     await expect.poll(async () => Number(await selectionBox.getAttribute('height'))).toBeGreaterThanOrEqual(98);
     await expect.poll(async () => Number(await node.locator('.node-entity-title').evaluate((element) => element.closest('g')?.querySelector('rect')?.getAttribute('height') ?? '0'))).toBeGreaterThanOrEqual(88);
+  });
+
+  test('keeps circles square when editing their dimensions', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Circle onto the canvas').click();
+    await page.locator('[data-node-id]').first().click();
+    await expect(page.getByLabel('Lock aspect ratio')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByLabel('Node width').fill('180');
+    await expect(page.getByRole('spinbutton', { name: 'Node height' })).toHaveValue('180');
   });
 
   test('connects nodes by dragging between connection ports', async ({ page }) => {
