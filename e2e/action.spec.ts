@@ -167,6 +167,18 @@ test.describe('diagram editing workflow', () => {
     await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
   });
 
+  test('exposes common selection actions in the top bar', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await expect(page.getByLabel('Fit selection')).toBeEnabled();
+    await expect(page.getByTitle('Duplicate selection · ⌘D')).toBeEnabled();
+    await expect(page.getByLabel('Group selection')).toBeDisabled();
+    await page.getByTitle('Duplicate selection · ⌘D').click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+    await page.getByLabel('Delete selection').click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(1);
+  });
+
   test('Alt-drag duplicates without applying grid snapping', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();

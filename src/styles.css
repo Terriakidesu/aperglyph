@@ -501,6 +501,18 @@ body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user
 .command-trigger:hover { color: #eeeaff; background: #25213f; border-color: #51458a; }
 .command-trigger svg { color: #a99bff; }
 .command-trigger kbd { padding: 2px 4px; color: #aaa0d8; background: #252044; border: 1px solid #423774; border-radius: 3px; font: 8px var(--mono); }
+.editor-brand-wrap { order: 1; }
+.topbar-quick-actions { order: 2; min-width: 0; flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px; margin: 0 12px; padding: 3px; color: #858ea4; background: #141925; border: 1px solid #292f43; border-radius: 7px; }
+.topbar-quick-heading { padding: 0 6px 0 5px; color: #707a92; font: 8px var(--mono); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.topbar-quick-actions button { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 7px; color: #b7bed0; background: transparent; border-radius: 5px; font: 9px var(--mono); white-space: nowrap; }
+.topbar-quick-actions button:hover:not(:disabled), .topbar-quick-actions button:focus-visible { color: #fff; background: #29234b; }
+.topbar-quick-actions button:focus-visible { outline: 2px solid #9180f2; outline-offset: 1px; }
+.topbar-quick-actions button svg { color: #a99bff; }
+.topbar-quick-actions button:disabled { color: #596277; }
+.topbar-quick-actions button:disabled svg { color: #596277; }
+.topbar-quick-actions .topbar-quick-danger { color: #c8899a; }
+.topbar-quick-actions .topbar-quick-danger svg { color: #df93a9; }
+.editor-actions { order: 3; margin-left: 0; }
 
 .status-popover-wrap, .zoom-popover-wrap { position: relative; }
 .status-toggle.active, .zoom-reset[aria-expanded="true"] { color: #dcd6ff; }
@@ -581,4 +593,9 @@ body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user
   .dock-reopen { display: none; }
   .status-local { display: none; }
   .shape-library, .outline-panel, .properties-panel { display: none; }
+}
+
+@media (max-width: 1080px) {
+  .topbar-quick-actions { display: none; }
+  .editor-actions { margin-left: auto; }
 }

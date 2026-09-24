@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, Command, Download, Eye, FileText, History, Maximize2, MoreHorizontal, Redo2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Command, Copy, Download, Eye, FileText, Group, History, Lock, Maximize2, MoreHorizontal, Redo2, Trash2, Undo2, Unlock, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { editorEvents } from '../core/events';
 import { createId } from '../core/document';
@@ -143,6 +143,7 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
 
   return <>
     <header className="editor-topbar">
+      <TopQuickActions onFitSelection={onFitSelection} />
       <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title-wrap"><div className="document-title">{editingTitle ? <input className="document-title-input" aria-label="Document title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitTitle(); } if (event.key === 'Escape') { setTitleDraft(document.name); setEditingTitle(false); } }} autoFocus /> : <button className="document-title-button" title="Rename document" onClick={() => setEditingTitle(true)}><strong>{document.name}</strong></button>}<button className="document-menu-toggle" title="Document menu" aria-label="Document menu" aria-expanded={documentMenuOpen} onClick={() => setDocumentMenuOpen((open) => !open)}><ChevronDown size={13} /></button><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div>{documentMenuOpen && <DocumentMenu onRename={() => { setDocumentMenuOpen(false); setEditingTitle(true); }} onNew={() => { useEditorStore.getState().reset(); rememberActiveDocument(useEditorStore.getState().document.id); setDocumentMenuOpen(false); }} onOpen={() => fileInputRef.current?.click()} onDuplicate={duplicateCurrentDocument} onInfo={() => { setDocumentMenuOpen(false); setDocumentInfoOpen(true); }} onBackup={() => void createBackup()} onPrint={() => { printDocument(document, { pageId: activePageId, contentBounds: true, padding: 32, outlineOnly: true }); setDocumentMenuOpen(false); }} />}{documentInfoOpen && <DocumentInfo document={document} onClose={() => setDocumentInfoOpen(false)} />}</div><input ref={fileInputRef} className="visually-hidden" type="file" accept=".wdiag,.mmd,.mermaid,.puml,.plantuml,.sql,.svg,image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }} /></div>
           <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)" aria-label="Undo"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)" aria-label="Redo"><Redo2 size={17} /></button></div><span className="topbar-divider" />
         {onDiagnostics && <button className={`secondary-button diagnostics-button ${diagnosticCount > 0 ? 'has-diagnostics' : ''}`} onClick={onDiagnostics} title={diagnosticCount > 0 ? `Open diagnostics · ${diagnosticCount} issues` : 'No active diagnostics'} aria-label="Open diagnostics">{diagnosticCount > 0 ? <><AlertTriangle size={14} /><span className="diagnostics-label">Diagnostics</span><span>{diagnosticCount}</span></> : <CheckCircle2 size={14} />}</button>}
@@ -153,6 +154,34 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
     </header>
     {inspectOpen && <div className="inspect-drawer"><div className="inspect-heading"><strong>Document inspector</strong><div><button className="secondary-button" onClick={inspectDocument}>Copy JSON</button><button className="icon-button" onClick={() => setInspectOpen(false)} aria-label="Close inspector"><X size={15} /></button></div></div><pre>{JSON.stringify(document, null, 2)}</pre></div>}
   </>;
+}
+
+function TopQuickActions({ onFitSelection }: { onFitSelection: () => void }) {
+  const document = useEditorStore((state) => state.document);
+  const activePageId = useEditorStore((state) => state.activePageId);
+  const selectedIds = useEditorStore((state) => state.selectedIds);
+  const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
+  const groupSelection = useEditorStore((state) => state.groupSelection);
+  const deleteSelection = useEditorStore((state) => state.deleteSelection);
+  const updateNodes = useEditorStore((state) => state.updateNodes);
+  const page = document.pages.find((candidate) => candidate.id === activePageId);
+  const selectedNodes = page?.nodes.filter((node) => selectedIds.includes(node.id)) ?? [];
+  const hasSelection = selectedIds.length > 0;
+  const canGroup = selectedNodes.length > 1;
+  const allLocked = selectedNodes.length > 0 && selectedNodes.every((node) => node.locked);
+  const toggleLock = () => {
+    if (selectedNodes.length === 0) return;
+    const locked = !allLocked;
+    updateNodes(selectedNodes.map((node) => node.id), { locked }, locked ? 'Lock selection' : 'Unlock selection');
+  };
+  return <div className="topbar-quick-actions" aria-label="Quick actions">
+    <span className="topbar-quick-heading">Quick actions</span>
+    <button disabled={!selectedNodes.length} title="Fit selected objects" aria-label="Fit selection" onClick={onFitSelection}><Maximize2 size={13} /><span>Fit</span></button>
+    <button disabled={!hasSelection} title="Duplicate selection · ⌘D" aria-label="Make a copy of the selection" onClick={() => duplicateSelection()}><Copy size={13} /><span>Duplicate</span></button>
+    <button disabled={!canGroup} title="Group selected objects · ⌘G" aria-label="Group selection" onClick={() => groupSelection()}><Group size={13} /><span>Group</span></button>
+    <button disabled={!selectedNodes.length} title={allLocked ? 'Unlock selection' : 'Lock selection'} aria-label={allLocked ? 'Unlock selection' : 'Lock selection'} onClick={toggleLock}>{allLocked ? <Unlock size={13} /> : <Lock size={13} />}<span>{allLocked ? 'Unlock' : 'Lock'}</span></button>
+    <button disabled={!hasSelection} className="topbar-quick-danger" title="Delete selection · Delete" aria-label="Delete selection" onClick={deleteSelection}><Trash2 size={13} /><span>Delete</span></button>
+  </div>;
 }
 
 function DocumentMenu({ onRename, onNew, onOpen, onDuplicate, onInfo, onBackup, onPrint }: { onRename: () => void; onNew: () => void; onOpen: () => void; onDuplicate: () => void; onInfo: () => void; onBackup: () => void; onPrint: () => void }) {
