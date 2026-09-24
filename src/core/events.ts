@@ -5,6 +5,7 @@ export interface EditorEventMap {
   'document:opened': { document: DiagramDocument };
   'selection:changed': { ids: string[] };
   'viewport:changed': Viewport;
+  'viewport:preview': Viewport | null;
   'pointer:changed': Point | null;
   'viewport:fit': { scope: 'page' | 'selection' };
   'interaction:cancel': undefined;

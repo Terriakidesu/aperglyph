@@ -35,7 +35,8 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added richer ERD field metadata/paste tools, DFD process numbering checks, and UML use-case/package validation and relationship shapes.
 
 ### Changed
-- Reduced touchpad latency with a more responsive pinch curve, transient canvas camera updates per animation frame, and a single final viewport commit after the gesture settles.
+- Reduced touchpad latency with D3-style normalized wheel deltas, transient canvas camera updates per animation frame, live zoom status previews, and a single final viewport commit after the gesture settles.
+- Added native two-pointer touchscreen pan/pinch handling and prevented pending gestures from overwriting explicit viewport commands.
 - Promoted common selection actions—fit, duplicate, group, lock, and delete—to a centered top-bar Quick actions cluster with selection-aware states.
 - Improved touchpad navigation: two-finger scrolling pans the canvas, pinch/Ctrl+scroll zooms around the pointer, and high-frequency wheel events are batched for smoother movement.
 - Improved editor control discoverability with explicit active-tool status, clearer snapping/grid states, keyboard-accessible panel resizing, consistent pan guidance, and dismissible page/zoom/snap menus.

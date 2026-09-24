@@ -4,14 +4,14 @@ import { useRef } from 'react';
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import type { Point, SnapSettings, ToolId } from '../core/types';
+import type { Point, SnapSettings, ToolId, Viewport } from '../core/types';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 
 const zoomOptions = [25, 50, 75, 100, 125, 150, 200];
 const toolLabels: Record<ToolId, string> = { select: 'Select', pan: 'Pan', connector: 'Connector', text: 'Text', shape: 'Shape' };
 
 export function StatusBar() {
-  const viewport = useEditorStore((state) => state.viewport);
+  const committedViewport = useEditorStore((state) => state.viewport);
   const updateViewport = useEditorStore((state) => state.updateViewport);
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -20,12 +20,15 @@ export function StatusBar() {
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
   const [validationEnabled, setValidationEnabled] = useState(isDiagnosticsEnabled);
   const [pointer, setPointer] = useState<Point | null>(null);
+  const [viewportPreview, setViewportPreview] = useState<Viewport | null>(null);
   const [snapOpen, setSnapOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
   const snapRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<HTMLDivElement>(null);
   useEffect(() => editorEvents.on('diagnostics:changed', ({ enabled }) => setValidationEnabled(enabled)), []);
   useEffect(() => editorEvents.on('pointer:changed', setPointer), []);
+  useEffect(() => editorEvents.on('viewport:preview', setViewportPreview), []);
+  useEffect(() => editorEvents.on('viewport:changed', () => setViewportPreview(null)), []);
   useEffect(() => {
     const closePopovers = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -45,6 +48,7 @@ export function StatusBar() {
     };
   }, []);
   const page = getActivePage(document, activePageId);
+  const viewport = viewportPreview ?? committedViewport;
   const zoom = Math.round(viewport.zoom * 100);
   const snapSettings: SnapSettings = page ? getSnapSettings(page.settings) : { grid: true, objects: true, guides: true, ports: true };
   const diagnosticCount = validationEnabled ? collectDiagnostics(document, 'page', activePageId).filter((diagnostic) => diagnostic.severity !== 'info').length : 0;

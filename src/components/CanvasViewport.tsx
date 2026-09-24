@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { Lock, Ruler, Trash2, Unlock } from 'lucide-react';
 import { createEdge, createId, createNode as buildNode } from '../core/document';
 import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
@@ -104,21 +104,63 @@ interface GuideDrag {
 interface WheelGesture {
   frame: number | null;
   idleTimer: number | null;
-  camera: Viewport | null;
+  camera: CameraTransform | null;
   panX: number;
   panY: number;
   zoomFactor: number;
   zoomPoint: Point | null;
 }
 
+interface TouchGesture {
+  frame: number | null;
+  initialCamera: CameraTransform;
+  initialDistance: number;
+  initialWorldAtMidpoint: Point;
+  camera: CameraTransform | null;
+}
+
+interface CameraTransform {
+  x: number;
+  y: number;
+  k: number;
+}
+
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const ENDPOINT_SNAP_DISTANCE = 24;
 const DOUBLE_CLICK_WINDOW_MS = 600;
-const WHEEL_ZOOM_STEP = 1.18;
 
 function viewportTransform(size: CanvasSize, viewport: Viewport): string {
   return `translate(${size.width / 2 + viewport.x * viewport.zoom} ${size.height / 2 + viewport.y * viewport.zoom}) scale(${viewport.zoom})`;
+}
+
+function cameraFromViewport(size: CanvasSize, viewport: Viewport): CameraTransform {
+  return { x: size.width / 2 + viewport.x * viewport.zoom, y: size.height / 2 + viewport.y * viewport.zoom, k: viewport.zoom };
+}
+
+function viewportFromCamera(size: CanvasSize, camera: CameraTransform): Viewport {
+  return { x: (camera.x - size.width / 2) / camera.k, y: (camera.y - size.height / 2) / camera.k, zoom: camera.k };
+}
+
+function cameraTransform(camera: CameraTransform): string {
+  return `translate(${camera.x} ${camera.y}) scale(${camera.k})`;
+}
+
+function clampZoom(zoom: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+}
+
+/** Scale around a screen-space point, matching d3-zoom's transform math. */
+function scaleCameraAtPoint(camera: CameraTransform, factor: number, point: Point): CameraTransform {
+  const k = clampZoom(camera.k * factor);
+  const ratio = k / camera.k;
+  return { k, x: point.x - (point.x - camera.x) * ratio, y: point.y - (point.y - camera.y) * ratio };
+}
+
+function wheelZoomDelta(event: { deltaY: number; deltaMode: number; ctrlKey: boolean; metaKey: boolean }): number {
+  const modeScale = event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002;
+  const modifierScale = event.ctrlKey || event.metaKey ? 10 : 1;
+  return -event.deltaY * modeScale * modifierScale;
 }
 
 interface RulerMark {
@@ -150,6 +192,10 @@ function asConnectionPort(value: string | null): ConnectionPort | undefined {
 
 function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function midpoint(left: Point, right: Point): Point {
+  return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
 }
 
 function endpointPoint(endpoint: Endpoint, node: DiagramNode | undefined, toward?: Point): Point | undefined {
@@ -351,6 +397,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   });
   const previousHintsPreference = useRef(view.connectionHints);
   const wheelGestureRef = useRef<WheelGesture>({ frame: null, idleTimer: null, camera: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
+  const touchPointersRef = useRef(new Map<number, Point>());
+  const touchGestureRef = useRef<TouchGesture | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -405,6 +453,40 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const updateGuides = useEditorStore((state) => state.updateGuides);
   const guideDragRef = useRef<GuideDrag | null>(null);
   const page = getActivePage(document, activePageId);
+  const gesturePageKeyRef = useRef(`${document.id}:${activePageId}`);
+
+  const cancelActiveInteraction = useCallback(() => {
+    const session = dragRef.current;
+    const guideDrag = guideDragRef.current;
+    if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
+    if (guideDrag && svgRef.current?.hasPointerCapture(guideDrag.pointerId)) svgRef.current.releasePointerCapture(guideDrag.pointerId);
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+    frameRef.current = null;
+    panFrameRef.current = null;
+    pendingPanRef.current = null;
+    isPanningRef.current = false;
+    dragRef.current = null;
+    endpointPreviewRef.current = null;
+    setDragPreview({});
+    setMarquee(null);
+    setAlignmentGuides([]);
+    setSnapCandidateIds([]);
+    setConnectorStart(null);
+    setConnectorDragPreview(null);
+    setQuickCreate(null);
+    setQuickCreateSearch('');
+    setEndpointPreview(null);
+    setWaypointPreview(null);
+    setSegmentPreview(null);
+    setLabelPreview(null);
+    setResizePreview(null);
+    setGuidePreview(null);
+    guideDragRef.current = null;
+    setShapeDragPreview(null);
+    setTextEdit(null);
+    setContextMenu(null);
+  }, []);
 
   useEffect(() => {
     if (!stageRef.current) return;
@@ -450,37 +532,24 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   }, [activeTool]);
 
   useEffect(() => editorEvents.on('interaction:cancel', () => {
-    const session = dragRef.current;
-    const guideDrag = guideDragRef.current;
-    if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
-    if (guideDrag && svgRef.current?.hasPointerCapture(guideDrag.pointerId)) svgRef.current.releasePointerCapture(guideDrag.pointerId);
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
-    frameRef.current = null;
-    panFrameRef.current = null;
-    pendingPanRef.current = null;
-    isPanningRef.current = false;
-    dragRef.current = null;
-    endpointPreviewRef.current = null;
-    setDragPreview({});
-    setMarquee(null);
-    setAlignmentGuides([]);
-    setSnapCandidateIds([]);
-    setConnectorStart(null);
-    setConnectorDragPreview(null);
-    setQuickCreate(null);
-    setQuickCreateSearch('');
-    setEndpointPreview(null);
-    setWaypointPreview(null);
-    setSegmentPreview(null);
-    setLabelPreview(null);
-    setResizePreview(null);
-    setGuidePreview(null);
-    guideDragRef.current = null;
-    setShapeDragPreview(null);
-    setTextEdit(null);
-    setContextMenu(null);
-  }), []);
+    cancelActiveInteraction();
+    const wheel = wheelGestureRef.current;
+    if (wheel.frame !== null) cancelAnimationFrame(wheel.frame);
+    if (wheel.idleTimer !== null) window.clearTimeout(wheel.idleTimer);
+    wheel.frame = null;
+    wheel.idleTimer = null;
+    wheel.camera = null;
+    wheel.panX = 0;
+    wheel.panY = 0;
+    wheel.zoomFactor = 1;
+    wheel.zoomPoint = null;
+    const touch = touchGestureRef.current;
+    if (touch && touch.frame !== null) cancelAnimationFrame(touch.frame);
+    touchGestureRef.current = null;
+    touchPointersRef.current.clear();
+    editorEvents.emit('viewport:preview', null);
+    viewportGroupRef.current?.setAttribute('transform', viewportTransform(size, useEditorStore.getState().viewport));
+  }), [cancelActiveInteraction, size.height, size.width]);
 
   useEffect(() => () => spatialClient.terminate(), [spatialClient]);
 
@@ -488,11 +557,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     const gesture = wheelGestureRef.current;
     if (gesture.frame !== null) cancelAnimationFrame(gesture.frame);
     if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
+    const touch = touchGestureRef.current;
+    if (touch && touch.frame !== null) cancelAnimationFrame(touch.frame);
   }, []);
 
   useLayoutEffect(() => {
-    const camera = wheelGestureRef.current.camera ?? viewport;
-    viewportGroupRef.current?.setAttribute('transform', viewportTransform(size, camera));
+    const camera = touchGestureRef.current?.camera ?? wheelGestureRef.current.camera ?? cameraFromViewport(size, viewport);
+    viewportGroupRef.current?.setAttribute('transform', cameraTransform(camera));
   }, [size.height, size.width, viewport]);
 
   useEffect(() => {
@@ -527,13 +598,15 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }, []);
 
-  const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera = wheelGestureRef.current.camera ?? viewport) => {
+  const worldPoint = useCallback((event: { clientX: number; clientY: number }, camera?: Viewport) => {
     const screen = screenPoint(event);
+    const liveCamera = touchGestureRef.current?.camera ?? wheelGestureRef.current.camera;
+    const resolvedCamera = camera ?? (liveCamera ? viewportFromCamera(size, liveCamera) : useEditorStore.getState().viewport);
     return {
-      x: (screen.x - size.width / 2) / camera.zoom - camera.x,
-      y: (screen.y - size.height / 2) / camera.zoom - camera.y,
+      x: (screen.x - size.width / 2) / resolvedCamera.zoom - resolvedCamera.x,
+      y: (screen.y - size.height / 2) / resolvedCamera.zoom - resolvedCamera.y,
     };
-  }, [screenPoint, size.height, size.width, viewport]);
+  }, [screenPoint, size.height, size.width]);
 
   const dismissCanvasHint = () => {
     if (!showCanvasHint) return;
@@ -950,7 +1023,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setContextMenu(null);
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
       const point = worldPoint(event);
-      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: viewport };
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: useEditorStore.getState().viewport };
       isPanningRef.current = true;
       svgRef.current?.setPointerCapture(event.pointerId);
       return;
@@ -1070,7 +1143,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       event.preventDefault();
       event.stopPropagation();
       const point = worldPoint(event);
-      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: viewport };
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screenPoint(event), initialViewport: useEditorStore.getState().viewport };
       isPanningRef.current = true;
       svgRef.current?.setPointerCapture(event.pointerId);
       return;
@@ -1216,6 +1289,21 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setEndpointPreview(preview);
   };
 
+  const handlePointerDownCapture = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType !== 'touch') {
+      if (wheelGestureRef.current.camera) commitWheelGesture();
+      return;
+    }
+    touchPointersRef.current.set(event.pointerId, screenPoint(event));
+    if (touchPointersRef.current.size < 2) {
+      if (wheelGestureRef.current.camera) commitWheelGesture();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    beginTouchGesture();
+  };
+
   const beginCanvasInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
     setContextMenu(null);
     dismissCanvasHint();
@@ -1224,7 +1312,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     const point = worldPoint(event);
     const screen = screenPoint(event);
     if (activeTool === 'pan' || spacePressed || event.button === 1) {
-      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screen, initialViewport: viewport };
+      dragRef.current = { mode: 'pan', pointerId: event.pointerId, startWorld: point, startClient: screen, initialViewport: useEditorStore.getState().viewport };
       isPanningRef.current = true;
     } else if (activeTool === 'shape') {
       addNode(buildNode('rectangle', { x: point.x - 90, y: point.y - 44 }, { data: { label: 'Rectangle' } }));
@@ -1243,6 +1331,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === 'touch') {
+      touchPointersRef.current.set(event.pointerId, screenPoint(event));
+      if (touchGestureRef.current) {
+        event.preventDefault();
+        scheduleTouchFrame();
+        return;
+      }
+    }
     const pointer = worldPoint(event);
     setPointerWorld(pointer);
     editorEvents.emit('pointer:changed', pointer);
@@ -1305,6 +1401,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   };
 
   const finishPointerInteraction = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === 'touch') {
+      if (touchGestureRef.current) {
+        finishTouchPointer(event);
+        return;
+      }
+      touchPointersRef.current.delete(event.pointerId);
+    }
     if (finishGuideDrag(event)) return;
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
@@ -1414,31 +1517,162 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     editorEvents.emit('pointer:changed', null);
   };
 
+  const applyWheelFrame = useCallback(() => {
+    const pending = wheelGestureRef.current;
+    pending.frame = null;
+    const current = pending.camera ?? cameraFromViewport(size, useEditorStore.getState().viewport);
+    let next: CameraTransform = { x: current.x - pending.panX, y: current.y - pending.panY, k: current.k };
+    if (pending.zoomFactor !== 1 && pending.zoomPoint) next = scaleCameraAtPoint(next, pending.zoomFactor, pending.zoomPoint);
+    pending.panX = 0;
+    pending.panY = 0;
+    pending.zoomFactor = 1;
+    pending.zoomPoint = null;
+    pending.camera = next;
+    viewportGroupRef.current?.setAttribute('transform', cameraTransform(next));
+    editorEvents.emit('viewport:preview', viewportFromCamera(size, next));
+  }, [size.height, size.width]);
+
   const commitWheelGesture = useCallback(() => {
     const gesture = wheelGestureRef.current;
     gesture.idleTimer = null;
+    if (!gesture.camera) return;
     if (gesture.frame !== null) {
-      gesture.idleTimer = window.setTimeout(commitWheelGesture, 16);
-      return;
+      cancelAnimationFrame(gesture.frame);
+      gesture.frame = null;
+      applyWheelFrame();
     }
     const camera = gesture.camera;
-    if (!camera) return;
     gesture.camera = null;
-    updateViewport(camera);
-  }, [updateViewport]);
+    if (camera) updateViewport(viewportFromCamera(size, camera));
+  }, [applyWheelFrame, size.height, size.width, updateViewport]);
+
+  const cancelWheelGesture = useCallback(() => {
+    const gesture = wheelGestureRef.current;
+    if (gesture.frame !== null) cancelAnimationFrame(gesture.frame);
+    if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
+    gesture.frame = null;
+    gesture.idleTimer = null;
+    gesture.camera = null;
+    gesture.panX = 0;
+    gesture.panY = 0;
+    gesture.zoomFactor = 1;
+    gesture.zoomPoint = null;
+    viewportGroupRef.current?.setAttribute('transform', cameraTransform(cameraFromViewport(size, useEditorStore.getState().viewport)));
+    editorEvents.emit('viewport:preview', null);
+  }, [size.height, size.width]);
+
+  const applyTouchFrame = useCallback(() => {
+    const gesture = touchGestureRef.current;
+    if (!gesture) return;
+    gesture.frame = null;
+    const points = [...touchPointersRef.current.values()].slice(0, 2);
+    if (points.length < 2) return;
+    const center = midpoint(points[0], points[1]);
+    const distance = Math.max(1, distanceBetween(points[0], points[1]));
+    const scaled = scaleCameraAtPoint(gesture.initialCamera, distance / gesture.initialDistance, { x: 0, y: 0 });
+    const camera: CameraTransform = {
+      x: center.x - gesture.initialWorldAtMidpoint.x * scaled.k,
+      y: center.y - gesture.initialWorldAtMidpoint.y * scaled.k,
+      k: scaled.k,
+    };
+    gesture.camera = camera;
+    viewportGroupRef.current?.setAttribute('transform', cameraTransform(camera));
+    editorEvents.emit('viewport:preview', viewportFromCamera(size, camera));
+  }, [size.height, size.width]);
+
+  const scheduleTouchFrame = useCallback(() => {
+    const gesture = touchGestureRef.current;
+    if (!gesture || gesture.frame !== null) return;
+    gesture.frame = requestAnimationFrame(applyTouchFrame);
+  }, [applyTouchFrame]);
+
+  const finishTouchGesture = useCallback((commit: boolean) => {
+    const gesture = touchGestureRef.current;
+    if (!gesture) {
+      touchPointersRef.current.clear();
+      return;
+    }
+    if (gesture.frame !== null) cancelAnimationFrame(gesture.frame);
+    gesture.frame = null;
+    const camera = commit ? gesture.camera : null;
+    for (const pointerId of touchPointersRef.current.keys()) {
+      if (svgRef.current?.hasPointerCapture(pointerId)) svgRef.current.releasePointerCapture(pointerId);
+    }
+    touchGestureRef.current = null;
+    touchPointersRef.current.clear();
+    isPanningRef.current = false;
+    if (camera) updateViewport(viewportFromCamera({ width: size.width, height: size.height }, camera));
+    else {
+      viewportGroupRef.current?.setAttribute('transform', cameraTransform(cameraFromViewport(size, useEditorStore.getState().viewport)));
+      editorEvents.emit('viewport:preview', null);
+    }
+  }, [size.height, size.width, updateViewport]);
+
+  const finishTouchPointer = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!touchGestureRef.current) return;
+    touchPointersRef.current.set(event.pointerId, screenPoint(event));
+    event.preventDefault();
+    if (event.type === 'pointercancel') {
+      touchPointersRef.current.delete(event.pointerId);
+      finishTouchGesture(false);
+      return;
+    }
+    const gesture = touchGestureRef.current;
+    if (gesture?.frame !== null) cancelAnimationFrame(gesture.frame);
+    if (gesture) gesture.frame = null;
+    applyTouchFrame();
+    touchPointersRef.current.delete(event.pointerId);
+    if (touchPointersRef.current.size < 2) finishTouchGesture(true);
+  }, [applyTouchFrame, finishTouchGesture, screenPoint]);
+
+  const handleTouchPointerEndCapture = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.pointerType !== 'touch' || !touchGestureRef.current) return;
+    event.stopPropagation();
+    finishTouchPointer(event);
+  };
+
+  const handleTouchEndCapture = (event: ReactTouchEvent<SVGSVGElement>) => {
+    if (!touchGestureRef.current || event.touches.length > 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const gesture = touchGestureRef.current;
+    if (gesture?.frame !== null) cancelAnimationFrame(gesture.frame);
+    if (gesture) gesture.frame = null;
+    applyTouchFrame();
+    finishTouchGesture(event.type !== 'touchcancel');
+  };
+
+  const beginTouchGesture = useCallback(() => {
+    if (touchGestureRef.current) return;
+    const points = [...touchPointersRef.current.values()].slice(0, 2);
+    if (points.length < 2) return;
+    commitWheelGesture();
+    cancelActiveInteraction();
+    const initialCamera = cameraFromViewport(size, useEditorStore.getState().viewport);
+    const initialMidpoint = midpoint(points[0], points[1]);
+    const initialDistance = Math.max(1, distanceBetween(points[0], points[1]));
+    const initialWorldAtMidpoint = {
+      x: (initialMidpoint.x - initialCamera.x) / initialCamera.k,
+      y: (initialMidpoint.y - initialCamera.y) / initialCamera.k,
+    };
+    touchGestureRef.current = { frame: null, initialCamera, initialDistance, initialWorldAtMidpoint, camera: null };
+    isPanningRef.current = true;
+    for (const pointerId of touchPointersRef.current.keys()) svgRef.current?.setPointerCapture(pointerId);
+  }, [cancelActiveInteraction, commitWheelGesture, size.height, size.width]);
 
   const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(size.width, size.height) : 1;
     const deltaX = Number.isFinite(event.deltaX) ? event.deltaX * scale : 0;
-    const deltaY = Number.isFinite(event.deltaY) ? event.deltaY * scale : 0;
-    if (deltaX === 0 && deltaY === 0) return;
+    const rawDeltaY = Number.isFinite(event.deltaY) ? event.deltaY : 0;
+    const deltaY = rawDeltaY * scale;
+    if (deltaX === 0 && rawDeltaY === 0) return;
     const gesture = wheelGestureRef.current;
-    if (!gesture.camera) gesture.camera = { ...useEditorStore.getState().viewport };
+    if (!gesture.camera) gesture.camera = cameraFromViewport(size, useEditorStore.getState().viewport);
     if (event.ctrlKey || event.metaKey) {
-      const boundedDelta = Math.max(-240, Math.min(240, deltaY));
-      gesture.zoomFactor = Math.max(.25, Math.min(4, gesture.zoomFactor * Math.pow(WHEEL_ZOOM_STEP, -boundedDelta / 100)));
+      const boundedDelta = Math.max(-240, Math.min(240, rawDeltaY));
+      gesture.zoomFactor = Math.max(.25, Math.min(4, gesture.zoomFactor * Math.pow(2, wheelZoomDelta({ deltaY: boundedDelta, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, metaKey: event.metaKey }))));
       gesture.zoomPoint = screenPoint(event);
     } else {
       // Two-finger trackpad scrolling moves the canvas. A modifier-based wheel
@@ -1449,31 +1683,57 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
     gesture.idleTimer = window.setTimeout(commitWheelGesture, 90);
     if (gesture.frame !== null) return;
-    gesture.frame = requestAnimationFrame(() => {
-      const pending = wheelGestureRef.current;
-      pending.frame = null;
-      const current = pending.camera ?? useEditorStore.getState().viewport;
-      let nextX = current.x - pending.panX / current.zoom;
-      let nextY = current.y - pending.panY / current.zoom;
-      let nextZoom = current.zoom;
-      if (pending.zoomFactor !== 1 && pending.zoomPoint) {
-        const zoomPoint = pending.zoomPoint;
-        const worldAtPointer = {
-          x: (zoomPoint.x - size.width / 2) / current.zoom - nextX,
-          y: (zoomPoint.y - size.height / 2) / current.zoom - nextY,
-        };
-        nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.zoom * pending.zoomFactor));
-        nextX = (zoomPoint.x - size.width / 2) / nextZoom - worldAtPointer.x;
-        nextY = (zoomPoint.y - size.height / 2) / nextZoom - worldAtPointer.y;
-      }
-      pending.panX = 0;
-      pending.panY = 0;
-      pending.zoomFactor = 1;
-      pending.zoomPoint = null;
-      pending.camera = { x: nextX, y: nextY, zoom: nextZoom };
-      viewportGroupRef.current?.setAttribute('transform', viewportTransform(size, pending.camera));
-    });
+    gesture.frame = requestAnimationFrame(applyWheelFrame);
   };
+
+  useEffect(() => editorEvents.on('viewport:changed', () => {
+    if (wheelGestureRef.current.camera) cancelWheelGesture();
+    if (touchGestureRef.current) finishTouchGesture(false);
+  }), [cancelWheelGesture, finishTouchGesture]);
+
+  useEffect(() => {
+    const nextKey = `${document.id}:${activePageId}`;
+    if (gesturePageKeyRef.current === nextKey) return;
+    gesturePageKeyRef.current = nextKey;
+    cancelWheelGesture();
+    finishTouchGesture(false);
+  }, [activePageId, cancelWheelGesture, document.id, finishTouchGesture]);
+
+  useEffect(() => {
+    const finishNativePointer = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || !touchGestureRef.current) return;
+      touchPointersRef.current.set(event.pointerId, screenPoint(event));
+      const gesture = touchGestureRef.current;
+      if (gesture?.frame !== null) cancelAnimationFrame(gesture.frame);
+      if (gesture) gesture.frame = null;
+      if (event.type === 'pointercancel') {
+        touchPointersRef.current.delete(event.pointerId);
+        finishTouchGesture(false);
+        return;
+      }
+      applyTouchFrame();
+      touchPointersRef.current.delete(event.pointerId);
+      if (touchPointersRef.current.size < 2) finishTouchGesture(true);
+    };
+    const finishNativeTouch = (event: TouchEvent) => {
+      if (!touchGestureRef.current || event.touches.length > 0) return;
+      const gesture = touchGestureRef.current;
+      if (gesture?.frame !== null) cancelAnimationFrame(gesture.frame);
+      if (gesture) gesture.frame = null;
+      applyTouchFrame();
+      finishTouchGesture(event.type !== 'touchcancel');
+    };
+    window.addEventListener('pointerup', finishNativePointer, true);
+    window.addEventListener('pointercancel', finishNativePointer, true);
+    window.addEventListener('touchend', finishNativeTouch, { capture: true, passive: false });
+    window.addEventListener('touchcancel', finishNativeTouch, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener('pointerup', finishNativePointer, true);
+      window.removeEventListener('pointercancel', finishNativePointer, true);
+      window.removeEventListener('touchend', finishNativeTouch, true);
+      window.removeEventListener('touchcancel', finishNativeTouch, true);
+    };
+  }, [applyTouchFrame, finishTouchGesture, screenPoint]);
 
   const transform = viewportTransform(size, viewport);
   const gridSize = page?.settings.gridSize ?? 16;
@@ -1611,7 +1871,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef} onPointerLeave={clearPointerPosition}>
       {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">H</span> Pan tool <span className="hint-separator">·</span> <span className="hint-key">Two fingers</span> to pan <span className="hint-separator">·</span> <span className="hint-key">Pinch / Ctrl+scroll</span> to zoom</div>}
       {view.rulers && <><div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}</div><div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}</div></>}
-    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
+    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDownCapture={handlePointerDownCapture} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUpCapture={handleTouchPointerEndCapture} onPointerCancelCapture={handleTouchPointerEndCapture} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onTouchEndCapture={handleTouchEndCapture} onTouchCancelCapture={handleTouchEndCapture} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
          <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke={canvasGridColor} strokeWidth="0.7" opacity={page?.settings.canvasTheme === 'light' ? '0.7' : '0.62'} /></pattern>
         <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
@@ -1619,7 +1879,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
       </defs>
        <rect className="canvas-background" width={size.width} height={size.height} fill={canvasBackground} />
-        <g transform={transform}>
+         <g ref={viewportGroupRef} transform={transform}>
           <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : canvasBackground} />
           {shapePreviewNode && <g className="shape-drop-preview" transform={`translate(${shapePreviewNode.position.x} ${shapePreviewNode.position.y})`} pointerEvents="none"><NodeGraphic node={shapePreviewNode} diagramType={document.diagramType} /></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}

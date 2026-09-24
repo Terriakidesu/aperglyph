@@ -160,7 +160,8 @@ test.describe('diagram editing workflow', () => {
     const beforePan = await root.getAttribute('transform');
     const beforeZoom = await page.getByLabel('Zoom percentage').textContent();
     await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaX: 80, deltaY: 40, deltaMode: 0, clientX, clientY });
-    await expect.poll(() => root.getAttribute('transform')).not.toBe(beforePan);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(root).not.toHaveAttribute('transform', beforePan ?? '');
     await expect(page.getByLabel('Zoom percentage')).toHaveText(beforeZoom ?? '100%');
 
     const pinchPrevented = await canvas.evaluate((element, point) => {
@@ -171,6 +172,77 @@ test.describe('diagram editing workflow', () => {
     expect(pinchPrevented).toBe(true);
     await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX, clientY });
     await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
+  });
+
+  test('keeps a small pinch delta anchored at the pointer', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const point = await canvas.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { clientX: rect.left + rect.width * 0.72, clientY: rect.top + rect.height * 0.38 };
+    });
+    const readWorldPoint = () => page.evaluate(({ clientX, clientY }) => {
+      const root = document.querySelector<SVGGElement>('svg.diagram-canvas > g');
+      const inverse = root?.getScreenCTM()?.inverse();
+      if (!inverse) return null;
+      const world = new DOMPoint(clientX, clientY).matrixTransform(inverse);
+      return { x: world.x, y: world.y, transform: root?.getAttribute('transform') ?? '' };
+    }, point);
+    const before = await readWorldPoint();
+    expect(before).not.toBeNull();
+    await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -5, deltaMode: 0, ctrlKey: true, clientX: point.clientX, clientY: point.clientY });
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    const after = await readWorldPoint();
+    expect(after).not.toBeNull();
+    expect(after?.transform).not.toBe(before?.transform);
+    expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0))).toBeLessThan(0.01);
+    expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(0.01);
+  });
+
+  test('supports touchscreen pinch without scrolling the browser page', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const before = await page.evaluate(() => ({ zoom: Number(document.querySelector('[aria-label="Zoom percentage"]')?.textContent?.replace('%', '')), scrollX: globalThis.scrollX, scrollY: globalThis.scrollY }));
+    const cdp = await page.context().newCDPSession(page);
+    const center = { x: (box?.x ?? 0) + (box?.width ?? 0) * 0.65, y: (box?.y ?? 0) + (box?.height ?? 0) * 0.45 };
+    const points = (distance: number) => [{ id: 1, x: center.x - distance, y: center.y }, { id: 2, x: center.x + distance, y: center.y }];
+    try {
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(35) });
+      for (const distance of [45, 55, 65, 75, 85, 95]) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(distance) });
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await page.waitForTimeout(120);
+    } finally {
+      try { await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); } catch { /* Already ended. */ }
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await cdp.detach();
+    }
+    const after = await page.evaluate(() => ({ zoom: Number(document.querySelector('[aria-label="Zoom percentage"]')?.textContent?.replace('%', '')), scrollX: globalThis.scrollX, scrollY: globalThis.scrollY }));
+    expect(after.zoom).toBeGreaterThan(before.zoom);
+    expect(after.scrollX).toBe(before.scrollX);
+    expect(after.scrollY).toBe(before.scrollY);
+  });
+
+  test('does not let a pending gesture overwrite a viewport command', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Canvas view').click();
+    const result = await page.evaluate(async () => {
+      const canvas = document.querySelector<SVGSVGElement>('svg.diagram-canvas');
+      const rect = canvas?.getBoundingClientRect();
+      canvas?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, ctrlKey: true, clientX: (rect?.left ?? 0) + (rect?.width ?? 0) * 0.6, clientY: (rect?.top ?? 0) + (rect?.height ?? 0) * 0.4 }));
+      [...document.querySelectorAll<HTMLButtonElement>('.view-menu button')].find((button) => button.textContent?.trim() === 'Fit page')?.click();
+      await new Promise(requestAnimationFrame);
+      const fitted = document.querySelector<SVGGElement>('svg.diagram-canvas > g')?.getAttribute('transform');
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      const settled = document.querySelector<SVGGElement>('svg.diagram-canvas > g')?.getAttribute('transform');
+      return { fitted, settled };
+    });
+    expect(result.settled).toBe(result.fitted);
   });
 
   test('exposes common selection actions in the top bar', async ({ page }) => {
