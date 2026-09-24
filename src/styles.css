@@ -811,7 +811,7 @@ body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user
 .status-bar { position: relative; height: 28px; padding: 0 11px; background: #0c1118; border-top-color: var(--line-soft); font-size: 9px; }
 .status-left, .status-center, .status-right { gap: 10px; }
 .status-left { flex: 0 0 auto; }
-.status-center { min-width: 0; flex: 1; justify-content: center; overflow: hidden; }
+.status-center { min-width: 0; flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; }
 .status-save { display: inline-flex; align-items: center; gap: 6px; color: #8b96aa; white-space: nowrap; }
 .status-save.dirty { color: #c4a76d; }
 .status-stat { color: #69758c; white-space: nowrap; }
