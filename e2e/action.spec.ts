@@ -236,6 +236,28 @@ test.describe('diagram editing workflow', () => {
     expect(new Set(widths).size).toBe(1);
   });
 
+  test('resizes from the center with Alt-drag', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    const node = page.locator('[data-node-id]').first();
+    const before = await node.boundingBox();
+    const handle = node.locator('.node-handles .handle').nth(2);
+    const handleBox = await handle.boundingBox();
+    expect(before).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+    await page.keyboard.down('Alt');
+    await page.mouse.move((handleBox?.x ?? 0) + 4, (handleBox?.y ?? 0) + 4);
+    await page.mouse.down();
+    await page.mouse.move((handleBox?.x ?? 0) + 34, (handleBox?.y ?? 0) + 24, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    const after = await node.boundingBox();
+    expect(after).not.toBeNull();
+    expect(after?.width ?? 0).toBeGreaterThan((before?.width ?? 0) + 40);
+    expect(after?.height ?? 0).toBeGreaterThan((before?.height ?? 0) + 28);
+    expect(after?.x ?? 0).toBeLessThan((before?.x ?? 0) - 15);
+  });
+
   test('makes editor controls discoverable and keyboard accessible', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     const selectTool = page.getByRole('button', { name: 'Select tool' });

@@ -48,6 +48,7 @@ interface DragSession {
   initialNode?: { position: Point; size: Size };
   resizeMinimum?: Size;
   resizeAspectRatio?: number;
+  resizeFromCenter?: boolean;
   endpoint?: 'source' | 'target';
   connectorSource?: ConnectorAnchor;
   labelStart?: Point;
@@ -220,7 +221,7 @@ function endpointPoint(endpoint: Endpoint, node: DiagramNode | undefined, toward
   return endpoint.point;
 }
 
-function resizeGeometry(initial: { position: Point; size: Size }, handle: ResizeHandle, start: Point, current: Point, preserveAspect: boolean, minimum: Size = { width: 48, height: 32 }, aspectRatio?: number): { position: Point; size: Size } {
+function resizeGeometry(initial: { position: Point; size: Size }, handle: ResizeHandle, start: Point, current: Point, preserveAspect: boolean, minimum: Size = { width: 48, height: 32 }, aspectRatio?: number, fromCenter = false): { position: Point; size: Size } {
   const minWidth = Math.max(48, minimum.width);
   const minHeight = Math.max(32, minimum.height);
   const delta = { x: current.x - start.x, y: current.y - start.y };
@@ -230,10 +231,24 @@ function resizeGeometry(initial: { position: Point; size: Size }, handle: Resize
   let right = initialRight;
   let top = initial.position.y;
   let bottom = initialBottom;
-  if (handle.includes('w')) left = Math.min(initialRight - minWidth, initial.position.x + delta.x);
-  if (handle.includes('e')) right = Math.max(initial.position.x + minWidth, initialRight + delta.x);
-  if (handle.includes('n')) top = Math.min(initialBottom - minHeight, initial.position.y + delta.y);
-  if (handle.includes('s')) bottom = Math.max(initial.position.y + minHeight, initialBottom + delta.y);
+  if (fromCenter) {
+    const center = { x: initial.position.x + initial.size.width / 2, y: initial.position.y + initial.size.height / 2 };
+    const width = handle.includes('e') || handle.includes('w')
+      ? Math.max(minWidth, initial.size.width + 2 * (handle.includes('e') ? delta.x : -delta.x))
+      : initial.size.width;
+    const height = handle.includes('s') || handle.includes('n')
+      ? Math.max(minHeight, initial.size.height + 2 * (handle.includes('s') ? delta.y : -delta.y))
+      : initial.size.height;
+    left = center.x - width / 2;
+    right = center.x + width / 2;
+    top = center.y - height / 2;
+    bottom = center.y + height / 2;
+  } else {
+    if (handle.includes('w')) left = Math.min(initialRight - minWidth, initial.position.x + delta.x);
+    if (handle.includes('e')) right = Math.max(initial.position.x + minWidth, initialRight + delta.x);
+    if (handle.includes('n')) top = Math.min(initialBottom - minHeight, initial.position.y + delta.y);
+    if (handle.includes('s')) bottom = Math.max(initial.position.y + minHeight, initialBottom + delta.y);
+  }
   if (preserveAspect) {
     const ratio = aspectRatio ?? initial.size.width / Math.max(1, initial.size.height);
     let width = right - left;
@@ -247,10 +262,18 @@ function resizeGeometry(initial: { position: Point; size: Size }, handle: Resize
       width = Math.max(minWidth, height * ratio);
       height = Math.max(minHeight, width / ratio);
     }
-    if (handle.includes('w')) left = initialRight - width;
-    else right = initial.position.x + width;
-    if (handle.includes('n')) top = initialBottom - height;
-    else bottom = initial.position.y + height;
+    if (fromCenter) {
+      const center = { x: initial.position.x + initial.size.width / 2, y: initial.position.y + initial.size.height / 2 };
+      left = center.x - width / 2;
+      right = center.x + width / 2;
+      top = center.y - height / 2;
+      bottom = center.y + height / 2;
+    } else {
+      if (handle.includes('w')) left = initialRight - width;
+      else right = initial.position.x + width;
+      if (handle.includes('n')) top = initialBottom - height;
+      else bottom = initial.position.y + height;
+    }
   }
   return { position: { x: left, y: top }, size: { width: right - left, height: bottom - top } };
 }
@@ -1048,6 +1071,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       initialNode: { position: { ...node.position }, size: { ...node.size } },
       resizeMinimum: node.type === 'entity' ? entityMinimumSize(node.data.fields, node.data.entityVariant, node.data.columnHeaders === true) : undefined,
       resizeAspectRatio: pluginManager.getShape(node.library, node.type)?.aspectRatio,
+      resizeFromCenter: event.altKey,
     };
     svgRef.current?.setPointerCapture(event.pointerId);
   };
@@ -1406,7 +1430,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'endpoint') {
       updateEndpointPreview(session, point, event.altKey, ENDPOINT_SNAP_DISTANCE / viewport.zoom);
     } else if (session.mode === 'resize' && session.initialNode && session.nodeId && session.resizeHandle) {
-        setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey || session.resizeAspectRatio !== undefined, session.resizeMinimum, session.resizeAspectRatio) });
+        setResizePreview({ nodeId: session.nodeId, ...resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, point, event.shiftKey || session.resizeAspectRatio !== undefined, session.resizeMinimum, session.resizeAspectRatio, session.resizeFromCenter || event.altKey) });
     } else if (session.mode === 'waypoint' && session.edgeId && session.waypointIndex !== undefined) {
       const gridSize = page?.settings.gridSize ?? 16;
       const nextPoint = page && getSnapSettings(page.settings).grid && !event.altKey && !session.disableSnapping
@@ -1482,7 +1506,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     } else if (session.mode === 'resize') {
       const nodeId = session.nodeId;
       if (nodeId && session.initialNode && session.resizeHandle) {
-        const geometry = resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, worldPoint(event), event.shiftKey || session.resizeAspectRatio !== undefined, session.resizeMinimum, session.resizeAspectRatio);
+        const geometry = resizeGeometry(session.initialNode, session.resizeHandle, session.startWorld, worldPoint(event), event.shiftKey || session.resizeAspectRatio !== undefined, session.resizeMinimum, session.resizeAspectRatio, session.resizeFromCenter || event.altKey);
         updateNode(nodeId, geometry, 'Resize node');
         setResizePreview(null);
       }
