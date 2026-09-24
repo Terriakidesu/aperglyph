@@ -153,6 +153,51 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg line')).toHaveCount(3);
   });
 
+  test('offers starter templates from an empty canvas', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await expect(page.getByRole('heading', { name: 'Start a diagram' })).toBeVisible();
+    await page.locator('.canvas-template-grid button').filter({ hasText: 'Flowchart' }).click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(5);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(5);
+  });
+
+  test('switches the shape library to a persistent grid view', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByRole('button', { name: 'Shape grid' }).click();
+    await expect(page.locator('.shape-library')).toHaveClass(/library-grid-mode/);
+    await expect(page.getByRole('button', { name: 'Shape grid' })).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Shape grid' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('inverts selection from command search', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const rectangle = page.getByTitle('Drag Rectangle onto the canvas');
+    await rectangle.click();
+    await rectangle.click();
+    const selectedBefore = await page.locator('.canvas-node.selected').getAttribute('data-node-id');
+    expect(selectedBefore).not.toBeNull();
+    await page.keyboard.press('Control+k');
+    await page.getByLabel('Search commands').fill('Invert selection');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.canvas-node.selected')).toHaveCount(1);
+    await expect(page.locator('.canvas-node.selected')).not.toHaveAttribute('data-node-id', selectedBefore ?? '');
+  });
+
+  test('enters and exits group isolation from the canvas', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const rectangle = page.getByTitle('Drag Rectangle onto the canvas');
+    await rectangle.click();
+    await rectangle.click();
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Control+g');
+    await expect(page.locator('.group-boundary')).toHaveCount(1);
+    await page.locator('.canvas-node').first().dblclick({ force: true });
+    await expect(page.getByRole('navigation', { name: 'Group navigation' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('navigation', { name: 'Group navigation' })).toHaveCount(0);
+  });
+
   test('supports keyboard nudging and the command palette', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();

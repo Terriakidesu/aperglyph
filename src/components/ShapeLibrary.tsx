@@ -1,4 +1,4 @@
-import { ChevronDown, Search, Star } from 'lucide-react';
+import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { pluginManager } from '../plugins';
 import type { ShapeDefinition } from '../plugins';
@@ -13,6 +13,7 @@ const RECENT_KEY = 'aperglyph.shape-library.recent';
 
 type LibraryFilter = 'all' | 'favorites' | 'recent';
 type LibraryScope = 'all' | string;
+type LibraryDisplayMode = 'list' | 'grid';
 
 export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse }: { activePanel?: LeftPanelId; onPanelChange?: (panel: LeftPanelId) => void; onCollapse?: () => void }) {
   const document = useEditorStore((state) => state.document);
@@ -24,6 +25,7 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
   const [favorites, setFavorites] = useState<string[]>(readList(FAVORITES_KEY));
   const [recent, setRecent] = useState<string[]>(readList(RECENT_KEY));
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => readGroups());
+  const [displayMode, setDisplayMode] = useState<LibraryDisplayMode>(() => readDisplayMode());
   const plugins = useSyncExternalStore(pluginManager.subscribe, pluginManager.getSnapshot, pluginManager.getSnapshot);
   const normalizedSearch = search.trim().toLowerCase();
   const shapeKey = (libraryId: string, shape: ShapeDefinition) => `${libraryId}:${shape.id}`;
@@ -62,13 +64,21 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
     writeList(FAVORITES_KEY, next);
   };
 
-  return <aside className="shape-library">
+  return <aside className={`shape-library library-${displayMode}-mode`}>
     <LeftDockHeader activePanel={activePanel} onChange={onPanelChange ?? (() => undefined)} onCollapse={onCollapse ?? (() => undefined)} badge={countVisible ? <span className="library-count">{visibleCount}</span> : undefined} />
-    <div className="library-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search shapes" aria-label="Search shapes" /></div>
+    <div className="library-heading"><div><span className="panel-kicker">Resources</span><strong>Shapes</strong></div><div className="library-display-toggle" role="group" aria-label="Shape display mode"><button className={displayMode === 'list' ? 'active' : ''} title="Compact list" aria-label="Compact list" aria-pressed={displayMode === 'list'} onClick={() => { setDisplayMode('list'); writeDisplayMode('list'); }}><List size={13} /></button><button className={displayMode === 'grid' ? 'active' : ''} title="Shape grid" aria-label="Shape grid" aria-pressed={displayMode === 'grid'} onClick={() => { setDisplayMode('grid'); writeDisplayMode('grid'); }}><LayoutGrid size={13} /></button></div></div>
+    <div className="library-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search shapes…" aria-label="Search shapes" /></div>
+    <div className="library-scope-nav" role="navigation" aria-label="Shape libraries">
+      <button className={libraryScope === 'all' && filter === 'all' ? 'active' : ''} onClick={() => { setLibraryScope('all'); setFilter('all'); writeLibraryScope('all'); writeLibraryFilter('all'); }}><span>All shapes</span><small>{plugins.reduce((count, plugin) => count + plugin.shapes.length, 0)}</small></button>
+      <button className={filter === 'favorites' ? 'active' : ''} onClick={() => { setFilter('favorites'); writeLibraryFilter('favorites'); }}><span>Favorites</span><Star size={11} /></button>
+      <button className={filter === 'recent' ? 'active' : ''} onClick={() => { setFilter('recent'); writeLibraryFilter('recent'); }}><span>Recently used</span><small>{recent.length}</small></button>
+      <span className="library-nav-label">Libraries</span>
+      {plugins.map((plugin) => <button key={plugin.id} className={libraryScope === plugin.id ? 'active library-nav-library' : 'library-nav-library'} onClick={() => { setLibraryScope(plugin.id); setFilter('all'); writeLibraryScope(plugin.id); writeLibraryFilter('all'); }}><span>{plugin.name}</span><small>{plugin.shapes.length}</small></button>)}
+    </div>
+    <label className="library-scope-legacy"><span>Library</span><select aria-label="Shape library category" value={libraryScope} onChange={(event) => { setLibraryScope(event.target.value); setFilter('all'); writeLibraryScope(event.target.value); writeLibraryFilter('all'); }}><option value="all">All libraries</option>{plugins.map((plugin) => <option key={plugin.id} value={plugin.id}>{plugin.name}</option>)}</select></label>
     <div className="library-filters" role="tablist" aria-label="Shape library filters">
       {(['all', 'favorites', 'recent'] as LibraryFilter[]).map((value) => <button key={value} role="tab" aria-selected={filter === value} className={filter === value ? 'active' : ''} onClick={() => { setFilter(value); writeLibraryFilter(value); }}>{value === 'all' ? 'All' : value === 'favorites' ? 'Favorites' : 'Recent'}</button>)}
     </div>
-    <label className="library-scope"><span>Library</span><select aria-label="Shape library category" value={libraryScope} onChange={(event) => { setLibraryScope(event.target.value); writeLibraryScope(event.target.value); }}><option value="all">All libraries</option>{plugins.map((plugin) => <option key={plugin.id} value={plugin.id}>{plugin.name}</option>)}</select></label>
     <div className="library-scroll">
        {plugins.map((plugin) => {
          const shapes = plugin.shapes.filter((shape) => matches(shape, plugin.id));
@@ -77,7 +87,7 @@ export function ShapeLibrary({ activePanel = 'shapes', onPanelChange, onCollapse
           return <div key={plugin.id} className="library-plugin-group">{categories.map(([category, categoryShapes], categoryIndex) => {
             const groupId = `${plugin.id}:${category}`;
             const open = openGroups[groupId] ?? categoryIndex === 0;
-           return <ShapeGroup key={groupId} title={categories.length === 1 ? `${plugin.name} shapes` : category} shapes={categoryShapes} open={open} onToggle={() => {
+            return <ShapeGroup key={groupId} title={categories.length === 1 ? `${plugin.name} shapes` : category} shapes={categoryShapes} displayMode={displayMode} open={open} onToggle={() => {
              const next = { ...openGroups, [groupId]: !open };
              setOpenGroups(next);
              writeGroups(next);
@@ -100,8 +110,8 @@ function groupShapes(shapes: ShapeDefinition[], fallback: string): Array<[string
   return [...groups.entries()];
 }
 
-function ShapeGroup({ title, shapes, open, onToggle, onAdd, libraryId, isFavorite, onToggleFavorite, isRecent }: { title: string; shapes: ShapeDefinition[]; open: boolean; onToggle: () => void; onAdd: (shape: ShapeDefinition) => void; libraryId: string; isFavorite: (libraryId: string, shape: ShapeDefinition) => boolean; onToggleFavorite: (libraryId: string, shape: ShapeDefinition) => void; isRecent: (shape: ShapeDefinition) => boolean }) {
-  return <div className="shape-group"><button className="group-heading" onClick={onToggle}><span>{title}</span><ChevronDown size={14} className={!open ? 'collapsed' : ''} /></button>{open && <div className="shape-list">{shapes.map((shape) => <div className={`shape-item-row ${isRecent(shape) ? 'recent' : ''}`} key={`${shape.id}-${shape.type}`}><button className="shape-item" draggable title={`Drag ${shape.label} onto the canvas`} onClick={() => onAdd(shape)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; const payload = serializeShapeDrop(libraryId, shape); event.dataTransfer.setData(SHAPE_DRAG_MIME, payload); event.dataTransfer.setData('text/plain', payload); }}>{shapeIcon(shape, libraryId)}<span>{shape.label}</span><span className="shape-drag-hint">+</span></button><button className={isFavorite(libraryId, shape) ? 'shape-favorite active' : 'shape-favorite'} title={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} aria-label={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} onClick={() => onToggleFavorite(libraryId, shape)}><Star size={12} fill={isFavorite(libraryId, shape) ? 'currentColor' : 'none'} /></button></div>)}</div>}</div>;
+function ShapeGroup({ title, shapes, displayMode, open, onToggle, onAdd, libraryId, isFavorite, onToggleFavorite, isRecent }: { title: string; shapes: ShapeDefinition[]; displayMode: LibraryDisplayMode; open: boolean; onToggle: () => void; onAdd: (shape: ShapeDefinition) => void; libraryId: string; isFavorite: (libraryId: string, shape: ShapeDefinition) => boolean; onToggleFavorite: (libraryId: string, shape: ShapeDefinition) => void; isRecent: (shape: ShapeDefinition) => boolean }) {
+  return <div className="shape-group"><button className="group-heading" onClick={onToggle}><span>{title}</span><ChevronDown size={14} className={!open ? 'collapsed' : ''} /></button>{open && <div className={`shape-list ${displayMode === 'grid' ? 'shape-grid' : ''}`}>{shapes.map((shape) => <div className={`shape-item-row ${isRecent(shape) ? 'recent' : ''}`} key={`${shape.id}-${shape.type}`}><button className="shape-item" draggable title={`Drag ${shape.label} onto the canvas`} onClick={() => onAdd(shape)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; const payload = serializeShapeDrop(libraryId, shape); event.dataTransfer.setData(SHAPE_DRAG_MIME, payload); event.dataTransfer.setData('text/plain', payload); }}>{shapeIcon(shape, libraryId)}<span>{shape.label}</span><span className="shape-drag-hint">+</span></button><button className={isFavorite(libraryId, shape) ? 'shape-favorite active' : 'shape-favorite'} title={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} aria-label={isFavorite(libraryId, shape) ? `Remove ${shape.label} from favorites` : `Favorite ${shape.label}`} onClick={() => onToggleFavorite(libraryId, shape)}><Star size={12} fill={isFavorite(libraryId, shape) ? 'currentColor' : 'none'} /></button></div>)}</div>}</div>;
 }
 
 function shapeIcon(shape: ShapeDefinition, libraryId: string) {
@@ -167,4 +177,12 @@ function readLibraryScope(): LibraryScope {
 
 function writeLibraryScope(value: LibraryScope): void {
   try { globalThis.localStorage?.setItem('aperglyph.shape-library.scope', value); } catch { /* optional UI preference */ }
+}
+
+function readDisplayMode(): LibraryDisplayMode {
+  try { return globalThis.localStorage?.getItem('aperglyph.shape-library.display') === 'grid' ? 'grid' : 'list'; } catch { return 'list'; }
+}
+
+function writeDisplayMode(value: LibraryDisplayMode): void {
+  try { globalThis.localStorage?.setItem('aperglyph.shape-library.display', value); } catch { /* optional UI preference */ }
 }

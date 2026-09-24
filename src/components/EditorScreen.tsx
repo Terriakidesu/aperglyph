@@ -1,9 +1,10 @@
-import { PanelLeftOpen, PanelRightOpen } from 'lucide-react';
+import { PanelLeftOpen, PanelRightOpen, Shapes, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { createNode as buildNode } from '../core/document';
+import { createTemplateDocument } from '../core/templates';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
 import { getActivePage, useEditorStore } from '../store/editorStore';
@@ -32,6 +33,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const redo = useEditorStore((state) => state.redo);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
   const selectAll = useEditorStore((state) => state.selectAll);
+  const invertSelection = useEditorStore((state) => state.invertSelection);
   const selectAllConnectors = useEditorStore((state) => state.selectAllConnectors);
   const selectSameType = useEditorStore((state) => state.selectSameType);
   const selectConnected = useEditorStore((state) => state.selectConnected);
@@ -61,6 +63,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const document = useEditorStore((state) => state.document);
   const setDocument = useEditorStore((state) => state.setDocument);
   const activePageId = useEditorStore((state) => state.activePageId);
+  const setActivePage = useEditorStore((state) => state.setActivePage);
   const viewport = useEditorStore((state) => state.viewport);
   const page = getActivePage(document, activePageId);
   const [leftOpen, setLeftOpen] = useState(() => readStoredBoolean('aperglyph.editor.left-open', true));
@@ -71,6 +74,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const [viewPreferences, setViewPreferences] = useState<ViewPreferences>(() => readViewPreferences());
   const [focusMode, setFocusMode] = useState(false);
   const [presentationMode, setPresentationMode] = useState(false);
+  const [isolatedGroupId, setIsolatedGroupId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(() => Boolean(globalThis.document?.fullscreenElement));
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -103,6 +107,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'select-same-type', label: 'Select same shape type', hint: 'Selection', run: () => selectSameType() },
     { id: 'select-connected', label: 'Select connected objects', hint: 'Selection', run: () => selectConnected() },
     { id: 'select-descendants', label: 'Select descendants', hint: 'Selection', run: () => selectDescendants() },
+    { id: 'invert-selection', label: 'Invert selection', hint: 'Selection', run: () => invertSelection() },
     { id: 'group', label: 'Group selection', hint: 'Selection', shortcut: '⌘G', run: () => groupSelection() },
     { id: 'new-page', label: 'Add page', hint: 'Pages', run: () => createPage() },
     { id: 'auto-layout', label: 'Auto layout', hint: 'Arrange', run: () => { void autoLayout(); } },
@@ -112,6 +117,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'diagnostics', label: 'Open diagnostics', hint: 'Validation', run: () => setShowDiagnostics(true) },
     { id: 'save-template', label: 'Save current document as template', hint: 'Templates', run: () => { const name = globalThis.prompt('Template name', document.name); if (name?.trim()) saveLocalTemplate(document, name); } },
     { id: 'shortcuts', label: 'Open keyboard shortcuts', hint: 'Help', run: () => setShowShortcuts(true) },
+    ...(isolatedGroupId ? [{ id: 'exit-group', label: 'Exit group isolation', hint: 'Navigation', run: () => setIsolatedGroupId(null) }] : []),
+    ...document.pages.map((candidate) => ({ id: `page-${candidate.id}`, label: `Open page · ${candidate.name}`, hint: 'Pages', run: () => setActivePage(candidate.id) })),
+    ...(page ? page.nodes.map((node) => ({ id: `object-${node.id}`, label: `Select · ${nodeLabelForPalette(node)}`, hint: 'Objects', run: () => useEditorStore.getState().setSelection([node.id], node.id) })) : []),
+    ...(page ? page.edges.map((edge) => ({ id: `connector-${edge.id}`, label: `Select connector · ${nodeLabelForPalette(edge)}`, hint: 'Objects', run: () => useEditorStore.getState().setSelection([edge.id], edge.id) })) : []),
   ];
   const matchingCommands = paletteCommands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(paletteQuery.trim().toLowerCase()));
   const diagnosticCount = validationEnabled ? collectDiagnostics(document).filter((diagnostic) => diagnostic.severity !== 'info').length : 0;
@@ -242,6 +251,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const viewportKey = `${document.id}:${activePageId}`;
   const restoredViewportKey = useRef<string | null>(null);
   const skipViewportSaveKey = useRef<string | null>(null);
+  useEffect(() => setIsolatedGroupId(null), [activePageId]);
   useEffect(() => {
     if (restoredViewportKey.current === viewportKey) return;
     restoredViewportKey.current = viewportKey;
@@ -305,7 +315,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
         if (node) { event.preventDefault(); editorEvents.emit('text:edit', { kind: 'node', id: node.id }); return; }
       }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
-       if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setShowDiagnostics(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
+       if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setShowDiagnostics(false); if (isolatedGroupId) { setIsolatedGroupId(null); return; } setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
         const distance = event.shiftKey ? (page && getSnapSettings(page.settings).grid ? page.settings.gridSize : 10) : 1;
@@ -319,7 +329,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, flipSelection, groupSelection, matchSelectionSize, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, resetSelectionRotation, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
+     }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, flipSelection, groupSelection, invertSelection, isolatedGroupId, matchSelectionSize, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, resetSelectionRotation, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
 
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));
@@ -336,11 +346,12 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
      <EditorTopBar onExit={onExit} onOpenDocument={openDocument} onOpenPreferences={() => setShowPreferences(true)} onDiagnostics={() => setShowDiagnostics(true)} diagnosticCount={diagnosticCount} view={viewPreferences} gridVisible={page?.settings.gridVisible ?? true} onViewChange={updateViewPreferences} onToggleGrid={() => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid')} onFitPage={() => editorEvents.emit('viewport:fit', { scope: 'page' })} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onZoom100={() => useEditorStore.getState().updateViewport({ zoom: 1 })} onToggleFocus={() => setFocusMode((value) => !value)} onToggleFullscreen={() => void toggleFullscreen()} onTogglePresentation={() => setPresentationMode((value) => !value)} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />
     <div className="editor-workspace" style={workspaceStyle}>
       <EditorToolbar />
-      {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
+       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} onEnterGroup={setIsolatedGroupId} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
       {leftOpen && <PanelResizeHandle side="left" width={leftWidth} onWidthChange={(value) => setLeftWidth(clampPanelWidth(value, 'left'))} onPointerDown={(event) => beginPanelResize('left', event)} />}
-       <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} /><PageTabs /><StatusBar /></section>
+        <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} isolatedGroupId={isolatedGroupId} onEnterGroup={setIsolatedGroupId} onExitGroup={() => setIsolatedGroupId(null)} onCreateTemplate={(type) => { if (type === 'blank') return; openDocument(createTemplateDocument(`Untitled ${type} diagram`, type)); }} /><PageTabs /><StatusBar /></section>
       {rightOpen && <PanelResizeHandle side="right" width={rightWidth} onWidthChange={(value) => setRightWidth(clampPanelWidth(value, 'right'))} onPointerDown={(event) => beginPanelResize('right', event)} />}
        {rightOpen && <PropertiesPanel />}
+       <div className="mobile-dock-actions" aria-label="Workspace panels"><button onClick={() => { setLeftPanel('shapes'); setLeftOpen(true); }} aria-label="Open shapes" title="Open shapes"><Shapes size={16} /></button><button onClick={() => setRightOpen(true)} aria-label="Open properties" title="Open properties"><SlidersHorizontal size={16} /></button></div>
        {!leftOpen && <DockReopenButton side="left" onClick={() => setLeftOpen(true)} />}
        {!rightOpen && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
       </div>
@@ -361,6 +372,11 @@ interface PaletteCommand {
 
 function Shortcut({ keys, label }: { keys: string; label: string }) {
   return <div className="shortcut-row"><span>{label}</span><kbd>{keys}</kbd></div>;
+}
+
+function nodeLabelForPalette(node: { type: string; data: Record<string, unknown> }): string {
+  const label = node.data.label;
+  return typeof label === 'string' && label.trim() ? label : node.type;
 }
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {

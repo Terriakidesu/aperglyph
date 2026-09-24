@@ -104,6 +104,7 @@ interface EditorStore {
   deleteStylePreset: (presetId: string) => void;
   deleteSelection: () => void;
   selectAll: () => void;
+  invertSelection: () => void;
   selectAllConnectors: () => void;
   selectSameType: (nodeId?: string) => void;
   selectConnected: (nodeId?: string) => void;
@@ -445,6 +446,17 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const page = getActivePage(document, activePageId);
       if (!page) return;
       get().setSelection([...page.nodes.filter((node) => !node.hidden).map((node) => node.id), ...page.edges.map((edge) => edge.id)]);
+    },
+    invertSelection: () => {
+      const { document, activePageId, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      if (!page) return;
+      const selected = new Set(selectedIds);
+      const ids = [
+        ...page.nodes.filter((node) => !node.hidden && !selected.has(node.id)).map((node) => node.id),
+        ...page.edges.filter((edge) => !selected.has(edge.id)).map((edge) => edge.id),
+      ];
+      get().setSelection(ids, ids[0] ?? null);
     },
     selectAllConnectors: () => {
       const { document, activePageId } = get();

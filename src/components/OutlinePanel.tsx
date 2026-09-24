@@ -7,7 +7,7 @@ import { LeftDockHeader, type LeftPanelId } from './DockHeader';
 
 const OUTLINE_EXPANSION_KEY = 'aperglyph.outline.expanded';
 
-export function OutlinePanel({ activePanel = 'outline', onPanelChange, onCollapse }: { activePanel?: LeftPanelId; onPanelChange?: (panel: LeftPanelId) => void; onCollapse?: () => void }) {
+export function OutlinePanel({ activePanel = 'outline', onPanelChange, onCollapse, onEnterGroup }: { activePanel?: LeftPanelId; onPanelChange?: (panel: LeftPanelId) => void; onCollapse?: () => void; onEnterGroup?: (groupId: string) => void }) {
   const document = useEditorStore((state) => state.document);
   const activePageId = useEditorStore((state) => state.activePageId);
   const selectedIds = useEditorStore((state) => state.selectedIds);
@@ -193,8 +193,8 @@ export function OutlinePanel({ activePanel = 'outline', onPanelChange, onCollaps
         const groupName = `Group: ${nodeLabel(groupedNodes[0])}`;
         if (normalizedQuery && !matches(`${groupName} ${groupId}`) && matchingNodes.length === 0) return null;
         const isExpanded = expanded[groupId] !== false;
-        return <div className="outline-group" key={groupId}>
-          <div className={`outline-row outline-group-row ${selectedIds.some((id) => groupedNodes.some((node) => node.id === id)) ? 'selected' : ''}`} role="button" tabIndex={0} onClick={() => setSelection(groupedNodes.map((node) => node.id), groupedNodes[0]?.id ?? null)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelection(groupedNodes.map((node) => node.id), groupedNodes[0]?.id ?? null); } }}>
+         return <div className="outline-group" key={groupId}>
+           <div className={`outline-row outline-group-row ${selectedIds.some((id) => groupedNodes.some((node) => node.id === id)) ? 'selected' : ''}`} role="button" tabIndex={0} onClick={() => setSelection(groupedNodes.map((node) => node.id), groupedNodes[0]?.id ?? null)} onDoubleClick={() => onEnterGroup?.(groupId)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelection(groupedNodes.map((node) => node.id), groupedNodes[0]?.id ?? null); } }}>
             <button className="outline-expand" aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${groupName}`} onClick={(event) => { event.stopPropagation(); setExpandedState(groupId, !isExpanded); }}>{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
             <GripVertical className="outline-grip" size={12} /><span className="outline-group-marker" /><strong>{groupName}</strong><small>{groupedNodes.length}</small>
           </div>

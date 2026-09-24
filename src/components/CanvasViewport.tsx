@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react';
-import { Lock, Ruler, Trash2, Unlock } from 'lucide-react';
+import { ChevronRight, Lock, Ruler, Trash2, Unlock, X } from 'lucide-react';
 import { createEdge, createId, createNode as buildNode } from '../core/document';
 import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
 import type { ShapeDropPayload } from '../core/shapeTransfer';
@@ -66,6 +66,13 @@ interface SegmentPreview {
   edgeId: string;
   segmentIndex: number;
   axis: 'x' | 'y';
+  value: number;
+}
+
+interface DistanceIndicator {
+  start: Point;
+  end: Point;
+  label: Point;
   value: number;
 }
 
@@ -206,6 +213,52 @@ function asConnectionPort(value: string | null): ConnectionPort | undefined {
 
 function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function buildDistanceIndicators(movingNodes: DiagramNode[], preview: Record<string, Point>, allNodes: DiagramNode[]): DistanceIndicator[] {
+  if (movingNodes.length === 0) return [];
+  const movingIds = new Set(movingNodes.map((node) => node.id));
+  const moved = movingNodes.map((node) => ({
+    left: (preview[node.id] ?? node.position).x,
+    top: (preview[node.id] ?? node.position).y,
+    right: (preview[node.id] ?? node.position).x + node.size.width,
+    bottom: (preview[node.id] ?? node.position).y + node.size.height,
+  }));
+  const movingBounds = {
+    left: Math.min(...moved.map((bounds) => bounds.left)),
+    top: Math.min(...moved.map((bounds) => bounds.top)),
+    right: Math.max(...moved.map((bounds) => bounds.right)),
+    bottom: Math.max(...moved.map((bounds) => bounds.bottom)),
+  };
+  const horizontal: DistanceIndicator[] = [];
+  const vertical: DistanceIndicator[] = [];
+  allNodes.filter((node) => !node.hidden && !movingIds.has(node.id)).forEach((node) => {
+    const left = node.position.x;
+    const top = node.position.y;
+    const right = left + node.size.width;
+    const bottom = top + node.size.height;
+    const overlapY = Math.max(movingBounds.top, top) <= Math.min(movingBounds.bottom, bottom);
+    const overlapX = Math.max(movingBounds.left, left) <= Math.min(movingBounds.right, right);
+    if (overlapY && left >= movingBounds.right) {
+      const value = left - movingBounds.right;
+      const y = (Math.max(movingBounds.top, top) + Math.min(movingBounds.bottom, bottom)) / 2;
+      horizontal.push({ start: { x: movingBounds.right, y }, end: { x: left, y }, label: { x: (movingBounds.right + left) / 2, y: y - 6 }, value });
+    } else if (overlapY && right <= movingBounds.left) {
+      const value = movingBounds.left - right;
+      const y = (Math.max(movingBounds.top, top) + Math.min(movingBounds.bottom, bottom)) / 2;
+      horizontal.push({ start: { x: right, y }, end: { x: movingBounds.left, y }, label: { x: (right + movingBounds.left) / 2, y: y - 6 }, value });
+    }
+    if (overlapX && top >= movingBounds.bottom) {
+      const value = top - movingBounds.bottom;
+      const x = (Math.max(movingBounds.left, left) + Math.min(movingBounds.right, right)) / 2;
+      vertical.push({ start: { x, y: movingBounds.bottom }, end: { x, y: top }, label: { x: x + 6, y: (movingBounds.bottom + top) / 2 }, value });
+    } else if (overlapX && bottom <= movingBounds.top) {
+      const value = movingBounds.top - bottom;
+      const x = (Math.max(movingBounds.left, left) + Math.min(movingBounds.right, right)) / 2;
+      vertical.push({ start: { x, y: bottom }, end: { x, y: movingBounds.top }, label: { x: x + 6, y: (bottom + movingBounds.top) / 2 }, value });
+    }
+  });
+  return [...horizontal.sort((left, right) => left.value - right.value).slice(0, 1), ...vertical.sort((left, right) => left.value - right.value).slice(0, 1)];
 }
 
 function midpoint(left: Point, right: Point): Point {
@@ -381,6 +434,10 @@ function connectionDropAnchor(event: ReactPointerEvent<SVGSVGElement>, point: Po
 interface CanvasViewportProps {
   onImportFile?: (file: File, point: Point) => void | Promise<void>;
   view?: CanvasViewOptions;
+  isolatedGroupId?: string | null;
+  onEnterGroup?: (groupId: string) => void;
+  onExitGroup?: () => void;
+  onCreateTemplate?: (type: 'blank' | 'flowchart' | 'erd' | 'dfd' | 'use-case') => void;
 }
 
 interface CanvasViewOptions {
@@ -393,7 +450,7 @@ interface CanvasViewOptions {
 
 const DEFAULT_CANVAS_VIEW: CanvasViewOptions = { rulers: true, guides: true, minimap: true, showPorts: false, connectionHints: true };
 
-export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: CanvasViewportProps) {
+export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW, isolatedGroupId = null, onEnterGroup, onExitGroup, onCreateTemplate }: CanvasViewportProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const viewportGroupRef = useRef<SVGGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -409,6 +466,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const [spacePressed, setSpacePressed] = useState(false);
   const [visibleNodeIds, setVisibleNodeIds] = useState<Set<string> | null>(null);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [showDistances, setShowDistances] = useState(false);
+  const [distanceIndicators, setDistanceIndicators] = useState<DistanceIndicator[]>([]);
   const [snapCandidateIds, setSnapCandidateIds] = useState<string[]>([]);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [waypointPreview, setWaypointPreview] = useState<{ edgeId: string; index: number; point: Point } | null>(null);
@@ -427,6 +486,10 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const [resizePreview, setResizePreview] = useState<{ nodeId: string; position: Point; size: Size } | null>(null);
   const [guidePreview, setGuidePreview] = useState<DiagramGuide | null>(null);
   const [guidesOpen, setGuidesOpen] = useState(false);
+  const [minimapCollapsed, setMinimapCollapsed] = useState(() => {
+    try { return globalThis.localStorage?.getItem('aperglyph.canvas-minimap-collapsed') === 'true'; } catch { return false; }
+  });
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
   const [showCanvasHint, setShowCanvasHint] = useState(() => {
     try {
@@ -514,6 +577,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setDragPreview({});
     setMarquee(null);
     setAlignmentGuides([]);
+    setShowDistances(false);
+    setDistanceIndicators([]);
     setSnapCandidateIds([]);
     setConnectorStart(null);
     setConnectorDragPreview(null);
@@ -577,6 +642,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   useEffect(() => {
     if (activeTool !== 'connector') setConnectorStart(null);
   }, [activeTool]);
+
+  useEffect(() => {
+    if (isolatedGroupId) setTextEdit(null);
+  }, [isolatedGroupId]);
+
+  useEffect(() => {
+    setOnboardingDismissed(false);
+  }, [activePageId, document.id]);
 
   useEffect(() => editorEvents.on('interaction:cancel', () => {
     cancelActiveInteraction();
@@ -1143,11 +1216,20 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       return;
     }
 
+    if (event.button === 0 && event.detail === 2 && node.groupId && node.groupId !== isolatedGroupId) {
+      lastClickRef.current = null;
+      dragRef.current = null;
+      setTextEdit(null);
+      onEnterGroup?.(node.groupId);
+      return;
+    }
+
     const now = Date.now();
     if (event.button === 0 && !event.shiftKey && !event.altKey && lastClickRef.current?.kind === 'node' && lastClickRef.current.id === node.id && now - lastClickRef.current.time < DOUBLE_CLICK_WINDOW_MS) {
       lastClickRef.current = null;
       dragRef.current = null;
-      beginTextEdit('node', node.id);
+      if (node.groupId && node.groupId !== isolatedGroupId) { setTextEdit(null); onEnterGroup?.(node.groupId); }
+      else beginTextEdit('node', node.id);
       return;
     }
     if (event.button === 0 && !event.shiftKey && !event.altKey) lastClickRef.current = { kind: 'node', id: node.id, time: now };
@@ -1422,6 +1504,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       return;
     }
     const point = worldPoint(event);
+    if (session.mode !== 'drag') { setShowDistances(false); setDistanceIndicators([]); }
     if (session.mode === 'connector' && connectorDragPreview) {
       const snappingEnabled = page ? getSnapSettings(page.settings).ports && !event.altKey && !session.disableSnapping : false;
       const snapped = snappingEnabled ? nearestConnectionAnchor(page?.nodes ?? [], point, session.connectorSource?.nodeId, ENDPOINT_SNAP_DISTANCE / viewport.zoom) : null;
@@ -1446,6 +1529,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         : rawValue;
       setSegmentPreview({ edgeId: session.edgeId, segmentIndex: session.segmentIndex, axis: session.segmentAxis, value });
     } else if (session.mode === 'drag' && session.initialPositions) {
+      setShowDistances(event.altKey);
       const movingNodes = page?.nodes.filter((node) => Object.hasOwn(session.initialPositions ?? {}, node.id)) ?? [];
       const candidateNodes = page?.nodes.filter((node) => snapCandidateIds.includes(node.id)) ?? [];
        const snap = page ? getSnapSettings(page.settings) : undefined;
@@ -1453,10 +1537,12 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       const preview = snapped.positions;
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
-        setDragPreview(preview);
-        setAlignmentGuides(snapped.guides);
+         setDragPreview(preview);
+         setAlignmentGuides(snapped.guides);
+         setDistanceIndicators(event.altKey ? buildDistanceIndicators(movingNodes, preview, page?.nodes ?? []) : []);
       });
     } else if (session.mode === 'marquee') {
+      setShowDistances(false);
       setMarquee({ start: session.startWorld, current: point });
     }
   };
@@ -1586,6 +1672,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     }
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     dragRef.current = null;
+    setShowDistances(false);
+    setDistanceIndicators([]);
   };
 
   const clearPointerPosition = () => {
@@ -1821,7 +1909,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y),
   } : null;
 
-  const renderedNodes = page?.nodes.filter((node) => !node.hidden && (!visibleNodeIds || visibleNodeIds.has(node.id))).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)) ?? [];
+  const isVisibleInIsolation = (node: DiagramNode) => !isolatedGroupId || node.groupId === isolatedGroupId;
+  const renderedNodes = page?.nodes.filter((node) => !node.hidden && isVisibleInIsolation(node) && (!visibleNodeIds || visibleNodeIds.has(node.id))).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)) ?? [];
   const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => {
     const clamped = clampEntityNodeSize(node);
     const moved = dragPreview[node.id] ? { ...clamped, position: dragPreview[node.id] } : clamped;
@@ -1831,7 +1920,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const groupBounds = (() => {
     const groups = new Map<string, DiagramNode[]>();
     nodeMap.forEach((node) => {
-      if (node.hidden || !node.groupId) return;
+      if (node.hidden || !node.groupId || !isVisibleInIsolation(node)) return;
       const members = groups.get(node.groupId) ?? [];
       members.push(node);
       groups.set(node.groupId, members);
@@ -1845,7 +1934,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       return { id, members, bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY }, selected: members.every((node) => selectedIds.includes(node.id)) };
     });
   })();
-  const renderedEdges = page?.edges.filter((edge) => !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId)) ?? [];
+  const renderedEdges = page?.edges.filter((edge) => {
+    if (isolatedGroupId) {
+      const sourceVisible = !edge.source.nodeId || page.nodes.some((node) => node.id === edge.source.nodeId && isVisibleInIsolation(node));
+      const targetVisible = !edge.target.nodeId || page.nodes.some((node) => node.id === edge.target.nodeId && isVisibleInIsolation(node));
+      if (!sourceVisible || !targetVisible) return false;
+    }
+    return !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId);
+  }) ?? [];
   const connectionTarget = connectorDragPreview?.target
     ? { nodeId: connectorDragPreview.target.anchor.nodeId, point: connectorDragPreview.target.point }
     : endpointPreview?.anchor.nodeId
@@ -1945,16 +2041,31 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const quickCreateMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(quickCreateSearch.trim().toLowerCase())).slice(0, 8);
   const shapeInsertMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeInsertSearch.trim().toLowerCase())).slice(0, 8);
   const shapeChangeMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeChangeSearch.trim().toLowerCase())).slice(0, 8);
+  const isolatedMembers = isolatedGroupId ? (page?.nodes ?? []).filter((node) => node.groupId === isolatedGroupId) : [];
+  const isolatedGroupLabel = isolatedMembers.length > 0
+    ? `Group · ${isolatedMembers.length} object${isolatedMembers.length === 1 ? '' : 's'}`
+    : 'Group';
+  const pageIsEmpty = Boolean(page && page.nodes.length === 0 && page.edges.length === 0);
+  const contextNode = contextMenu?.target.kind === 'node' && contextMenu.target.id
+    ? page?.nodes.find((node) => node.id === contextMenu.target.id)
+    : undefined;
+  const startFromTemplate = (type: 'blank' | 'flowchart' | 'erd' | 'dfd' | 'use-case') => {
+    setOnboardingDismissed(true);
+    onCreateTemplate?.(type);
+  };
 
     return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef} onPointerLeave={clearPointerPosition}>
       {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">H</span> Pan tool <span className="hint-separator">·</span> <span className="hint-key">Two fingers</span> to pan <span className="hint-separator">·</span> <span className="hint-key">Pinch / Ctrl+scroll</span> to zoom</div>}
+      {isolatedGroupId && <nav className="canvas-breadcrumbs" aria-label="Group navigation"><button onClick={onExitGroup}> {page?.name ?? 'Page'} </button><ChevronRight size={13} /><span>{isolatedGroupLabel}</span><button className="canvas-breadcrumb-close" title="Exit group isolation" aria-label="Exit group isolation" onClick={onExitGroup}><X size={12} /></button></nav>}
+      {pageIsEmpty && onCreateTemplate && !onboardingDismissed && <div className="canvas-onboarding"><div className="canvas-onboarding-card"><span className="panel-kicker">AperGlyph</span><h2>Start a diagram</h2><p>Choose a local template or drag a shape from the library.</p><div className="canvas-template-grid"><button onClick={() => startFromTemplate('flowchart')}><strong>Flowchart</strong><small>Processes and decisions</small></button><button onClick={() => startFromTemplate('erd')}><strong>ER diagram</strong><small>Entities and relationships</small></button><button onClick={() => startFromTemplate('dfd')}><strong>Data flow</strong><small>Systems and data stores</small></button><button onClick={() => startFromTemplate('use-case')}><strong>UML</strong><small>Actors and use cases</small></button></div><button className="canvas-onboarding-blank" onClick={() => startFromTemplate('blank')}>Start with a blank canvas</button></div></div>}
       {view.rulers && <><div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}</div><div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}</div></>}
     <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDownCapture={handlePointerDownCapture} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUpCapture={handleTouchPointerEndCapture} onPointerCancelCapture={handleTouchPointerEndCapture} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onTouchEndCapture={handleTouchEndCapture} onTouchCancelCapture={handleTouchEndCapture} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
          <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke={canvasGridColor} strokeWidth="0.7" opacity={page?.settings.canvasTheme === 'light' ? '0.7' : '0.62'} /></pattern>
         <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
         <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8,0 L0,4 L8,8 z" fill="#8a92ab" /></marker>
-        <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
+         <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
+         <marker id="distance-tick" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 2.5 0 V 5" stroke="#f0bf78" strokeWidth="1" /></marker>
       </defs>
        <rect className="canvas-background" width={size.width} height={size.height} fill={canvasBackground} />
          <g ref={viewportGroupRef} transform={transform}>
@@ -1977,7 +2088,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
           const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
              return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} onSegmentPointerDown={beginSegmentInteraction} />;
         })}</g>
-          <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={view.showPorts || activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => beginTextEdit('node', selectedNode.id)} />; })}</g>
+          <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={view.showPorts || activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => { if (selectedNode.groupId && selectedNode.groupId !== isolatedGroupId) { setTextEdit(null); onEnterGroup?.(selectedNode.groupId); } else beginTextEdit('node', selectedNode.id); }} />; })}</g>
          {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
          <g className="edge-marker-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
@@ -1987,25 +2098,28 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
              return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} hovered={hoveredEdgeId === edge.id} onPointerDown={beginEndpointInteraction} />;
          })}</g>
-        <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
-          ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
-          : <line key={`horizontal-${index}`} className="alignment-guide" x1={guide.start} y1={guide.position} x2={guide.end} y2={guide.position} />)}</g>
-        {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
+         <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
+           ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
+           : <line key={`horizontal-${index}`} className="alignment-guide" x1={guide.start} y1={guide.position} x2={guide.end} y2={guide.position} />)}</g>
+         {showDistances && distanceIndicators.length > 0 && <g className="distance-indicator-layer" pointerEvents="none">{distanceIndicators.map((indicator, index) => <g key={`distance-${index}`}><line className="distance-indicator" x1={indicator.start.x} y1={indicator.start.y} x2={indicator.end.x} y2={indicator.end.y} /><text className="distance-indicator-label" x={indicator.label.x} y={indicator.label.y}>{Math.round(indicator.value)} px</text></g>)}</g>}
+         {marqueeRect && <rect className="selection-marquee" x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.width} height={marqueeRect.height} />}
       </g>
     </svg>
-       {editBox && textEdit && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
-        {toolbarKind && toolbarPoint && !contextMenu && !textEdit && !quickCreate && <ContextualToolbar kind={toolbarKind} x={toolbarPoint.x} y={toolbarPoint.y} nodes={selectedNodeItems} grouped={toolbarSelectionIsGrouped} edge={toolbarEdge} document={document} onDuplicate={() => duplicateSelection()} onDelete={deleteSelection} onToggleLock={toggleSelectedLock} onToggleHidden={toolbarKind === 'node' ? toggleSelectedHidden : undefined} onFormatPainter={toolbarKind === 'node' ? activateFormatPainter : undefined} onFill={toolbarKind === 'node' || toolbarKind === 'selection' ? applySelectedFill : undefined} onAlign={toolbarKind === 'selection' ? alignSelection : undefined} onDistribute={toolbarKind === 'selection' ? distributeSelection : undefined} onFlip={toolbarKind !== 'edge' ? flipSelection : undefined} onGroup={toolbarKind === 'selection' ? groupSelection : undefined} onUngroup={toolbarKind === 'selection' ? ungroupSelection : undefined} onZOrder={toolbarKind !== 'edge' ? setZOrder : undefined} onEdgeRouting={toolbarKind === 'edge' ? changeEdgeRouting : undefined} onReverse={toolbarEdge ? () => reverseContextEdge(toolbarEdge.id) : undefined} onSwapMarkers={toolbarEdge ? () => swapContextMarkers(toolbarEdge.id) : undefined} onAddWaypoint={toolbarEdge ? () => addContextWaypoint(toolbarEdge.id) : undefined} onResetEdge={toolbarEdge ? () => resetEdge(toolbarEdge.id) : undefined} />}
+        {editBox && textEdit && !isolatedGroupId && <input ref={textInputRef} className="canvas-text-editor" style={{ left: editBox.left, top: editBox.top, width: editBox.width, textAlign: editBox.textAlign }} value={textEdit.value} onChange={(event) => setTextEdit({ ...textEdit, value: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); commitTextEdit(); } if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); } }} onBlur={commitTextEdit} onPointerDown={(event) => event.stopPropagation()} aria-label="Edit diagram text" />}
+        {toolbarKind && toolbarPoint && !contextMenu && !textEdit && !quickCreate && <ContextualToolbar kind={toolbarKind} x={toolbarPoint.x} y={toolbarPoint.y} nodes={selectedNodeItems} grouped={toolbarSelectionIsGrouped} edge={toolbarEdge} document={document} onDuplicate={() => duplicateSelection()} onFitSelection={() => editorEvents.emit('viewport:fit', { scope: 'selection' })} onDelete={deleteSelection} onToggleLock={toggleSelectedLock} onToggleHidden={toolbarKind === 'node' ? toggleSelectedHidden : undefined} onFormatPainter={toolbarKind === 'node' ? activateFormatPainter : undefined} onFill={toolbarKind === 'node' || toolbarKind === 'selection' ? applySelectedFill : undefined} onAlign={toolbarKind === 'selection' ? alignSelection : undefined} onDistribute={toolbarKind === 'selection' ? distributeSelection : undefined} onFlip={toolbarKind !== 'edge' ? flipSelection : undefined} onGroup={toolbarKind === 'selection' ? groupSelection : undefined} onUngroup={toolbarKind === 'selection' ? ungroupSelection : undefined} onZOrder={toolbarKind !== 'edge' ? setZOrder : undefined} onEdgeRouting={toolbarKind === 'edge' ? changeEdgeRouting : undefined} onReverse={toolbarEdge ? () => reverseContextEdge(toolbarEdge.id) : undefined} onSwapMarkers={toolbarEdge ? () => swapContextMarkers(toolbarEdge.id) : undefined} onAddWaypoint={toolbarEdge ? () => addContextWaypoint(toolbarEdge.id) : undefined} onResetEdge={toolbarEdge ? () => resetEdge(toolbarEdge.id) : undefined} />}
         {contextMenu && <div className="canvas-context-menu" style={{ left: Math.min(contextMenu.x, Math.max(8, size.width - 218)), top: Math.min(contextMenu.y, Math.max(8, size.height - 360)) }} onPointerDown={(event) => event.stopPropagation()}>
-        {contextMenu.target.kind === 'canvas' && <><button onClick={() => { pasteClipboardAt(contextMenu.world); setContextMenu(null); }}>Paste at cursor</button><button onClick={() => { selectAll(); setContextMenu(null); }}>Select all</button><button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button><div className="context-menu-divider" /><button onClick={() => { editorEvents.emit('viewport:fit', { scope: 'page' }); setContextMenu(null); }}>Fit page</button><button onClick={() => { useEditorStore.getState().updateViewport({ zoom: 1 }); setContextMenu(null); }}>100% zoom</button></>}
+         {contextMenu.target.kind === 'canvas' && <><button onClick={() => { pasteClipboardAt(contextMenu.world); setContextMenu(null); }}>Paste at cursor</button><button onClick={() => { selectAll(); setContextMenu(null); }}>Select all</button><button onClick={() => { useEditorStore.getState().invertSelection(); setContextMenu(null); }}>Invert selection</button><button onClick={() => { setSelection([]); setContextMenu(null); }}>Clear selection</button><div className="context-menu-divider" /><button onClick={() => { editorEvents.emit('viewport:fit', { scope: 'page' }); setContextMenu(null); }}>Fit page</button><button onClick={() => { useEditorStore.getState().updateViewport({ zoom: 1 }); setContextMenu(null); }}>100% zoom</button></>}
         {contextMenu.target.kind === 'node' && contextMenu.target.id && <><button onClick={() => beginTextEdit('node', contextMenu.target.id!)}>Edit text</button><button onClick={openShapeChange}>Change shape…</button><div className="context-menu-divider" /><button onClick={() => { void copySelection(); setContextMenu(null); }}>Copy</button><button onClick={() => { cutSelection(); setContextMenu(null); }}>Cut</button><button onClick={duplicateContextTarget}>Duplicate selection</button><div className="context-menu-divider" /><button onClick={() => { setZOrder('forward'); setContextMenu(null); }}>Bring forward</button><button onClick={() => { setZOrder('backward'); setContextMenu(null); }}>Send backward</button><button onClick={() => { setZOrder('front'); setContextMenu(null); }}>Bring to front</button><button onClick={() => { setZOrder('back'); setContextMenu(null); }}>Send to back</button><div className="context-menu-divider" /><button onClick={() => { toggleSelectedLock(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => { toggleSelectedHidden(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.hidden ? 'Show' : 'Hide'}</button><button onClick={() => { selectConnected(contextMenu.target.id!); setContextMenu(null); }}>Select connected</button><button onClick={() => { selectSameType(contextMenu.target.id!); setContextMenu(null); }}>Select same type</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
-       {contextMenu.target.kind === 'edge' && contextMenu.target.id && <><button onClick={() => beginTextEdit('edge', contextMenu.target.id!)}>Edit label</button><button onClick={() => { reverseContextEdge(contextMenu.target.id!); setContextMenu(null); }}>Reverse</button><button onClick={() => { addContextWaypoint(contextMenu.target.id!); setContextMenu(null); }}>Add waypoint</button><button onClick={() => { resetEdge(contextMenu.target.id!); setContextMenu(null); }}>Reset route</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
+        {contextNode?.groupId && <button onClick={() => { onEnterGroup?.(contextNode.groupId!); setContextMenu(null); }}>Enter group</button>}
+        {contextMenu.target.kind === 'edge' && contextMenu.target.id && <><button onClick={() => beginTextEdit('edge', contextMenu.target.id!)}>Edit label</button><button onClick={() => { reverseContextEdge(contextMenu.target.id!); setContextMenu(null); }}>Reverse</button><button onClick={() => { addContextWaypoint(contextMenu.target.id!); setContextMenu(null); }}>Add waypoint</button><button onClick={() => { resetEdge(contextMenu.target.id!); setContextMenu(null); }}>Reset route</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
        </div>}
          {quickCreate && <div className="quick-create-menu" style={{ left: Math.min(Math.max(8, quickCreate.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, quickCreate.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Quick create</span><button title="Cancel quick create" aria-label="Cancel quick create" onClick={() => { setQuickCreate(null); setQuickCreateSearch(''); }}>×</button></div><input autoFocus aria-label="Search quick create shapes" placeholder="Search shapes…" value={quickCreateSearch} onChange={(event) => setQuickCreateSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuickCreate(null); setQuickCreateSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = quickCreateMatches[0]; if (match) createQuickShape(match.shape, match.pluginId); } }} /><div className="quick-create-list">{quickCreateMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : quickCreateMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => createQuickShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
          {shapeInsert && <div className="quick-create-menu shape-insert-menu" style={{ left: Math.min(Math.max(8, shapeInsert.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, shapeInsert.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Insert shape <small>· S</small></span><button title="Cancel shape search" aria-label="Cancel shape search" onClick={() => { setShapeInsert(null); setShapeInsertSearch(''); }}>×</button></div><input autoFocus aria-label="Search shapes to insert" placeholder="Search shapes…" value={shapeInsertSearch} onChange={(event) => setShapeInsertSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShapeInsert(null); setShapeInsertSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = shapeInsertMatches[0]; if (match) insertStandaloneShape(match.shape, match.pluginId); } }} /><div className="quick-create-list">{shapeInsertMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : shapeInsertMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => insertStandaloneShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
          {shapeChange && <div className="quick-create-menu shape-change-menu" style={{ left: Math.min(Math.max(8, shapeChange.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, shapeChange.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Change shape</span><button title="Cancel shape change" aria-label="Cancel shape change" onClick={() => { setShapeChange(null); setShapeChangeSearch(''); }}>×</button></div><input autoFocus aria-label="Search replacement shapes" placeholder="Search shapes…" value={shapeChangeSearch} onChange={(event) => setShapeChangeSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShapeChange(null); setShapeChangeSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = shapeChangeMatches[0]; if (match) applyShapeChange(match.shape, match.pluginId); } }} /><div className="quick-create-list">{shapeChangeMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : shapeChangeMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => applyShapeChange(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
-       {view.minimap && <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
-        <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>
-       </div>}
+        {view.minimap && <div className={`canvas-minimap ${minimapCollapsed ? 'collapsed' : ''}`} style={minimapCollapsed ? undefined : { width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { if (minimapCollapsed) return; event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
+          <button className="minimap-collapse" title={minimapCollapsed ? 'Show minimap' : 'Hide minimap'} aria-label={minimapCollapsed ? 'Show minimap' : 'Hide minimap'} onPointerDown={(event) => event.stopPropagation()} onClick={() => { const next = !minimapCollapsed; setMinimapCollapsed(next); try { globalThis.localStorage?.setItem('aperglyph.canvas-minimap-collapsed', String(next)); } catch { /* optional UI preference */ } }}>{minimapCollapsed ? '＋' : '−'}</button>
+          {!minimapCollapsed && <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>}
+        </div>}
        {view.guides && (page?.guides?.length ?? 0) > 0 && <details className="guide-controls" open={guidesOpen} onToggle={(event) => setGuidesOpen(event.currentTarget.open)}><summary><Ruler size={12} /> Guides <span>{page?.guides?.length}</span></summary><div className="guide-control-list">{page?.guides?.map((guide) => <div key={guide.id} className="guide-control"><i className={guide.orientation} /><span>{guide.orientation === 'vertical' ? `X ${Math.round(guide.position)}` : `Y ${Math.round(guide.position)}`}</span><button title={guide.locked ? 'Unlock guide' : 'Lock guide'} aria-label={guide.locked ? 'Unlock guide' : 'Lock guide'} onClick={() => toggleGuideLock(guide.id)}>{guide.locked ? <Lock size={12} /> : <Unlock size={12} />}</button><button title="Delete guide" aria-label="Delete guide" disabled={guide.locked} onClick={() => removeGuide(guide.id)}><Trash2 size={12} /></button></div>)}</div></details>}
    </div>;
 }

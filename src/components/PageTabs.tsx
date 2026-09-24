@@ -1,4 +1,4 @@
-import { MoreHorizontal, Plus } from 'lucide-react';
+import { Layers3, MoreHorizontal, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getSnapSettings } from '../core/snapping';
 import { useEditorStore } from '../store/editorStore';
@@ -14,6 +14,7 @@ export function PageTabs() {
   const reorderPage = useEditorStore((state) => state.reorderPage);
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const activeIndex = document.pages.findIndex((page) => page.id === activePageId);
   const activePage = document.pages[activeIndex] ?? document.pages[0];
@@ -63,12 +64,14 @@ export function PageTabs() {
     setMenuOpen(false);
   };
 
-  return <div className="page-tabs">
-    <div className="page-tabs-inner" ref={tabsRef}>
-      {document.pages.map((page, index) => <button key={page.id} className={`page-tab ${page.id === activePageId ? 'active' : ''}`} aria-current={page.id === activePageId ? 'page' : undefined} aria-label={`Open page ${index + 1}: ${page.name}`} title={`${page.name} · Double-click to rename`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}
+  return <div className="page-tabs" ref={tabsRef}>
+    <div className="page-tabs-label"><Layers3 size={13} /><span>Pages</span></div>
+    <div className="page-tabs-scroll"><div className="page-tabs-inner">
+      {document.pages.map((page, index) => <button key={page.id} draggable className={`page-tab ${page.id === activePageId ? 'active' : ''} ${draggedPageId === page.id ? 'dragging' : ''}`} aria-current={page.id === activePageId ? 'page' : undefined} aria-label={`Open page ${index + 1}: ${page.name}`} title={`${page.name} · Double-click to rename · Drag to reorder`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggedPageId(page.id); }} onDragEnd={() => setDraggedPageId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (!draggedPageId || draggedPageId === page.id) return; const targetIndex = document.pages.findIndex((candidate) => candidate.id === page.id); if (targetIndex >= 0) reorderPage(draggedPageId, targetIndex); setDraggedPageId(null); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}
       <button className="add-page" title="Add page" aria-label="Create page" onClick={() => createPage()}><Plus size={15} /></button>
       <button className={`page-more ${menuOpen ? 'active' : ''}`} title="Page actions" aria-label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={16} /></button>
-      {menuOpen && activePage && <div className="page-menu" role="menu" aria-label={`Actions for ${activePage.name}`} onPointerDown={(event) => event.stopPropagation()}>
+        </div></div>
+        {menuOpen && activePage && <div className="page-menu" role="menu" aria-label={`Actions for ${activePage.name}`} onPointerDown={(event) => event.stopPropagation()}>
         <strong>{activePage.name}</strong>
         <button onClick={promptRename}>Rename</button>
         <button onClick={() => { duplicatePage(activePage.id); setMenuOpen(false); }}>Duplicate</button>
@@ -80,8 +83,7 @@ export function PageTabs() {
         <label className="page-color-input">Canvas color<input type="color" value={/^#[0-9a-f]{6}$/i.test(activePage.settings.background) ? activePage.settings.background : '#10131c'} onChange={(event) => updatePageSettings({ background: event.target.value }, activePage.id, 'Change canvas color')} /></label>
         <button onClick={promptSettings}>Page settings</button>
         <button className="context-danger" disabled={document.pages.length <= 1} onClick={() => { deletePage(activePage.id); setMenuOpen(false); }}>Delete</button>
-      </div>}
-    </div>
-    <span className="page-count">{document.pages.length} page{document.pages.length === 1 ? '' : 's'}</span>
+       </div>}
+     <span className="page-count">{document.pages.length} page{document.pages.length === 1 ? '' : 's'}</span>
   </div>;
 }

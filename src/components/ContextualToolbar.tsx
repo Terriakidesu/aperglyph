@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, EyeOff, Group, Link2, Lock, Paintbrush, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, Copy, EyeOff, Group, Link2, Lock, Maximize2, Paintbrush, RotateCcw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { edgeRouting } from '../core/routing';
@@ -13,6 +13,7 @@ interface ContextualToolbarProps {
   edge?: DiagramEdge;
   document: DiagramDocument;
   onDuplicate: () => void;
+  onFitSelection?: () => void;
   onDelete: () => void;
   onToggleLock: () => void;
   onToggleHidden?: () => void;
@@ -31,7 +32,7 @@ interface ContextualToolbarProps {
   onResetEdge?: () => void;
 }
 
-export function ContextualToolbar({ kind, x, y, nodes = [], grouped = false, edge, document, onDuplicate, onDelete, onToggleLock, onToggleHidden, onFormatPainter, onFill, onAlign, onDistribute, onFlip, onGroup, onUngroup, onZOrder, onEdgeRouting, onReverse, onSwapMarkers, onAddWaypoint, onResetEdge }: ContextualToolbarProps) {
+export function ContextualToolbar({ kind, x, y, nodes = [], grouped = false, edge, document, onDuplicate, onFitSelection, onDelete, onToggleLock, onToggleHidden, onFormatPainter, onFill, onAlign, onDistribute, onFlip, onGroup, onUngroup, onZOrder, onEdgeRouting, onReverse, onSwapMarkers, onAddWaypoint, onResetEdge }: ContextualToolbarProps) {
   const [menu, setMenu] = useState<'align' | 'distribute' | 'layer' | 'fill' | null>(null);
   const closeMenu = () => setMenu(null);
   return <div className={`contextual-toolbar contextual-toolbar-${kind}`} style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
@@ -51,9 +52,9 @@ export function ContextualToolbar({ kind, x, y, nodes = [], grouped = false, edg
     </> : <>
       {onFill && <ToolbarMenu label="Fill" open={menu === 'fill'} onToggle={() => setMenu(menu === 'fill' ? null : 'fill')}><div className="contextual-color-grid">{document.palette.slice(0, 8).map((color) => <button key={color} aria-label={`Fill ${color}`} title={color} style={{ background: color }} onClick={() => { onFill(color); closeMenu(); }} />)}</div></ToolbarMenu>}
       {onFormatPainter && <button onClick={onFormatPainter} title="Format painter"><Paintbrush size={13} /> Paint</button>}
-      <button onClick={onDuplicate} title="Duplicate selection"><Copy size={13} /> Duplicate</button><button onClick={() => onFlip?.('horizontal')} title="Flip horizontally">Flip H</button><button onClick={() => onFlip?.('vertical')} title="Flip vertically">Flip V</button><button onClick={onToggleLock} title="Lock or unlock selection"><Lock size={13} /></button>{onToggleHidden && <button onClick={onToggleHidden} title="Hide selected object"><EyeOff size={13} /> Hide</button>}
+       {onFitSelection && <button onClick={onFitSelection} title="Fit selection" aria-label="Fit selection"><Maximize2 size={13} /> Fit</button>}<button onClick={onDuplicate} title="Duplicate selection · ⌘D" aria-label="Make a copy of the selection"><Copy size={13} /> Duplicate</button>{onGroup ? <button onClick={onGroup} title="Group selection" aria-label="Group selection">Group</button> : <button disabled title="Group selection" aria-label="Group selection">Group</button>}<button onClick={() => onFlip?.('horizontal')} title="Flip horizontally">Flip H</button><button onClick={() => onFlip?.('vertical')} title="Flip vertically">Flip V</button><button onClick={onToggleLock} title="Lock or unlock selection"><Lock size={13} /></button>{onToggleHidden && <button onClick={onToggleHidden} title="Hide selected object"><EyeOff size={13} /> Hide</button>}
       {onZOrder && <ToolbarMenu label="Layer" open={menu === 'layer'} onToggle={() => setMenu(menu === 'layer' ? null : 'layer')}><button onClick={() => { onZOrder('front'); closeMenu(); }}>Bring to front</button><button onClick={() => { onZOrder('forward'); closeMenu(); }}>Bring forward</button><button onClick={() => { onZOrder('backward'); closeMenu(); }}>Send backward</button><button onClick={() => { onZOrder('back'); closeMenu(); }}>Send to back</button></ToolbarMenu>}
-      <button className="contextual-danger" onClick={onDelete} title="Delete selection"><Trash2 size={13} /></button>
+       <button className="contextual-danger" onClick={onDelete} title="Delete selection" aria-label="Delete selection"><Trash2 size={13} /></button>
     </>}
   </div>;
 }
