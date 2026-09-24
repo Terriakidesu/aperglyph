@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, FitNodesToTextCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, UpdateShapeDefaultsCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 import { edgeRoute } from './routing';
 
@@ -55,6 +55,20 @@ describe('command history', () => {
     const moved = new CommandManager().execute(new MoveNodesCommand(pageId, { [outer.id]: { x: 100, y: 120 } }), document);
     expect(moved.pages[0].nodes.find((node) => node.id === inner.id)?.position).toEqual({ x: 140, y: 170 });
     expect(moved.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual({ x: 180, y: 220 });
+  });
+
+  it('changes container ownership together with a drag in one command', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const source = createNode('frame', { x: 0, y: 0 }, { container: true });
+    const target = createNode('frame', { x: 300, y: 0 }, { container: true });
+    const child = { ...createNode('rectangle', { x: 40, y: 50 }), containerId: source.id };
+    document.pages[0].nodes.push(source, target, child);
+    const manager = new CommandManager();
+    const moved = manager.execute(new MoveNodesCommand(pageId, { [child.id]: { x: 340, y: 50 } }, { [child.id]: target.id }), document);
+    expect(moved.pages[0].nodes.find((node) => node.id === child.id)?.containerId).toBe(target.id);
+    const detached = manager.execute(new MoveNodesCommand(pageId, { [child.id]: { x: 720, y: 50 } }, { [child.id]: undefined }), moved);
+    expect(detached.pages[0].nodes.find((node) => node.id === child.id)?.containerId).toBeUndefined();
   });
 
   it('detaches surviving children when their container is deleted', () => {
@@ -208,6 +222,26 @@ describe('command history', () => {
     expect(withPage.pages.map((item) => item.name)).toEqual(['Page 1', 'Review']);
     const renamed = manager.execute(new RenamePageCommand(page.id, 'Architecture'), withPage);
     expect(renamed.pages[1].name).toBe('Architecture');
+  });
+
+  it('stores and clears per-shape style defaults as one undoable document change', () => {
+    const document = createDocument();
+    const manager = new CommandManager();
+    const styled = manager.execute(new UpdateShapeDefaultsCommand({ 'general:rectangle': { fill: '#123456', textColor: '#fff' } }), document);
+    expect(styled.styleDefaults['general:rectangle']).toEqual({ fill: '#123456', textColor: '#fff' });
+    const cleared = manager.execute(new UpdateShapeDefaultsCommand({}), styled);
+    expect(cleared.styleDefaults).toEqual({});
+    expect(manager.undo(cleared)?.styleDefaults['general:rectangle']).toEqual({ fill: '#123456', textColor: '#fff' });
+  });
+
+  it('fits selected labels to their current text layout', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const node = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 120, height: 220 }, data: { label: 'Short label' } });
+    document.pages[0].nodes.push(node);
+    const fitted = new CommandManager().execute(new FitNodesToTextCommand(pageId, [node.id]), document);
+    expect(fitted.pages[0].nodes[0].size.height).toBeLessThan(220);
+    expect(fitted.pages[0].nodes[0].size.height).toBeGreaterThanOrEqual(32);
   });
 
   it('duplicates, aligns, distributes, rotates, and reorders selection geometry', () => {

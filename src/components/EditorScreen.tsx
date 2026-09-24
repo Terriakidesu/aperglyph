@@ -32,6 +32,12 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const redo = useEditorStore((state) => state.redo);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
   const selectAll = useEditorStore((state) => state.selectAll);
+  const selectAllConnectors = useEditorStore((state) => state.selectAllConnectors);
+  const selectSameType = useEditorStore((state) => state.selectSameType);
+  const selectConnected = useEditorStore((state) => state.selectConnected);
+  const selectDescendants = useEditorStore((state) => state.selectDescendants);
+  const selectedIds = useEditorStore((state) => state.selectedIds);
+  const primarySelectedId = useEditorStore((state) => state.primarySelectedId);
   const copySelection = useEditorStore((state) => state.copySelection);
   const cutSelection = useEditorStore((state) => state.cutSelection);
   const pasteClipboardAt = useEditorStore((state) => state.pasteClipboardAt);
@@ -42,6 +48,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const groupSelection = useEditorStore((state) => state.groupSelection);
   const ungroupSelection = useEditorStore((state) => state.ungroupSelection);
   const nudgeSelection = useEditorStore((state) => state.nudgeSelection);
+  const fitSelectionToText = useEditorStore((state) => state.fitSelectionToText);
   const addNode = useEditorStore((state) => state.createNode);
   const createPage = useEditorStore((state) => state.createPage);
   const autoLayout = useEditorStore((state) => state.autoLayout);
@@ -82,6 +89,11 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'toggle-grid', label: page?.settings.gridVisible ? 'Hide grid' : 'Show grid', hint: 'Canvas', run: () => updatePageSettings({ gridVisible: !(page?.settings.gridVisible ?? true) }, activePageId, 'Toggle grid') },
     { id: 'reset-connector', label: 'Reset connector route', hint: 'Selection', run: () => resetEdge() },
     { id: 'duplicate', label: 'Duplicate selection', hint: 'Selection', shortcut: '⌘D', run: () => duplicateSelection() },
+    { id: 'fit-text', label: 'Fit shapes to text', hint: 'Arrange', run: () => fitSelectionToText() },
+    { id: 'select-connectors', label: 'Select all connectors', hint: 'Selection', run: () => selectAllConnectors() },
+    { id: 'select-same-type', label: 'Select same shape type', hint: 'Selection', run: () => selectSameType() },
+    { id: 'select-connected', label: 'Select connected objects', hint: 'Selection', run: () => selectConnected() },
+    { id: 'select-descendants', label: 'Select descendants', hint: 'Selection', run: () => selectDescendants() },
     { id: 'group', label: 'Group selection', hint: 'Selection', shortcut: '⌘G', run: () => groupSelection() },
     { id: 'new-page', label: 'Add page', hint: 'Pages', run: () => createPage() },
     { id: 'auto-layout', label: 'Auto layout', hint: 'Arrange', run: () => { void autoLayout(); } },
@@ -268,6 +280,9 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       if (target.matches('input, textarea, [contenteditable="true"]')) return;
       const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === 'k') { event.preventDefault(); setShowPalette(true); setShowShortcuts(false); return; }
+      if (modifier && event.key === '0') { event.preventDefault(); editorEvents.emit('viewport:fit', { scope: 'page' }); return; }
+      if (modifier && event.key === '1') { event.preventDefault(); useEditorStore.getState().updateViewport({ zoom: 1 }); return; }
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); editorEvents.emit('viewport:fit', { scope: 'selection' }); return; }
       if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
       if (modifier && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAll(); return; }
@@ -276,6 +291,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
        if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); void readSystemClipboard(lastPointerWorldRef.current ?? undefined); return; }
       if (modifier && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
       if (modifier && event.key.toLowerCase() === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
+      if (!modifier && (event.key === 'Enter' || event.key === 'F2') && selectedIds.length === 1) {
+        const node = page?.nodes.find((candidate) => candidate.id === (primarySelectedId ?? selectedIds[0]));
+        if (node) { event.preventDefault(); editorEvents.emit('text:edit', { kind: 'node', id: node.id }); return; }
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
        if (event.key === 'Escape') { editorEvents.emit('interaction:cancel', undefined); clearFormatPainter(); setShowPalette(false); setShowShortcuts(false); setShowDiagnostics(false); setFocusMode(false); setPresentationMode(false); setTool('select'); return; }
       if (!modifier && !event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
@@ -285,12 +304,13 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
         return;
       }
       if (!modifier && event.key.toLowerCase() === 'r') { rotateSelection(); return; }
+      if (!modifier && event.key.toLowerCase() === 's') { event.preventDefault(); editorEvents.emit('ui:shape-search', { point: lastPointerWorldRef.current ?? undefined }); return; }
       const shortcuts: Record<string, typeof activeTool> = { v: 'select', h: 'pan', c: 'connector', t: 'text' };
       if (shortcuts[event.key.toLowerCase()]) setTool(shortcuts[event.key.toLowerCase()]);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, nudgeSelection, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, redo, rotateSelection, selectAll, setTool, ungroupSelection, undo]);
+    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, groupSelection, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
 
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));
@@ -317,7 +337,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
       </div>
       {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
       {showPreferences && <PreferencesDialog view={viewPreferences} onViewChange={updateViewPreferences} pageSettings={page?.settings} onPageSettingsChange={(changes) => updatePageSettings(changes, activePageId, 'Update preferences')} leftWidth={leftWidth} rightWidth={rightWidth} onWidthChange={(side, value) => side === 'left' ? setLeftWidth(clampPanelWidth(value, 'left')) : setRightWidth(clampPanelWidth(value, 'right'))} snapshotLimit={snapshotLimit} onSnapshotLimitChange={(value) => { const next = setSnapshotLimit(normalizeSnapshotLimit(value)); setSnapshotLimitState(next); }} onRestoreDefaults={() => { setViewPreferences(DEFAULT_VIEW_PREFERENCES); setLeftWidth(228); setRightWidth(288); setSnapshotLimitState(setSnapshotLimit(31)); if (page) updatePageSettings({ gridSize: 16, snapSettings: { grid: true, objects: true, guides: true, ports: true } }, page.id, 'Restore editor defaults'); }} onClose={() => setShowPreferences(false)} />}
-     {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan tool" /><Shortcut keys="Space + drag" label="Temporarily pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
+      {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan tool" /><Shortcut keys="Space + drag" label="Temporarily pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="S" label="Search and insert shape" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ 0" label="Fit page" /><Shortcut keys="⌘ 1" label="Zoom to 100%" /><Shortcut keys="⌘ ⇧ F" label="Fit selection" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
    </main>;
 }

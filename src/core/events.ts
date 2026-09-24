@@ -9,11 +9,13 @@ export interface EditorEventMap {
   'pointer:changed': Point | null;
   'viewport:fit': { scope: 'page' | 'selection' };
   'interaction:cancel': undefined;
+  'text:edit': { kind: 'node' | 'edge'; id: string };
   'ui:shortcuts': undefined;
   'ui:diagnostics': undefined;
   'ui:palette': undefined;
   'ui:preferences': undefined;
   'ui:toggle-properties': undefined;
+  'ui:shape-search': { point?: Point };
   'diagnostics:changed': { enabled: boolean };
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };

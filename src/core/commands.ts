@@ -175,16 +175,44 @@ export class DeleteNodesCommand implements DocumentCommand {
 
 export class MoveNodesCommand implements DocumentCommand {
   readonly label = 'Move selection';
-  constructor(private readonly pageId: string, private readonly positions: Record<string, Point>) {}
+  constructor(private readonly pageId: string, private readonly positions: Record<string, Point>, private readonly containerIds: Record<string, string | undefined> = {}) {}
 
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
     const page = getPage(next, this.pageId);
     if (page) {
       const positions = expandContainerPositions(page.nodes, this.positions);
-      page.nodes = page.nodes.map((node) => positions[node.id]
-        ? node.locked ? node : { ...node, position: { ...positions[node.id] } }
-        : node);
+      page.nodes = page.nodes.map((node) => {
+        if (!positions[node.id] || node.locked) return node;
+        const changes: NodePatch = {
+          position: { ...positions[node.id] },
+          ...(Object.prototype.hasOwnProperty.call(this.containerIds, node.id) ? { containerId: this.containerIds[node.id] } : {}),
+        };
+        return applyNodePatch(node, validNodePatch(page.nodes, node, changes));
+      });
+    }
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class FitNodesToTextCommand implements DocumentCommand {
+  readonly label = 'Fit shapes to text';
+  constructor(private readonly pageId: string, private readonly nodeIds: string[]) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const ids = new Set(this.nodeIds);
+    const page = getPage(next, this.pageId);
+    if (page) {
+      page.nodes = page.nodes.map((node) => {
+        if (!ids.has(node.id) || node.locked) return node;
+        const textHeight = wrappedNodeHeight({ ...node, style: { ...node.style, autoHeight: true } });
+        const height = node.type === 'entity'
+          ? Math.max(textHeight, entityMinimumSize(node.data.fields, node.data.entityVariant, node.data.columnHeaders === true).height)
+          : textHeight;
+        return { ...node, size: { ...node.size, height } };
+      });
     }
     next.updatedAt = Date.now();
     return next;
@@ -502,6 +530,20 @@ export class UpdateStylePresetsCommand implements DocumentCommand {
   execute(document: DiagramDocument): DiagramDocument {
     const next = cloneDocument(document);
     next.stylePresets = structuredClone(this.presets).slice(0, 64);
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class UpdateShapeDefaultsCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly defaults: Record<string, Partial<NodeStyle>>, label = 'Update shape defaults') {
+    this.label = label;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    next.styleDefaults = structuredClone(this.defaults);
     next.updatedAt = Date.now();
     return next;
   }

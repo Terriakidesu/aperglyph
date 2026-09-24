@@ -13,6 +13,7 @@ import {
   DistributeNodesCommand,
   DuplicatePageCommand,
   DuplicateSelectionCommand,
+  FitNodesToTextCommand,
   GroupNodesCommand,
   LayoutNodesCommand,
   MoveNodesCommand,
@@ -32,6 +33,7 @@ import {
   UpdateNodesCommand,
   UpdatePageGuidesCommand,
   UpdatePageSettingsCommand,
+  UpdateShapeDefaultsCommand,
   UpdateStylePresetsCommand,
   offsetClipboard,
   clipboardBounds,
@@ -77,15 +79,18 @@ interface EditorStore {
   executeCommand: (command: DocumentCommand) => void;
   updateEdge: (edgeId: string, changes: EdgePatch, label?: string) => void;
   resetEdge: (edgeId?: string) => void;
-  moveNodes: (positions: Record<string, Point>) => void;
+  moveNodes: (positions: Record<string, Point>, containerIds?: Record<string, string | undefined>) => void;
   reorderNodes: (nodeIds: string[], targetId: string) => void;
   nudgeSelection: (delta: Point) => void;
+  fitSelectionToText: () => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   updateNodes: (nodeIds: string[], changes: NodePatch, label?: string) => void;
   copyStyle: () => void;
   pasteStyle: () => void;
   resetFormatting: () => void;
   applyStyleToSameType: () => void;
+  setDefaultStyle: () => void;
+  clearDefaultStyle: () => void;
   activateFormatPainter: () => void;
   clearFormatPainter: () => void;
   updatePalette: (palette: string[], label?: string) => void;
@@ -94,6 +99,10 @@ interface EditorStore {
   deleteStylePreset: (presetId: string) => void;
   deleteSelection: () => void;
   selectAll: () => void;
+  selectAllConnectors: () => void;
+  selectSameType: (nodeId?: string) => void;
+  selectConnected: (nodeId?: string) => void;
+  selectDescendants: (nodeId?: string) => void;
   copySelection: () => ClipboardPayload | null;
   cutSelection: () => void;
   pasteClipboard: () => void;
@@ -147,6 +156,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     editorEvents.emit('document:changed', { document, action });
     editorEvents.emit('history:changed', { canUndo: manager.canUndo, canRedo: manager.canRedo, lastAction: manager.lastAction });
   };
+  const shapeStyleKey = (node: Pick<DiagramNode, 'library' | 'type'>) => `${node.library}:${node.type}`;
+  const applyShapeDefault = (document: DiagramDocument, node: DiagramNode): DiagramNode => {
+    const defaults = document.styleDefaults?.[shapeStyleKey(node)];
+    return defaults ? { ...node, style: { ...node.style, ...structuredClone(defaults) } } : node;
+  };
 
   return {
     document: initialDocument,
@@ -193,10 +207,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     },
     createNode: (node) => {
       const { activePageId, document } = get();
-      const next = manager.execute(new CreateNodeCommand(activePageId, node), document);
+      const styledNode = applyShapeDefault(document, node);
+      const next = manager.execute(new CreateNodeCommand(activePageId, styledNode), document);
       updateDocument(next, 'Create node');
-      get().setSelection([node.id], node.id);
-      editorEvents.emit('node:created', { nodeId: node.id });
+      get().setSelection([styledNode.id], styledNode.id);
+      editorEvents.emit('node:created', { nodeId: styledNode.id });
     },
     createEdge: (edge) => {
       const { activePageId, document } = get();
@@ -207,10 +222,11 @@ export const useEditorStore = create<EditorStore>((set, get) => {
     },
     createNodeAndEdge: (node, edge) => {
       const { activePageId, document } = get();
-      const next = manager.execute(new CreateNodeAndEdgeCommand(activePageId, node, edge), document);
+      const styledNode = applyShapeDefault(document, node);
+      const next = manager.execute(new CreateNodeAndEdgeCommand(activePageId, styledNode, edge), document);
       updateDocument(next, 'Create connected shape');
-      get().setSelection([node.id, edge.id], edge.id);
-      editorEvents.emit('node:created', { nodeId: node.id });
+      get().setSelection([styledNode.id, edge.id], edge.id);
+      editorEvents.emit('node:created', { nodeId: styledNode.id });
       editorEvents.emit('edge:created', { edgeId: edge.id });
     },
     changeNodeShape: (nodeId, libraryId, shape) => {
@@ -257,10 +273,10 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       updateDocument(next, 'Reset connector');
       editorEvents.emit('edge:changed', { edgeId: targetId });
     },
-    moveNodes: (positions) => {
+    moveNodes: (positions, containerIds) => {
       const { activePageId, document } = get();
       const ids = Object.keys(positions);
-      const next = manager.execute(new MoveNodesCommand(activePageId, positions), document);
+      const next = manager.execute(new MoveNodesCommand(activePageId, positions, containerIds), document);
       updateDocument(next, 'Move selection');
       editorEvents.emit('node:moved', { nodeIds: ids, positions });
     },
@@ -283,6 +299,14 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const next = manager.execute(new MoveNodesCommand(activePageId, positions), document);
       updateDocument(next, 'Nudge selection');
       editorEvents.emit('node:moved', { nodeIds, positions });
+    },
+    fitSelectionToText: () => {
+      const { activePageId, document, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const nodeIds = selectedIds.filter((id) => page?.nodes.some((node) => node.id === id));
+      if (nodeIds.length === 0) return;
+      const next = manager.execute(new FitNodesToTextCommand(activePageId, nodeIds), document);
+      updateDocument(next, 'Fit shapes to text');
     },
     updateNode: (nodeId, changes, label) => {
       const { activePageId, document } = get();
@@ -333,6 +357,27 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const next = manager.execute(new UpdateNodeStylesCommand(activePageId, styles, 'Apply style to same shapes'), document);
       updateDocument(next, 'Apply style to same shapes');
     },
+    setDefaultStyle: () => {
+      const { document, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, get().activePageId);
+      const node = page?.nodes.find((candidate) => candidate.id === primarySelectedId)
+        ?? page?.nodes.find((candidate) => selectedIds.includes(candidate.id));
+      if (!node) return;
+      const defaults = { ...(document.styleDefaults ?? {}), [shapeStyleKey(node)]: structuredClone(node.style) };
+      const next = manager.execute(new UpdateShapeDefaultsCommand(defaults, `Set default ${node.type} style`), document);
+      updateDocument(next, `Set default ${node.type} style`);
+    },
+    clearDefaultStyle: () => {
+      const { document, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, get().activePageId);
+      const node = page?.nodes.find((candidate) => candidate.id === primarySelectedId)
+        ?? page?.nodes.find((candidate) => selectedIds.includes(candidate.id));
+      if (!node || !document.styleDefaults?.[shapeStyleKey(node)]) return;
+      const defaults = { ...(document.styleDefaults ?? {}) };
+      delete defaults[shapeStyleKey(node)];
+      const next = manager.execute(new UpdateShapeDefaultsCommand(defaults, `Clear default ${node.type} style`), document);
+      updateDocument(next, `Clear default ${node.type} style`);
+    },
     activateFormatPainter: () => {
       const { document, activePageId, primarySelectedId, selectedIds } = get();
       const page = getActivePage(document, activePageId);
@@ -377,6 +422,60 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const page = getActivePage(document, activePageId);
       if (!page) return;
       get().setSelection([...page.nodes.filter((node) => !node.hidden).map((node) => node.id), ...page.edges.map((edge) => edge.id)]);
+    },
+    selectAllConnectors: () => {
+      const { document, activePageId } = get();
+      const page = getActivePage(document, activePageId);
+      if (!page) return;
+      get().setSelection(page.edges.map((edge) => edge.id), page.edges[0]?.id ?? null);
+    },
+    selectSameType: (nodeId) => {
+      const { document, activePageId, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const rootId = nodeId ?? primarySelectedId ?? selectedIds.find((id) => page?.nodes.some((node) => node.id === id));
+      const source = page?.nodes.find((node) => node.id === rootId);
+      if (!page || !source) return;
+      const ids = page.nodes.filter((node) => !node.hidden && node.library === source.library && node.type === source.type).map((node) => node.id);
+      get().setSelection(ids, source.id);
+    },
+    selectConnected: (nodeId) => {
+      const { document, activePageId, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const rootId = nodeId ?? primarySelectedId ?? selectedIds.find((id) => page?.nodes.some((node) => node.id === id));
+      if (!page || !rootId || !page.nodes.some((node) => node.id === rootId)) return;
+      const nodeIds = new Set([rootId]);
+      const edgeIds = new Set<string>();
+      let changed = true;
+      while (changed) {
+        changed = false;
+        page.edges.forEach((edge) => {
+          const sourceInSet = edge.source.nodeId !== undefined && nodeIds.has(edge.source.nodeId);
+          const targetInSet = edge.target.nodeId !== undefined && nodeIds.has(edge.target.nodeId);
+          if (!sourceInSet && !targetInSet) return;
+          if (!edgeIds.has(edge.id)) { edgeIds.add(edge.id); changed = true; }
+          if (edge.source.nodeId && !nodeIds.has(edge.source.nodeId)) { nodeIds.add(edge.source.nodeId); changed = true; }
+          if (edge.target.nodeId && !nodeIds.has(edge.target.nodeId)) { nodeIds.add(edge.target.nodeId); changed = true; }
+        });
+      }
+      get().setSelection([...nodeIds, ...edgeIds], rootId);
+    },
+    selectDescendants: (nodeId) => {
+      const { document, activePageId, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const rootId = nodeId ?? primarySelectedId ?? selectedIds.find((id) => page?.nodes.some((node) => node.id === id));
+      if (!page || !rootId || !page.nodes.some((node) => node.id === rootId)) return;
+      const ids = new Set([rootId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        page.nodes.forEach((node) => {
+          if (node.containerId && ids.has(node.containerId) && !ids.has(node.id)) {
+            ids.add(node.id);
+            changed = true;
+          }
+        });
+      }
+      get().setSelection([...ids], rootId);
     },
     copySelection: () => {
       const { document, activePageId, selectedIds } = get();

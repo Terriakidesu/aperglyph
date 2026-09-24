@@ -89,6 +89,12 @@ interface QuickCreateState {
   disableSnapping: boolean;
 }
 
+interface ShapeInsertState {
+  point: Point;
+  screen: Point;
+  disableSnapping: boolean;
+}
+
 interface ShapeDragPreview {
   payload: ShapeDropPayload;
   point: Point;
@@ -390,6 +396,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const [connectorDragPreview, setConnectorDragPreview] = useState<ConnectorDragPreview | null>(null);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickCreateSearch, setQuickCreateSearch] = useState('');
+  const [shapeInsert, setShapeInsert] = useState<ShapeInsertState | null>(null);
+  const [shapeInsertSearch, setShapeInsertSearch] = useState('');
   const [shapeChange, setShapeChange] = useState<ShapeChangeState | null>(null);
   const [shapeChangeSearch, setShapeChangeSearch] = useState('');
   const [shapeDragPreview, setShapeDragPreview] = useState<ShapeDragPreview | null>(null);
@@ -445,6 +453,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const cutSelection = useEditorStore((state) => state.cutSelection);
   const pasteClipboardAt = useEditorStore((state) => state.pasteClipboardAt);
   const selectAll = useEditorStore((state) => state.selectAll);
+  const selectSameType = useEditorStore((state) => state.selectSameType);
+  const selectConnected = useEditorStore((state) => state.selectConnected);
   const alignSelection = useEditorStore((state) => state.alignSelection);
   const distributeSelection = useEditorStore((state) => state.distributeSelection);
   const groupSelection = useEditorStore((state) => state.groupSelection);
@@ -485,6 +495,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setConnectorDragPreview(null);
     setQuickCreate(null);
     setQuickCreateSearch('');
+    setShapeInsert(null);
+    setShapeInsertSearch('');
     setShapeChange(null);
     setShapeChangeSearch('');
     setEndpointPreview(null);
@@ -703,6 +715,16 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     setTextEdit(null);
   };
 
+  useEffect(() => editorEvents.on('text:edit', ({ kind, id }) => beginTextEdit(kind, id)), [page, selectedIds]);
+
+  useEffect(() => editorEvents.on('ui:shape-search', ({ point }) => {
+    const world = point ?? { x: -viewport.x, y: -viewport.y };
+    setShapeInsert({ point: world, screen: { x: size.width / 2 + (world.x + viewport.x) * viewport.zoom, y: size.height / 2 + (world.y + viewport.y) * viewport.zoom }, disableSnapping: false });
+    setShapeInsertSearch('');
+    setQuickCreate(null);
+    setShapeChange(null);
+  }), [size.height, size.width, viewport.x, viewport.y, viewport.zoom]);
+
   const handleContextMenu = (event: ReactMouseEvent<SVGSVGElement>) => {
     event.preventDefault();
     const target = event.target as Element;
@@ -760,26 +782,6 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (nodes.length === 0) return;
     const hidden = !nodes.every((node) => node.hidden);
     updateNodes(nodes.map((node) => node.id), { hidden }, hidden ? 'Hide selection' : 'Show selection');
-  };
-
-  const selectConnected = (nodeId: string) => {
-    if (!page) return;
-    const ids = new Set<string>([nodeId]);
-    page.edges.forEach((edge) => {
-      if (edge.source.nodeId === nodeId || edge.target.nodeId === nodeId) {
-        ids.add(edge.id);
-        if (edge.source.nodeId) ids.add(edge.source.nodeId);
-        if (edge.target.nodeId) ids.add(edge.target.nodeId);
-      }
-    });
-    setSelection([...ids], nodeId);
-  };
-
-  const selectSameType = (nodeId: string) => {
-    const source = page?.nodes.find((node) => node.id === nodeId);
-    if (!source || !page) return;
-    const ids = page.nodes.filter((node) => !node.hidden && node.type === source.type).map((node) => node.id);
-    setSelection(ids, nodeId);
   };
 
   const reverseContextEdge = (edgeId: string) => {
@@ -940,12 +942,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       style: shape.defaultStyle,
       data: shape.defaultData ?? { label: shape.label },
     });
+    const owner = containerAtPoint({ x: position.x + size.width / 2, y: position.y + size.height / 2 });
+    const ownedNode = owner && owner.id !== node.id ? { ...node, containerId: owner.id } : node;
     const sourceNode = page.nodes.find((candidate) => candidate.id === quickCreate.source.nodeId);
     if (!sourceNode) return;
-    const target = { nodeId: node.id, port: nearestConnectionPort(node, nodeCenter(sourceNode)) } satisfies ConnectorAnchor;
-    const edge = buildConnectionEdge(quickCreate.source, target, false, [node]);
+    const target = { nodeId: ownedNode.id, port: nearestConnectionPort(ownedNode, nodeCenter(sourceNode)) } satisfies ConnectorAnchor;
+    const edge = buildConnectionEdge(quickCreate.source, target, false, [ownedNode]);
     if (!edge) return;
-    createNodeAndEdge(node, edge);
+    createNodeAndEdge(ownedNode, edge);
     setQuickCreate(null);
     setQuickCreateSearch('');
   };
@@ -962,6 +966,28 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
     if (!page || !getSnapSettings(page.settings).grid || disableSnapping) return raw;
     const gridSize = page.settings.gridSize;
     return { x: Math.round(raw.x / gridSize) * gridSize, y: Math.round(raw.y / gridSize) * gridSize };
+  };
+
+  const containerAtPoint = (point: Point, excludedIds = new Set<string>()): DiagramNode | undefined => page?.nodes
+    .filter((node) => node.container && !node.hidden && !excludedIds.has(node.id) && point.x >= node.position.x && point.x <= node.position.x + node.size.width && point.y >= node.position.y && point.y <= node.position.y + node.size.height)
+    .sort((left, right) => (left.size.width * left.size.height) - (right.size.width * right.size.height))[0];
+
+  const insertStandaloneShape = (shape: ReturnType<typeof pluginManager.list>[number]['shapes'][number], libraryId: string) => {
+    if (!shapeInsert || !page) return;
+    const size = shape.defaultSize ?? { width: 180, height: 88 };
+    const position = dropPosition(shapeInsert.point, size, shapeInsert.disableSnapping);
+    const node = buildNode(shape.type, position, {
+      library: libraryId,
+      size,
+      boundary: shape.boundary,
+      container: shape.container,
+      style: shape.defaultStyle,
+      data: shape.defaultData ?? { label: shape.label },
+    });
+    const owner = containerAtPoint({ x: position.x + size.width / 2, y: position.y + size.height / 2 });
+    addNode(owner && owner.id !== node.id ? { ...node, containerId: owner.id } : node);
+    setShapeInsert(null);
+    setShapeInsertSearch('');
   };
 
   const handleShapeDragOver = (event: ReactDragEvent<SVGSVGElement>) => {
@@ -999,7 +1025,8 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
       style: payload.defaultStyle,
       data: payload.defaultData ?? { label: payload.label },
     });
-    addNode(node);
+    const owner = containerAtPoint({ x: position.x + shapeSize.width / 2, y: position.y + shapeSize.height / 2 });
+    addNode(owner && owner.id !== node.id ? { ...node, containerId: owner.id } : node);
     setShapeDragPreview(null);
     setTool('select');
   };
@@ -1505,7 +1532,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         const candidateNodes = page.nodes.filter((node) => snapCandidateIds.includes(node.id));
          const snap = getSnapSettings(page.settings);
          const snapped = snapDraggedNodes(movingNodes, session.initialPositions, session.startWorld, point, candidateNodes, { gridSize: page.settings.gridSize, snapToGrid: snap.grid, snapToObjects: snap.objects, snapToGuides: snap.guides, guides: page.guides ?? [], threshold: 10 / viewport.zoom }, { constrainAxis: event.shiftKey, disableSnapping: event.altKey || session.disableSnapping });
-        moveNodes(snapped.positions);
+        const movingIds = new Set(movingNodes.map((node) => node.id));
+        const containerIds = Object.fromEntries(movingNodes.flatMap((node) => {
+          const finalPosition = snapped.positions[node.id] ?? node.position;
+          const owner = containerAtPoint({ x: finalPosition.x + node.size.width / 2, y: finalPosition.y + node.size.height / 2 }, movingIds);
+          const nextOwner = owner?.id === node.id ? undefined : owner?.id;
+          return nextOwner !== node.containerId ? [[node.id, nextOwner] as const] : [];
+        }));
+        moveNodes(snapped.positions, Object.keys(containerIds).length > 0 ? containerIds : undefined);
       }
       setDragPreview({});
       setAlignmentGuides([]);
@@ -1884,6 +1918,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   const guideWorld = { left: visibleWorld.x - visibleWorld.width, right: visibleWorld.x + visibleWorld.width * 2, top: visibleWorld.y - visibleWorld.height, bottom: visibleWorld.y + visibleWorld.height * 2 };
   const pointerScreen = pointerWorld ? { x: size.width / 2 + (pointerWorld.x + viewport.x) * viewport.zoom, y: size.height / 2 + (pointerWorld.y + viewport.y) * viewport.zoom } : null;
   const quickCreateMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(quickCreateSearch.trim().toLowerCase())).slice(0, 8);
+  const shapeInsertMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeInsertSearch.trim().toLowerCase())).slice(0, 8);
   const shapeChangeMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeChangeSearch.trim().toLowerCase())).slice(0, 8);
 
     return <div className={`canvas-stage ${activeTool === 'pan' || spacePressed ? 'pan-mode' : ''} ${activeTool === 'connector' ? 'connector-mode' : ''} ${formatPainter ? 'format-painter-mode' : ''}`} ref={stageRef} onPointerLeave={clearPointerPosition}>
@@ -1899,6 +1934,7 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
        <rect className="canvas-background" width={size.width} height={size.height} fill={canvasBackground} />
          <g ref={viewportGroupRef} transform={transform}>
           <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : canvasBackground} />
+          {page && <><rect className="page-boundary-shadow" x={-page.settings.width / 2 + 5} y={-page.settings.height / 2 + 6} width={page.settings.width} height={page.settings.height} /><rect className="page-boundary" x={-page.settings.width / 2} y={-page.settings.height / 2} width={page.settings.width} height={page.settings.height} aria-label={`Page boundary for ${page.name}`} /><text className="page-boundary-label" x={-page.settings.width / 2 + 12} y={-page.settings.height / 2 - 10}>{page.name}</text></>}
           {shapePreviewNode && <g className="shape-drop-preview" transform={`translate(${shapePreviewNode.position.x} ${shapePreviewNode.position.y})`} pointerEvents="none"><NodeGraphic node={shapePreviewNode} diagramType={document.diagramType} /></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
            {view.guides && <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
@@ -1939,8 +1975,9 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         {contextMenu.target.kind === 'node' && contextMenu.target.id && <><button onClick={() => beginTextEdit('node', contextMenu.target.id!)}>Edit text</button><button onClick={openShapeChange}>Change shape…</button><div className="context-menu-divider" /><button onClick={() => { void copySelection(); setContextMenu(null); }}>Copy</button><button onClick={() => { cutSelection(); setContextMenu(null); }}>Cut</button><button onClick={duplicateContextTarget}>Duplicate selection</button><div className="context-menu-divider" /><button onClick={() => { setZOrder('forward'); setContextMenu(null); }}>Bring forward</button><button onClick={() => { setZOrder('backward'); setContextMenu(null); }}>Send backward</button><button onClick={() => { setZOrder('front'); setContextMenu(null); }}>Bring to front</button><button onClick={() => { setZOrder('back'); setContextMenu(null); }}>Send to back</button><div className="context-menu-divider" /><button onClick={() => { toggleSelectedLock(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => { toggleSelectedHidden(); setContextMenu(null); }}>{page?.nodes.find((node) => node.id === contextMenu.target.id)?.hidden ? 'Show' : 'Hide'}</button><button onClick={() => { selectConnected(contextMenu.target.id!); setContextMenu(null); }}>Select connected</button><button onClick={() => { selectSameType(contextMenu.target.id!); setContextMenu(null); }}>Select same type</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
        {contextMenu.target.kind === 'edge' && contextMenu.target.id && <><button onClick={() => beginTextEdit('edge', contextMenu.target.id!)}>Edit label</button><button onClick={() => { reverseContextEdge(contextMenu.target.id!); setContextMenu(null); }}>Reverse</button><button onClick={() => { addContextWaypoint(contextMenu.target.id!); setContextMenu(null); }}>Add waypoint</button><button onClick={() => { resetEdge(contextMenu.target.id!); setContextMenu(null); }}>Reset route</button><button className="context-danger" onClick={deleteContextTarget}>Delete</button></>}
        </div>}
-        {quickCreate && <div className="quick-create-menu" style={{ left: Math.min(Math.max(8, quickCreate.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, quickCreate.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Quick create</span><button title="Cancel quick create" aria-label="Cancel quick create" onClick={() => { setQuickCreate(null); setQuickCreateSearch(''); }}>×</button></div><input autoFocus aria-label="Search quick create shapes" placeholder="Search shapes…" value={quickCreateSearch} onChange={(event) => setQuickCreateSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuickCreate(null); setQuickCreateSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = quickCreateMatches[0]; if (match) createQuickShape(match.shape, match.pluginId); } }} /><div className="quick-create-list">{quickCreateMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : quickCreateMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => createQuickShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
-        {shapeChange && <div className="quick-create-menu shape-change-menu" style={{ left: Math.min(Math.max(8, shapeChange.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, shapeChange.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Change shape</span><button title="Cancel shape change" aria-label="Cancel shape change" onClick={() => { setShapeChange(null); setShapeChangeSearch(''); }}>×</button></div><input autoFocus aria-label="Search replacement shapes" placeholder="Search shapes…" value={shapeChangeSearch} onChange={(event) => setShapeChangeSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShapeChange(null); setShapeChangeSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = shapeChangeMatches[0]; if (match) applyShapeChange(match.shape, match.pluginId); } }} /><div className="quick-create-list">{shapeChangeMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : shapeChangeMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => applyShapeChange(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
+         {quickCreate && <div className="quick-create-menu" style={{ left: Math.min(Math.max(8, quickCreate.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, quickCreate.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Quick create</span><button title="Cancel quick create" aria-label="Cancel quick create" onClick={() => { setQuickCreate(null); setQuickCreateSearch(''); }}>×</button></div><input autoFocus aria-label="Search quick create shapes" placeholder="Search shapes…" value={quickCreateSearch} onChange={(event) => setQuickCreateSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuickCreate(null); setQuickCreateSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = quickCreateMatches[0]; if (match) createQuickShape(match.shape, match.pluginId); } }} /><div className="quick-create-list">{quickCreateMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : quickCreateMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => createQuickShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
+         {shapeInsert && <div className="quick-create-menu shape-insert-menu" style={{ left: Math.min(Math.max(8, shapeInsert.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, shapeInsert.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Insert shape <small>· S</small></span><button title="Cancel shape search" aria-label="Cancel shape search" onClick={() => { setShapeInsert(null); setShapeInsertSearch(''); }}>×</button></div><input autoFocus aria-label="Search shapes to insert" placeholder="Search shapes…" value={shapeInsertSearch} onChange={(event) => setShapeInsertSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShapeInsert(null); setShapeInsertSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = shapeInsertMatches[0]; if (match) insertStandaloneShape(match.shape, match.pluginId); } }} /><div className="quick-create-list">{shapeInsertMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : shapeInsertMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => insertStandaloneShape(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
+         {shapeChange && <div className="quick-create-menu shape-change-menu" style={{ left: Math.min(Math.max(8, shapeChange.screen.x), Math.max(8, size.width - 224)), top: Math.min(Math.max(30, shapeChange.screen.y), Math.max(30, size.height - 248)) }} onPointerDown={(event) => event.stopPropagation()}><div className="quick-create-heading"><span>Change shape</span><button title="Cancel shape change" aria-label="Cancel shape change" onClick={() => { setShapeChange(null); setShapeChangeSearch(''); }}>×</button></div><input autoFocus aria-label="Search replacement shapes" placeholder="Search shapes…" value={shapeChangeSearch} onChange={(event) => setShapeChangeSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShapeChange(null); setShapeChangeSearch(''); } else if (event.key === 'Enter') { event.preventDefault(); const match = shapeChangeMatches[0]; if (match) applyShapeChange(match.shape, match.pluginId); } }} /><div className="quick-create-list">{shapeChangeMatches.length === 0 ? <span className="command-empty">No matching shapes</span> : shapeChangeMatches.map(({ pluginId, shape }) => <button key={`${pluginId}:${shape.id}`} onClick={() => applyShapeChange(shape, pluginId)}><span className={`shape-mini ${shape.type}`}>{shapeIconForQuickCreate(shape.icon)}</span><span>{shape.label}</span><small>{pluginId === 'general' ? 'Basic' : pluginId}</small></button>)}</div></div>}
        {view.minimap && <div className="canvas-minimap" style={{ width: minimapWidth, height: minimapHeight }} onPointerDown={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const x = minimapWorld.x + (event.clientX - rect.left - minimapOffset.x) / minimapScale; const y = minimapWorld.y + (event.clientY - rect.top - minimapOffset.y) / minimapScale; updateViewport({ x: -x, y: -y }); }} aria-label="Diagram minimap">
         <svg width={minimapWidth} height={minimapHeight} viewBox={`0 0 ${minimapWidth} ${minimapHeight}`}><rect className="minimap-world" x={minimapOffset.x} y={minimapOffset.y} width={minimapWorld.width * minimapScale} height={minimapWorld.height * minimapScale} />{(page?.nodes ?? []).filter((node) => !node.hidden).map((node) => { const point = minimapPoint(node.position); return <rect key={node.id} className={selectedIds.includes(node.id) ? 'minimap-node selected' : 'minimap-node'} x={point.x} y={point.y} width={Math.max(2, node.size.width * minimapScale)} height={Math.max(2, node.size.height * minimapScale)} />; })}<rect className="minimap-viewport" x={minimapViewport.x} y={minimapViewport.y} width={Math.max(2, minimapViewport.width)} height={Math.max(2, minimapViewport.height)} /></svg>
        </div>}

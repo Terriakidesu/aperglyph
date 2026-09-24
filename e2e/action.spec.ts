@@ -174,6 +174,29 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
   });
 
+  test('searches and inserts a shape with the keyboard', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.keyboard.press('s');
+    await expect(page.getByLabel('Search shapes to insert')).toBeVisible();
+    await page.getByLabel('Search shapes to insert').fill('decision');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-node-id]')).toHaveCount(1);
+    await expect(page.locator('.node-label')).toHaveText('Decision?');
+  });
+
+  test('selects every matching shape type from command search', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await page.getByTitle('Drag Circle onto the canvas').click();
+    await page.getByTitle('Show outline').click();
+    await page.locator('.outline-node-row').first().click();
+    await page.keyboard.press('Control+k');
+    await page.getByLabel('Search commands').fill('same shape type');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.canvas-node.selected')).toHaveCount(2);
+  });
+
   test('exposes contextual controls, independent snapping, rename, and preferences', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
@@ -660,6 +683,9 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('.node-entity-title')).toHaveCount(2);
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await expect(page.getByRole('button', { name: 'SQL schema (.sql)' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Export area' })).toBeVisible();
+    await page.getByRole('button', { name: 'Page', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'PDF · all pages' })).toBeVisible();
   });
 
   test('opens diagnostics and focuses a semantic DFD problem', async ({ page }) => {
@@ -733,6 +759,17 @@ test.describe('diagram editing workflow', () => {
     await expect(node.locator('.node-label')).toHaveText('Multiple words');
   });
 
+  test('opens direct text editing with Enter on the selected shape', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await page.locator('[data-node-id]').first().click();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.canvas-text-editor')).toBeVisible();
+    await page.locator('.canvas-text-editor').fill('Keyboard label');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.canvas-text-editor')).toHaveCount(0);
+  });
+
   test('preserves an explicitly sized shape when editing a shorter label', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Diamond onto the canvas').click();
@@ -772,6 +809,22 @@ test.describe('diagram editing workflow', () => {
     await page.getByTitle('Page actions').click();
     await page.getByRole('button', { name: 'Use light canvas' }).click();
     await expect(canvas.locator('.canvas-background')).toHaveAttribute('fill', '#f6f7fb');
+  });
+
+  test('persists a per-shape default style and exposes paper presets', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await expect(page.getByLabel('Page size')).toBeVisible();
+    await page.getByLabel('Page size').selectOption('a4');
+    await expect(page.getByLabel('Page width')).toHaveValue('794');
+    await page.getByLabel('Page orientation').selectOption('landscape');
+    await expect(page.getByLabel('Page width')).toHaveValue('1123');
+    await expect(page.locator('.page-boundary')).toHaveCount(1);
+
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await page.getByLabel('Fill color picker').fill('#123456');
+    await page.getByTitle(/Use this as the default rectangle style/).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await expect(page.locator('[data-node-id]').last().locator('rect').first()).toHaveAttribute('fill', '#123456');
   });
 
   test('customizes the view, library scope, and inspector layout', async ({ page }) => {

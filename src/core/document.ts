@@ -104,6 +104,7 @@ export function createDocument(
     pages: [page],
     palette: [...defaultDocumentPalette],
     stylePresets: [],
+    styleDefaults: {},
     createdAt: now,
     updatedAt: now,
   };
@@ -229,6 +230,7 @@ export function validateProjectDocument(value: unknown): string[] {
   if (value.diagramType !== undefined && (typeof value.diagramType !== 'string' || !diagramTypes.has(value.diagramType as DiagramType))) errors.push('document.diagramType is invalid');
   validatePalette(value.palette, 'document.palette', errors);
   validateStylePresets(value.stylePresets, 'document.stylePresets', errors);
+  validateStyleDefaults(value.styleDefaults, 'document.styleDefaults', errors);
   finiteInRange(value.createdAt, 'document.createdAt', 0, 100000000000000, errors);
   finiteInRange(value.updatedAt, 'document.updatedAt', 0, 100000000000000, errors);
   if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > MAX_PAGES) {
@@ -256,6 +258,19 @@ function validateStylePresets(value: unknown, path: string, errors: string[]): v
     isBoundedString(preset.name, `${presetPath}.name`, 1, 128, errors);
     if (!isRecord(preset.style)) errors.push(`${presetPath}.style must be an object`);
     else validatePartialNodeStyle(preset.style, `${presetPath}.style`, errors);
+  });
+}
+
+function validateStyleDefaults(value: unknown, path: string, errors: string[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value) || Object.keys(value).length > 128) {
+    errors.push(`${path} must contain at most 128 shape defaults`);
+    return;
+  }
+  Object.entries(value).forEach(([key, style]) => {
+    if (key.length < 1 || key.length > 256) errors.push(`${path}.${key} has an invalid shape key`);
+    if (!isRecord(style)) errors.push(`${path}.${key} must be an object`);
+    else validatePartialNodeStyle(style, `${path}.${key}`, errors);
   });
 }
 
@@ -517,6 +532,7 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
     pages,
     palette: normalizePalette(input.palette),
     stylePresets: normalizeStylePresets(input.stylePresets),
+    styleDefaults: normalizeStyleDefaults(input.styleDefaults),
     createdAt: input.createdAt ?? base.createdAt,
     updatedAt: input.updatedAt ?? Date.now(),
   };
@@ -557,6 +573,14 @@ function normalizeStylePresets(value: unknown): DiagramDocument['stylePresets'] 
     if (!isRecord(preset) || typeof preset.id !== 'string' || typeof preset.name !== 'string' || !isRecord(preset.style)) return [];
     return [{ id: preset.id, name: preset.name, style: structuredClone(preset.style) }];
   }).slice(0, 64) as DiagramDocument['stylePresets'];
+}
+
+function normalizeStyleDefaults(value: unknown): DiagramDocument['styleDefaults'] {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, style]) => {
+    if (!isRecord(style) || key.length < 1 || key.length > 256) return [];
+    return [[key, structuredClone(style) as Partial<NodeStyle>]];
+  }).slice(0, 128));
 }
 
 function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramEdge {

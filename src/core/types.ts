@@ -196,6 +196,8 @@ export interface DiagramDocument {
   pages: DiagramPage[];
   palette: string[];
   stylePresets: StylePreset[];
+  /** Persistent defaults keyed by `library:type` for newly-created shapes. */
+  styleDefaults: Record<string, Partial<NodeStyle>>;
   createdAt: number;
   updatedAt: number;
 }
