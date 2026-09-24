@@ -1,5 +1,5 @@
 import { MoreHorizontal, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getSnapSettings } from '../core/snapping';
 import { useEditorStore } from '../store/editorStore';
 
@@ -14,8 +14,24 @@ export function PageTabs() {
   const reorderPage = useEditorStore((state) => state.reorderPage);
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
   const [menuOpen, setMenuOpen] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const activeIndex = document.pages.findIndex((page) => page.id === activePageId);
   const activePage = document.pages[activeIndex] ?? document.pages[0];
+
+  useEffect(() => {
+    const closeMenu = (event: PointerEvent) => {
+      if (!tabsRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
 
   const promptRename = () => {
     if (!activePage) return;
@@ -48,11 +64,11 @@ export function PageTabs() {
   };
 
   return <div className="page-tabs">
-    <div className="page-tabs-inner">
-      {document.pages.map((page, index) => <button key={page.id} className={`page-tab ${page.id === activePageId ? 'active' : ''}`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}
-      <button className="add-page" title="Create page" aria-label="Create page" onClick={() => createPage()}><Plus size={15} /></button>
-      <button className={`page-more ${menuOpen ? 'active' : ''}`} title="Page actions" aria-label="Page actions" onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={16} /></button>
-      {menuOpen && activePage && <div className="page-menu" onPointerDown={(event) => event.stopPropagation()}>
+    <div className="page-tabs-inner" ref={tabsRef}>
+      {document.pages.map((page, index) => <button key={page.id} className={`page-tab ${page.id === activePageId ? 'active' : ''}`} aria-current={page.id === activePageId ? 'page' : undefined} aria-label={`Open page ${index + 1}: ${page.name}`} title={`${page.name} · Double-click to rename`} onClick={() => { setActivePage(page.id); setMenuOpen(false); }} onDoubleClick={() => { const name = window.prompt('Page name', page.name); if (name !== null) renamePage(page.id, name); }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page.name}</button>)}
+      <button className="add-page" title="Add page" aria-label="Create page" onClick={() => createPage()}><Plus size={15} /></button>
+      <button className={`page-more ${menuOpen ? 'active' : ''}`} title="Page actions" aria-label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><MoreHorizontal size={16} /></button>
+      {menuOpen && activePage && <div className="page-menu" role="menu" aria-label={`Actions for ${activePage.name}`} onPointerDown={(event) => event.stopPropagation()}>
         <strong>{activePage.name}</strong>
         <button onClick={promptRename}>Rename</button>
         <button onClick={() => { duplicatePage(activePage.id); setMenuOpen(false); }}>Duplicate</button>

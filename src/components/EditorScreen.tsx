@@ -1,6 +1,6 @@
 import { PanelLeftOpen, PanelRightOpen } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { CLIPBOARD_MIME, parseClipboardPayload, serializeClipboardPayload } from '../core/commands';
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { createNode as buildNode } from '../core/document';
@@ -299,16 +299,16 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     <div className="editor-workspace" style={workspaceStyle}>
       <EditorToolbar />
       {leftOpen && (leftPanel === 'outline' ? <OutlinePanel activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} /> : <ShapeLibrary activePanel={leftPanel} onPanelChange={setLeftPanel} onCollapse={() => setLeftOpen(false)} />)}
-      {leftOpen && <PanelResizeHandle side="left" onPointerDown={(event) => beginPanelResize('left', event)} />}
+      {leftOpen && <PanelResizeHandle side="left" width={leftWidth} onWidthChange={(value) => setLeftWidth(clampPanelWidth(value, 'left'))} onPointerDown={(event) => beginPanelResize('left', event)} />}
        <section className="canvas-column"><CanvasViewport onImportFile={importFileAtPoint} view={viewPreferences} /><PageTabs /><StatusBar /></section>
-      {rightOpen && <PanelResizeHandle side="right" onPointerDown={(event) => beginPanelResize('right', event)} />}
+      {rightOpen && <PanelResizeHandle side="right" width={rightWidth} onWidthChange={(value) => setRightWidth(clampPanelWidth(value, 'right'))} onPointerDown={(event) => beginPanelResize('right', event)} />}
        {rightOpen && <PropertiesPanel />}
        {!leftOpen && <DockReopenButton side="left" onClick={() => setLeftOpen(true)} />}
        {!rightOpen && <DockReopenButton side="right" onClick={() => setRightOpen(true)} />}
       </div>
       {showDiagnostics && <DiagnosticsPanel onClose={() => setShowDiagnostics(false)} />}
       {showPreferences && <PreferencesDialog view={viewPreferences} onViewChange={updateViewPreferences} pageSettings={page?.settings} onPageSettingsChange={(changes) => updatePageSettings(changes, activePageId, 'Update preferences')} leftWidth={leftWidth} rightWidth={rightWidth} onWidthChange={(side, value) => side === 'left' ? setLeftWidth(clampPanelWidth(value, 'left')) : setRightWidth(clampPanelWidth(value, 'right'))} snapshotLimit={snapshotLimit} onSnapshotLimitChange={(value) => { const next = setSnapshotLimit(normalizeSnapshotLimit(value)); setSnapshotLimitState(next); }} onRestoreDefaults={() => { setViewPreferences(DEFAULT_VIEW_PREFERENCES); setLeftWidth(228); setRightWidth(288); setSnapshotLimitState(setSnapshotLimit(31)); if (page) updatePageSettings({ gridSize: 16, snapSettings: { grid: true, objects: true, guides: true, ports: true } }, page.id, 'Restore editor defaults'); }} onClose={() => setShowPreferences(false)} />}
-     {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
+     {showShortcuts && <div className="modal-backdrop" onClick={() => setShowShortcuts(false)}><div className="shortcuts-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="panel-kicker">AperGlyph</span><h2>Keyboard shortcuts</h2></div><button className="icon-button" aria-label="Close shortcuts" onClick={() => setShowShortcuts(false)}>×</button></div><div className="shortcut-list"><Shortcut keys="V" label="Select tool" /><Shortcut keys="H" label="Pan tool" /><Shortcut keys="Space + drag" label="Temporarily pan canvas" /><Shortcut keys="C" label="Create connector" /><Shortcut keys="T" label="Add text" /><Shortcut keys="← ↑ → ↓" label="Nudge selection" /><Shortcut keys="Shift + arrows" label="Nudge by grid" /><Shortcut keys="Alt + drag" label="Duplicate while dragging" /><Shortcut keys="⌘ K" label="Command palette" /><Shortcut keys="⌘ Z" label="Undo last action" /><Shortcut keys="⌘ ⇧ Z" label="Redo action" /><Shortcut keys="Delete" label="Delete selection" /></div></div></div>}
      {showPalette && <div className="command-palette-backdrop" onMouseDown={() => setShowPalette(false)}><div className="command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="command-palette-search"><span>⌘K</span><input ref={paletteInputRef} aria-label="Search commands" placeholder="Search commands…" value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setShowPalette(false); } else if (event.key === 'ArrowDown') { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, Math.max(0, matchingCommands.length - 1))); } else if (event.key === 'ArrowUp') { event.preventDefault(); setPaletteIndex((index) => Math.max(0, index - 1)); } else if (event.key === 'Enter') { event.preventDefault(); const command = matchingCommands[paletteIndex]; if (command) { command.run(); setShowPalette(false); setPaletteQuery(''); } } }} /></div><div className="command-list">{matchingCommands.length === 0 ? <span className="command-empty">No matching commands</span> : matchingCommands.map((command, index) => <button key={command.id} className={index === paletteIndex ? 'command-item active' : 'command-item'} onMouseEnter={() => setPaletteIndex(index)} onClick={() => { command.run(); setShowPalette(false); setPaletteQuery(''); }}><span>{command.label}</span><small>{command.shortcut ?? command.hint}</small></button>)}</div></div></div>}
    </main>;
 }
@@ -373,8 +373,24 @@ function readViewPreferences(): ViewPreferences {
   }
 }
 
-function PanelResizeHandle({ side, onPointerDown }: { side: 'left' | 'right'; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void }) {
-  return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" aria-label={`Resize ${side} panel`} aria-orientation="vertical" onPointerDown={onPointerDown} />;
+function PanelResizeHandle({ side, width, onWidthChange, onPointerDown }: { side: 'left' | 'right'; width: number; onWidthChange: (width: number) => void; onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void }) {
+  const minimum = side === 'right' ? 220 : 180;
+  const maximum = side === 'right' ? 400 : 360;
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 40 : 10;
+    const direction = event.key === 'ArrowRight' ? (side === 'left' ? 1 : -1) : event.key === 'ArrowLeft' ? (side === 'left' ? -1 : 1) : 0;
+    if (direction !== 0) {
+      event.preventDefault();
+      onWidthChange(width + direction * step);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      onWidthChange(minimum);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      onWidthChange(maximum);
+    }
+  };
+  return <div className={`panel-resize-handle panel-resize-${side}`} role="separator" tabIndex={0} aria-label={`Resize ${side} panel`} aria-orientation="vertical" aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={width} aria-valuetext={`${width}px`} onKeyDown={onKeyDown} onPointerDown={onPointerDown} />;
 }
 
 function DockReopenButton({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {

@@ -35,6 +35,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Added richer ERD field metadata/paste tools, DFD process numbering checks, and UML use-case/package validation and relationship shapes.
 
 ### Changed
+- Improved editor control discoverability with explicit active-tool status, clearer snapping/grid states, keyboard-accessible panel resizing, consistent pan guidance, and dismissible page/zoom/snap menus.
 - Orthogonal routing now preserves semantic endpoint intent while keeping generated routes runtime-only and export-compatible.
 
 - Kept RBush as the broad-phase spatial index while using Rust for batched rectangle scoring and graph layout, with TypeScript fallbacks when WASM cannot load.

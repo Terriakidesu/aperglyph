@@ -127,6 +127,28 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'Done' }).click();
   });
 
+  test('makes editor controls discoverable and keyboard accessible', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const selectTool = page.getByRole('button', { name: 'Select tool' });
+    await expect(selectTool).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'Pan canvas tool' }).click();
+    await expect(page.getByRole('button', { name: 'Pan canvas tool' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.status-mode')).toContainText('Pan tool');
+
+    const leftResize = page.getByRole('separator', { name: 'Resize left panel' });
+    const beforeWidth = Number(await leftResize.getAttribute('aria-valuenow'));
+    await leftResize.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => Number(await leftResize.getAttribute('aria-valuenow'))).toBe(beforeWidth + 10);
+
+    await page.getByRole('button', { name: 'Page actions' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.page-menu')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Snap settings' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Snap settings' })).toHaveCount(0);
+  });
+
   test('Alt-drag duplicates without applying grid snapping', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     await page.getByTitle('Drag Rectangle onto the canvas').click();
