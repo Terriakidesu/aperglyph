@@ -1,4 +1,4 @@
-import { nodeCenter, nodeConnectionPoint } from './geometry';
+import { nodeCenter, nodeConnectionPoint, nodeLocalVectorToWorld } from './geometry';
 import { connectionAnchorPoints, entityFieldAnchors } from './anchors';
 import { normalizeEntityFields } from './erd';
 import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, OrthogonalRoutingMode, Point, PortDirection, RouteConstraint } from './types';
@@ -695,12 +695,8 @@ export function portDirection(port?: string): PortDirection | undefined {
 function routingDirection(endpoint: Endpoint, node: DiagramNode, boundary: Point, fallbackTarget: Point): Point {
   const explicit = portDirection(endpoint.port);
   if (!explicit) return exitDirection(node, boundary, fallbackTarget);
-  const radians = node.rotation * Math.PI / 180;
   const local = explicit === 'north' ? { x: 0, y: -1 } : explicit === 'east' ? { x: 1, y: 0 } : explicit === 'south' ? { x: 0, y: 1 } : { x: -1, y: 0 };
-  const world = {
-    x: local.x * Math.cos(radians) - local.y * Math.sin(radians),
-    y: local.x * Math.sin(radians) + local.y * Math.cos(radians),
-  };
+  const world = nodeLocalVectorToWorld(node, local);
   return Math.abs(world.x) >= Math.abs(world.y) ? { x: Math.sign(world.x) || 1, y: 0 } : { x: 0, y: Math.sign(world.y) || 1 };
 }
 

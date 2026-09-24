@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, FitNodesToTextCommand, GroupNodesCommand, LayoutNodesCommand, MatchNodeSizeCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ResetNodeRotationCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, UpdateShapeDefaultsCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, FitNodesToTextCommand, FlipNodesCommand, GroupNodesCommand, LayoutNodesCommand, MatchNodeSizeCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ResetNodeRotationCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, UpdateShapeDefaultsCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 import { edgeRoute } from './routing';
 
@@ -258,6 +258,21 @@ describe('command history', () => {
     expect(matchedAll.pages[0].nodes.find((node) => node.id === other.id)?.size).toEqual({ width: 240, height: 96 });
     const reset = manager.execute(new ResetNodeRotationCommand(pageId, [other.id]), matchedAll);
     expect(reset.pages[0].nodes.find((node) => node.id === other.id)?.rotation).toBe(0);
+  });
+
+  it('flips selected nodes independently and keeps the operation undoable', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const first = createNode('rectangle', { x: 0, y: 0 });
+    const second = createNode('diamond', { x: 240, y: 0 }, { flipY: true });
+    document.pages[0].nodes.push(first, second);
+    const manager = new CommandManager();
+    const horizontal = manager.execute(new FlipNodesCommand(pageId, [first.id, second.id], 'horizontal'), document);
+    expect(horizontal.pages[0].nodes.map((node) => node.flipX)).toEqual([true, true]);
+    expect(horizontal.pages[0].nodes[1].flipY).toBe(true);
+    const vertical = manager.execute(new FlipNodesCommand(pageId, [first.id, second.id], 'vertical'), horizontal);
+    expect(vertical.pages[0].nodes.map((node) => node.flipY)).toEqual([true, false]);
+    expect(manager.undo(vertical)?.pages[0].nodes.map((node) => Boolean(node.flipY))).toEqual([false, true]);
   });
 
   it('duplicates, aligns, distributes, rotates, and reorders selection geometry', () => {

@@ -20,6 +20,14 @@ describe('native file helpers', () => {
     expect(svg).toContain('translate(-90 -44)');
   });
 
+  it('exports reflected node geometry with the same local transform as the canvas', () => {
+    const node = createNode('diamond', { x: 30, y: 40 }, { flipX: true, flipY: true });
+    const svg = documentToSvg([node], [], '#10131c', 800, 600);
+    expect(svg).toContain('scale(-1 -1)');
+    expect(svg).toContain('translate(90 44)');
+    expect(svg).toContain('translate(-90 -44)');
+  });
+
   it('exports an ink-saving outline-only SVG suitable for printing', () => {
     const node = createNode('rectangle', { x: 30, y: 40 }, { style: { fill: '#2c2752', stroke: '#907bff', textColor: '#f4f5fa' } });
     const svg = documentToSvg([node], [], '#10131c', 800, 600, { outlineOnly: true });

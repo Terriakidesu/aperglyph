@@ -3,15 +3,52 @@ import { notationRenderer, silhouetteBoundaryPoints } from './silhouettes';
 
 export type ConnectionPort = 'top' | 'right' | 'bottom' | 'left' | 'center' | 'north' | 'east' | 'south' | 'west';
 
-export function nodeCenter(node: DiagramNode): Point {
+export function nodeCenter(node: Pick<DiagramNode, 'position' | 'size'>): Point {
   return { x: node.position.x + node.size.width / 2, y: node.position.y + node.size.height / 2 };
+}
+
+/** Convert an unflipped, node-local point to world coordinates. */
+export function nodeLocalToWorld(node: Pick<DiagramNode, 'position' | 'size' | 'rotation' | 'flipX' | 'flipY'>, point: Point): Point {
+  const center = nodeCenter(node);
+  return rotateAround(flipPoint(point, center, node.flipX, node.flipY), center, node.rotation);
+}
+
+/** Convert a world point into the node's unflipped local coordinate space. */
+export function nodeWorldToLocal(node: Pick<DiagramNode, 'position' | 'size' | 'rotation' | 'flipX' | 'flipY'>, point: Point): Point {
+  const center = nodeCenter(node);
+  return flipPoint(rotateAround(point, center, -node.rotation), center, node.flipX, node.flipY);
+}
+
+/** Convert a node-local direction vector into world coordinates. */
+export function nodeLocalVectorToWorld(node: Pick<DiagramNode, 'rotation' | 'flipX' | 'flipY'>, vector: Point): Point {
+  const reflected = { x: node.flipX ? -vector.x : vector.x, y: node.flipY ? -vector.y : vector.y };
+  const radians = node.rotation * Math.PI / 180;
+  return {
+    x: reflected.x * Math.cos(radians) - reflected.y * Math.sin(radians),
+    y: reflected.x * Math.sin(radians) + reflected.y * Math.cos(radians),
+  };
+}
+
+/** Return the local point used to render an already-rotated world coordinate. */
+export function nodeRenderedLocalPoint(node: Pick<DiagramNode, 'position' | 'size' | 'rotation'>, point: Point): Point {
+  return rotateAround(point, nodeCenter(node), -node.rotation);
+}
+
+/** Shared SVG transform for the node-local reflections used by canvas and export. */
+export function nodeFlipTransform(node: Pick<DiagramNode, 'size' | 'flipX' | 'flipY'>): string | undefined {
+  const scaleX = node.flipX ? -1 : 1;
+  const scaleY = node.flipY ? -1 : 1;
+  if (scaleX === 1 && scaleY === 1) return undefined;
+  const centerX = node.size.width / 2;
+  const centerY = node.size.height / 2;
+  return `translate(${centerX} ${centerY}) scale(${scaleX} ${scaleY}) translate(${-centerX} ${-centerY})`;
 }
 
 /** Selects the closest cardinal port so an orthogonal connection can keep a
  * stable anchor after its route is recalculated. */
 export function nearestConnectionPort(node: DiagramNode, toward: Point): Exclude<ConnectionPort, 'center' | 'north' | 'east' | 'south' | 'west'> {
   const center = nodeCenter(node);
-  const localTarget = rotateAround(toward, center, -node.rotation);
+  const localTarget = nodeWorldToLocal(node, toward);
   const dx = localTarget.x - center.x;
   const dy = localTarget.y - center.y;
   if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
@@ -24,11 +61,11 @@ export function nearestConnectionPort(node: DiagramNode, toward: Point): Exclude
  */
 export function nodeConnectionPoint(node: DiagramNode, toward: Point, port?: string, offset = 0.5): Point {
   const center = nodeCenter(node);
-  const localTarget = rotateAround(toward, center, -node.rotation);
+  const localTarget = nodeWorldToLocal(node, toward);
   const fixedPort = normalizePort(port);
   const target = fixedPort ? portPoint(center, node.size.width / 2, node.size.height / 2, fixedPort, offset) : localTarget;
   const localPoint = shapeEdgePoint(node, target);
-  return rotateAround(localPoint, center, node.rotation);
+  return nodeLocalToWorld(node, localPoint);
 }
 
 /**
@@ -160,7 +197,7 @@ export function connectionOffset(node: DiagramNode, point: Point, port?: string)
   const fixedPort = normalizePort(port);
   if (!fixedPort || fixedPort === 'center') return undefined;
   const center = nodeCenter(node);
-  const localPoint = rotateAround(point, center, -node.rotation);
+  const localPoint = nodeWorldToLocal(node, point);
   const halfWidth = node.size.width / 2 || 1;
   const halfHeight = node.size.height / 2 || 1;
   const ratio = fixedPort === 'top' || fixedPort === 'bottom'
@@ -177,6 +214,13 @@ function normalizePort(port?: string): Exclude<ConnectionPort, 'north' | 'east' 
   if (port === 'west') return 'left';
   if (port === 'top' || port === 'right' || port === 'bottom' || port === 'left' || port === 'center') return port;
   return undefined;
+}
+
+function flipPoint(point: Point, center: Point, flipX = false, flipY = false): Point {
+  return {
+    x: center.x + (flipX ? -1 : 1) * (point.x - center.x),
+    y: center.y + (flipY ? -1 : 1) * (point.y - center.y),
+  };
 }
 
 function rotateAround(point: Point, center: Point, degrees: number): Point {

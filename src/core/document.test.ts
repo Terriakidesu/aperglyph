@@ -18,10 +18,12 @@ describe('AperGlyph document model', () => {
 
   it('round trips a project through the native file format', () => {
     const document = createDocument('Round trip');
-    document.pages[0].nodes.push(createNode('process', { x: 120, y: 80 }));
+    document.pages[0].nodes.push(createNode('process', { x: 120, y: 80 }, { flipX: true, flipY: true }));
     const parsed = parseProject(serializeProject(document));
     expect(parsed.id).toBe(document.id);
     expect(parsed.pages[0].nodes[0].position).toEqual({ x: 120, y: 80 });
+    expect(parsed.pages[0].nodes[0].flipX).toBe(true);
+    expect(parsed.pages[0].nodes[0].flipY).toBe(true);
   });
 
   it('round trips free connector endpoints', () => {

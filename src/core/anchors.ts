@@ -1,5 +1,5 @@
 import { entityFieldPortOffset, normalizeEntityFields } from './erd';
-import { nodeCenter, nodeConnectionPoint } from './geometry';
+import { nodeCenter, nodeConnectionPoint, nodeRenderedLocalPoint } from './geometry';
 import type { ConnectionPort } from './geometry';
 import type { DiagramNode, Point } from './types';
 import type { ShapeAnchor, ShapeAnchorResolver } from '../plugins/types';
@@ -44,16 +44,7 @@ export function connectionAnchorPoints(node: DiagramNode, resolver?: ShapeAnchor
     return {
       anchor: { nodeId: node.id, ...anchor },
       point,
-      localPoint: rotateAround(point, center, -node.rotation),
+      localPoint: nodeRenderedLocalPoint(node, point),
     };
   });
-}
-
-function rotateAround(point: Point, center: Point, degrees: number): Point {
-  const radians = degrees * Math.PI / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const x = point.x - center.x;
-  const y = point.y - center.y;
-  return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
 }

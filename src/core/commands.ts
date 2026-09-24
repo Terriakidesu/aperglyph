@@ -596,6 +596,31 @@ export class RotateNodesCommand implements DocumentCommand {
   }
 }
 
+export type FlipAxis = 'horizontal' | 'vertical';
+
+export class FlipNodesCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly nodeIds: string[], private readonly axis: FlipAxis) {
+    this.label = `Flip selection ${axis}`;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const ids = new Set(this.nodeIds);
+    next.pages = next.pages.map((page) => page.id !== this.pageId ? page : {
+      ...page,
+      nodes: page.nodes.map((node) => {
+        if (!ids.has(node.id) || node.locked) return node;
+        return this.axis === 'horizontal'
+          ? { ...node, flipX: !node.flipX }
+          : { ...node, flipY: !node.flipY };
+      }),
+    });
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export type NodeSizeMatchAxis = 'width' | 'height' | 'both';
 
 export class MatchNodeSizeCommand implements DocumentCommand {
@@ -943,6 +968,8 @@ function isClipboardNode(value: unknown): value is DiagramNode {
     && typeof value.style.textColor === 'string'
     && (value.locked === undefined || typeof value.locked === 'boolean')
     && (value.hidden === undefined || typeof value.hidden === 'boolean')
+    && (value.flipX === undefined || typeof value.flipX === 'boolean')
+    && (value.flipY === undefined || typeof value.flipY === 'boolean')
     && (value.groupId === undefined || typeof value.groupId === 'string')
     && (value.zIndex === undefined || Number.isFinite(value.zIndex));
 }

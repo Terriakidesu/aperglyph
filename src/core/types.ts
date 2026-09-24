@@ -107,6 +107,9 @@ export interface DiagramNode {
   position: Point;
   size: Size;
   rotation: number;
+  /** Optional local-axis reflections applied around the node center. */
+  flipX?: boolean;
+  flipY?: boolean;
   /** Optional persisted geometry for extensible shape definitions. */
   boundary?: ShapeBoundary;
   style: NodeStyle;

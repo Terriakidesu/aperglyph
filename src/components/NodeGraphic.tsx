@@ -1,4 +1,5 @@
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, normalizeEntityFields } from '../core/erd';
+import { nodeFlipTransform } from '../core/geometry';
 import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramNode } from '../core/types';
@@ -56,7 +57,9 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
   const labelNode = showLabel && !['entity', 'actor', 'boundary', 'line', 'arrow-line'].includes(renderer)
     ? <NodeLabel node={node} label={label} width={width} height={height} align={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 'left' : undefined} vertical={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 'top' : undefined} padding={['package', 'folded-note', 'system-boundary'].includes(renderer) ? 14 : undefined} className={`node-label ${renderer === 'start' || renderer === 'use-case' ? 'node-label-strong' : ''}`} />
     : showLabel && renderer === 'actor' ? <NodeLabel node={node} label={label} width={width} height={height} vertical="bottom" /> : null;
-  return <>{shape}{labelNode}</>;
+  const flipTransform = nodeFlipTransform(node);
+  const content = <>{shape}{labelNode}</>;
+  return flipTransform ? <g transform={flipTransform}>{content}</g> : content;
 }
 
 /**

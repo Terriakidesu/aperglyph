@@ -113,7 +113,7 @@ export function createDocument(
 export function createNode(
   type: string,
   position: Point,
-  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data' | 'container'>> & { style?: Partial<NodeStyle>; boundary?: ShapeBoundary } = {},
+  options: Partial<Pick<DiagramNode, 'library' | 'size' | 'data' | 'container' | 'flipX' | 'flipY'>> & { style?: Partial<NodeStyle>; boundary?: ShapeBoundary } = {},
 ): DiagramNode {
   const node: DiagramNode = {
     id: createId('node'),
@@ -122,6 +122,8 @@ export function createNode(
     position: { ...position },
     size: options.size ?? { width: 180, height: 88 },
     rotation: 0,
+    ...(options.flipX ? { flipX: true } : {}),
+    ...(options.flipY ? { flipY: true } : {}),
     ...(options.boundary ? { boundary: options.boundary } : {}),
     ...(options.container ? { container: true } : {}),
     style: {
@@ -355,6 +357,8 @@ function validateNode(value: unknown, path: string, ids: Set<string>, errors: st
   if (!isRecord(value.size)) errors.push(`${path}.size must be an object`);
   else { finiteInRange(value.size.width, `${path}.size.width`, 1, 100000, errors); finiteInRange(value.size.height, `${path}.size.height`, 1, 100000, errors); }
   finiteInRange(value.rotation, `${path}.rotation`, -360000, 360000, errors);
+  if (value.flipX !== undefined && typeof value.flipX !== 'boolean') errors.push(`${path}.flipX must be boolean`);
+  if (value.flipY !== undefined && typeof value.flipY !== 'boolean') errors.push(`${path}.flipY must be boolean`);
   if (value.boundary !== undefined && value.boundary !== 'rectangle' && value.boundary !== 'ellipse' && value.boundary !== 'diamond') errors.push(`${path}.boundary is invalid`);
   if (value.locked !== undefined && typeof value.locked !== 'boolean') errors.push(`${path}.locked must be boolean`);
   if (value.hidden !== undefined && typeof value.hidden !== 'boolean') errors.push(`${path}.hidden must be boolean`);

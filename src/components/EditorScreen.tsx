@@ -45,6 +45,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const pastePayloadAt = useEditorStore((state) => state.pastePayloadAt);
   const duplicateSelection = useEditorStore((state) => state.duplicateSelection);
   const rotateSelection = useEditorStore((state) => state.rotateSelection);
+  const flipSelection = useEditorStore((state) => state.flipSelection);
   const groupSelection = useEditorStore((state) => state.groupSelection);
   const ungroupSelection = useEditorStore((state) => state.ungroupSelection);
   const nudgeSelection = useEditorStore((state) => state.nudgeSelection);
@@ -96,6 +97,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'match-height', label: 'Match selection height', hint: 'Arrange', run: () => matchSelectionSize('height') },
     { id: 'match-size', label: 'Match selection size', hint: 'Arrange', run: () => matchSelectionSize('both') },
     { id: 'reset-rotation', label: 'Reset selection rotation', hint: 'Arrange', run: () => resetSelectionRotation() },
+    { id: 'flip-horizontal', label: 'Flip selection horizontally', hint: 'Arrange', run: () => flipSelection('horizontal') },
+    { id: 'flip-vertical', label: 'Flip selection vertically', hint: 'Arrange', run: () => flipSelection('vertical') },
     { id: 'select-connectors', label: 'Select all connectors', hint: 'Selection', run: () => selectAllConnectors() },
     { id: 'select-same-type', label: 'Select same shape type', hint: 'Selection', run: () => selectSameType() },
     { id: 'select-connected', label: 'Select connected objects', hint: 'Selection', run: () => selectConnected() },
@@ -316,7 +319,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, groupSelection, matchSelectionSize, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, resetSelectionRotation, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
+    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, flipSelection, groupSelection, matchSelectionSize, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, resetSelectionRotation, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
 
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));

@@ -37,6 +37,14 @@ describe('node connector geometry', () => {
     expect(connectionOffset(node, point, 'right')).toBeCloseTo(0.8);
   });
 
+  it('reflects explicit ports and offsets with the node silhouette', () => {
+    const node = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 200, height: 100 }, flipX: true, flipY: true });
+    expect(nodeConnectionPoint(node, { x: 0, y: 0 }, 'right')).toEqual({ x: 0, y: 50 });
+    expect(nodeConnectionPoint(node, { x: 0, y: 0 }, 'bottom', 0.25)).toEqual({ x: 150, y: 0 });
+    expect(connectionOffset(node, { x: 150, y: 0 }, 'bottom')).toBeCloseTo(0.25);
+    expect(nearestConnectionPort(node, { x: 260, y: 50 })).toBe('left');
+  });
+
   it('uses ellipse geometry for DFD process bubbles', () => {
     const node = createNode('process', { x: 0, y: 0 }, { library: 'dfd', size: { width: 100, height: 60 } });
     const point = nodeConnectionPoint(node, { x: 200, y: 200 });

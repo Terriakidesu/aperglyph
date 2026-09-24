@@ -258,6 +258,18 @@ test.describe('diagram editing workflow', () => {
     expect(after?.x ?? 0).toBeLessThan((before?.x ?? 0) - 15);
   });
 
+  test('flips the selected shape through the command palette and undoes it', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    const node = page.locator('[data-node-id]').first();
+    await page.keyboard.press('Control+k');
+    await page.getByLabel('Search commands').fill('Flip selection horizontally');
+    await page.getByRole('button', { name: 'Flip selection horizontally' }).click();
+    await expect(node.locator('g[transform*="scale(-1 1)"]')).toHaveCount(1);
+    await page.keyboard.press('Control+z');
+    await expect(node.locator('g[transform*="scale(-1 1)"]')).toHaveCount(0);
+  });
+
   test('makes editor controls discoverable and keyboard accessible', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     const selectTool = page.getByRole('button', { name: 'Select tool' });

@@ -1,7 +1,7 @@
 import { createDocument, createNode, parseProject, serializeProject } from '../core/document';
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields, parseErdSql } from '../core/erd';
-import { nodeCenter } from '../core/geometry';
+import { nodeCenter, nodeFlipTransform } from '../core/geometry';
 import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
@@ -348,7 +348,8 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
   const textColor = escapeXml(outlineOnly ? '#000000' : node.style.textColor);
   const radius = node.style.radius;
   const renderer = shapeRenderer(node);
-  const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})`;
+  const flipTransform = nodeFlipTransform(node);
+  const transform = `translate(${x} ${y}) rotate(${node.rotation} ${width / 2} ${height / 2})${flipTransform ? ` ${flipTransform}` : ''}`;
   if (renderer === 'image') {
     const source = typeof node.data.src === 'string' && node.data.src.startsWith('data:image/') ? node.data.src : '';
     const labelMarkup = source ? '' : svgTextMarkup(node, rawLabel, width, height, textColor);

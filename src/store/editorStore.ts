@@ -14,6 +14,7 @@ import {
   DuplicatePageCommand,
   DuplicateSelectionCommand,
   FitNodesToTextCommand,
+  FlipNodesCommand,
   GroupNodesCommand,
   LayoutNodesCommand,
   MatchNodeSizeCommand,
@@ -115,6 +116,7 @@ interface EditorStore {
   pastePayloadAt: (payload: ClipboardPayload, point: Point) => void;
   duplicateSelection: (offset?: Point) => string[];
   rotateSelection: (degrees?: number) => void;
+  flipSelection: (axis: 'horizontal' | 'vertical') => void;
   alignSelection: (alignment: Alignment) => void;
   distributeSelection: (axis: DistributionAxis) => void;
   setZOrder: (action: ZOrderAction) => void;
@@ -571,6 +573,13 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (nodeIds.length === 0) return;
       const next = manager.execute(new RotateNodesCommand(activePageId, nodeIds, degrees), document);
       updateDocument(next, 'Rotate selection');
+    },
+    flipSelection: (axis) => {
+      const { activePageId, document, selectedIds } = get();
+      const nodeIds = selectedIds.filter((id) => getActivePage(document, activePageId)?.nodes.some((node) => node.id === id));
+      if (nodeIds.length === 0) return;
+      const next = manager.execute(new FlipNodesCommand(activePageId, nodeIds, axis), document);
+      updateDocument(next, `Flip selection ${axis}`);
     },
     alignSelection: (alignment) => {
       const { activePageId, document, selectedIds } = get();
