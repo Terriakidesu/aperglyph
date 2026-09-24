@@ -612,6 +612,19 @@ test.describe('diagram editing workflow', () => {
     await expect(page.locator('[data-edge-id]')).toHaveCount(0);
   });
 
+  test('opens connected-shape creation from a stationary connection point click', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    await page.getByTitle('Drag Rectangle onto the canvas').click();
+    await page.locator('[data-node-id]').first().locator('[data-connection-port="right"]').click();
+    await expect(page.getByText('Quick create')).toBeVisible();
+    await page.locator('.quick-create-list button').filter({ hasText: 'Circle' }).click();
+    await expect(page.locator('[data-node-id]')).toHaveCount(2);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(1);
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('[data-node-id]')).toHaveCount(1);
+    await expect(page.locator('[data-edge-id]')).toHaveCount(0);
+  });
+
   test('supports ERD field-row anchors and table column variants', async ({ page }) => {
     await page.getByRole('button', { name: 'Entity relationship Model your data system 3 entities · 2 relations' }).click();
     const nodes = page.locator('[data-node-id]');

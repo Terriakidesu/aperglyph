@@ -1442,6 +1442,13 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
         else if (page) setQuickCreate({ source: session.connectorSource, point, screen: screenPoint(event), disableSnapping: event.altKey || Boolean(session.disableSnapping) });
         setConnectorStart(null);
       } else if (activeTool !== 'connector') {
+        // A stationary click on a visible port is the fast path for building
+        // a connected shape. Dragging still creates a connector or opens the
+        // same chooser at the release point; clicking opens it at the port.
+        if (page) {
+          const point = worldPoint(event);
+          setQuickCreate({ source: session.connectorSource, point, screen: screenPoint(event), disableSnapping: event.altKey || Boolean(session.disableSnapping) });
+        }
         setConnectorStart(null);
       }
       setConnectorDragPreview(null);
@@ -2135,7 +2142,7 @@ function NodeView({ node, position, selected, connectorStart, connectorTarget, s
   ];
   return <g className={`canvas-node ${node.container ? 'container-node' : ''} ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''} ${connectorTarget ? 'connector-target' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
     <NodeGraphic node={node} diagramType={diagramType} />
-      {showPorts && <g className="connection-ports">{ports.map((port) => <circle key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset, port.id); }} />)}</g>}
+      {showPorts && <g className="connection-ports">{ports.map((port) => <g key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset, port.id); }}><circle cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} />{!port.fieldPort && <path className="connection-port-glyph" d={`M ${port.x - 2.5} ${port.y} H ${port.x + 2.5} M ${port.x} ${port.y - 2.5} V ${port.y + 2.5}`} />}</g>)}</g>}
      {selected && <g className="node-handles" pointerEvents="all"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" pointerEvents="none" />{resizeHandles.map((handle) => <rect key={handle.id} className="handle" x={handle.x} y={handle.y} width="8" height="8" style={{ cursor: handle.cursor }} onPointerDown={(event) => onResizePointerDown(event, node, handle.id)} />)}</g>}
   </g>;
 }
