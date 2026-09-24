@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compileDiagramIR, detectDiagramCode, importDiagramCode, parseDiagramCode } from './codeImport';
+import { edgeRoute } from './routing';
 
 describe('code to diagram compiler', () => {
   it('parses Mermaid into native flowchart shapes and labeled connectors', () => {
@@ -36,6 +37,101 @@ describe('code to diagram compiler', () => {
     expect((page?.nodes.find((node) => node.data.label === 'booking')?.data.fields as Array<{ foreignKey: boolean }>)[1].foreignKey).toBe(true);
   });
 
+  it('keeps a larger multi-FK schema compact and routes around every table', () => {
+    const source = `
+      CREATE TABLE customer (id BIGINT PRIMARY KEY);
+      CREATE TABLE staff (id BIGINT PRIMARY KEY);
+      CREATE TABLE service_package (id BIGINT PRIMARY KEY);
+      CREATE TABLE booking (
+        id BIGINT PRIMARY KEY,
+        customer_id BIGINT NOT NULL,
+        staff_id BIGINT NOT NULL,
+        package_id BIGINT,
+        FOREIGN KEY (customer_id) REFERENCES customer(id),
+        FOREIGN KEY (staff_id) REFERENCES staff(id),
+        FOREIGN KEY (package_id) REFERENCES service_package(id)
+      );
+      CREATE TABLE transaction_record (
+        id BIGINT PRIMARY KEY,
+        booking_id BIGINT NOT NULL,
+        package_id BIGINT,
+        FOREIGN KEY (booking_id) REFERENCES booking(id),
+        FOREIGN KEY (package_id) REFERENCES service_package(id)
+      );
+      CREATE TABLE payment (
+        id BIGINT PRIMARY KEY,
+        transaction_id BIGINT NOT NULL,
+        FOREIGN KEY (transaction_id) REFERENCES transaction_record(id)
+      );
+      CREATE TABLE employee (
+        id BIGINT PRIMARY KEY,
+        manager_id BIGINT,
+        FOREIGN KEY (manager_id) REFERENCES employee(id)
+      );
+      CREATE TABLE tag (id BIGINT PRIMARY KEY);
+      CREATE TABLE booking_tag (
+        booking_id BIGINT NOT NULL,
+        tag_id BIGINT NOT NULL,
+        PRIMARY KEY (booking_id, tag_id),
+        FOREIGN KEY (booking_id) REFERENCES booking(id),
+        FOREIGN KEY (tag_id) REFERENCES tag(id)
+      );
+      CREATE TABLE organization (
+        org_id BIGINT NOT NULL,
+        region_id BIGINT NOT NULL,
+        PRIMARY KEY (org_id, region_id)
+      );
+      CREATE TABLE branch (
+        org_id BIGINT NOT NULL,
+        region_id BIGINT NOT NULL,
+        branch_id BIGINT NOT NULL,
+        PRIMARY KEY (org_id, region_id, branch_id),
+        FOREIGN KEY (org_id, region_id) REFERENCES organization(org_id, region_id)
+      );
+      CREATE TABLE warehouse (id BIGINT PRIMARY KEY);
+      CREATE TABLE inventory (
+        id BIGINT PRIMARY KEY,
+        warehouse_id BIGINT NOT NULL,
+        package_id BIGINT,
+        FOREIGN KEY (warehouse_id) REFERENCES warehouse(id),
+        FOREIGN KEY (package_id) REFERENCES service_package(id)
+      );
+    `;
+    const result = importDiagramCode(source, 'sql');
+    const page = result.document?.pages[0];
+    expect(result.diagnostics.filter((item) => item.severity === 'error')).toHaveLength(0);
+    expect(page?.nodes).toHaveLength(13);
+    expect(page?.edges).toHaveLength(12);
+
+    const nodes = page?.nodes ?? [];
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    const rootTables = ['customer', 'staff', 'service_package'].map((label) => nodes.find((node) => node.data.label === label));
+    expect(rootTables.every((node) => node && node.position.y < (nodes.find((candidate) => candidate.data.label === 'booking')?.position.y ?? Number.POSITIVE_INFINITY))).toBe(true);
+    const width = Math.max(...nodes.map((node) => node.position.x + node.size.width)) - Math.min(...nodes.map((node) => node.position.x));
+    const height = Math.max(...nodes.map((node) => node.position.y + node.size.height)) - Math.min(...nodes.map((node) => node.position.y));
+    expect(width).toBeGreaterThan(Math.max(...nodes.map((node) => node.size.width)) + 80);
+    expect(width).toBeLessThan(2200);
+    expect(height).toBeLessThan(800);
+
+    const routeEntries: Array<{ points: Array<{ x: number; y: number }> }> = [];
+    page?.edges.forEach((edge) => {
+      const sourceNode = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+      const targetNode = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+      const route = edgeRoute(edge, sourceNode, targetNode, nodes, { otherRoutes: routeEntries.map((entry) => entry.points) });
+      routeEntries.push({ points: route });
+      expect(route.length).toBeGreaterThanOrEqual(2);
+      expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
+      nodes.filter((node) => node.id !== sourceNode?.id && node.id !== targetNode?.id).forEach((node) => {
+        expect(route.slice(0, -1).some((point, index) => segmentCrossesNode(point, route[index + 1], node)), `${sourceNode?.data.label}->${targetNode?.data.label} crosses ${node.data.label}: ${JSON.stringify(route)}`).toBe(false);
+      });
+    });
+
+    const employee = nodes.find((node) => node.data.label === 'employee');
+    const selfReference = page?.edges.find((edge) => edge.source.nodeId === employee?.id && edge.target.nodeId === employee?.id);
+    expect(selfReference).toBeDefined();
+    expect((employee?.data.fields as Array<{ name: string; reference?: unknown }>).find((field) => field.name === 'manager_id')?.reference).toBeDefined();
+  });
+
   it('supports DBML, DOT, PlantUML, JSON, and CSV adapters', () => {
     const samples = [
       ['dbml', 'Table users {\n id int [pk]\n}\nTable posts {\n user_id int [ref: > users.id]\n}'] as const,
@@ -70,3 +166,9 @@ describe('code to diagram compiler', () => {
     expect(document.pages[0].nodes[0].position).toEqual({ x: 40, y: 50 });
   });
 });
+
+function segmentCrossesNode(start: { x: number; y: number }, end: { x: number; y: number }, node: { position: { x: number; y: number }; size: { width: number; height: number } }): boolean {
+  if (start.y === end.y) return start.y > node.position.y && start.y < node.position.y + node.size.height && Math.max(start.x, end.x) > node.position.x && Math.min(start.x, end.x) < node.position.x + node.size.width;
+  if (start.x === end.x) return start.x > node.position.x && start.x < node.position.x + node.size.width && Math.max(start.y, end.y) > node.position.y && Math.min(start.y, end.y) < node.position.y + node.size.height;
+  return true;
+}

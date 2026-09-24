@@ -638,7 +638,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
         height: Math.max(...fitNodes.map((node) => node.position.y + node.size.height)) - Math.min(...fitNodes.map((node) => node.position.y)),
       }
       : { x: -page.settings.width / 2, y: -page.settings.height / 2, width: page.settings.width, height: page.settings.height };
-    const padding = 72;
+    const padding = scope === 'content' ? 36 : 72;
     const zoom = Math.min(3, Math.max(MIN_ZOOM, Math.min((size.width - padding * 2) / Math.max(1, bounds.width), (size.height - padding * 2) / Math.max(1, bounds.height))));
     updateViewport({ zoom, x: -(bounds.x + bounds.width / 2), y: -(bounds.y + bounds.height / 2) });
   }, [page, selectedIds, size.height, size.width, updateViewport]);
@@ -2237,9 +2237,10 @@ function edgeCardinality(edge: DiagramEdge): { start: string; end: string } | nu
 function EdgeCardinalityLabel({ point, neighbor, value, edge }: { point: Point; neighbor: Point; value: string; edge: DiagramEdge }) {
   const direction = directionBetween(point, neighbor);
   const horizontal = Math.abs(direction.x) >= Math.abs(direction.y);
+  const along = 30;
   const position = horizontal
-    ? { x: point.x + direction.x * 22, y: point.y - 10 }
-    : { x: point.x + 11, y: point.y + direction.y * 22 + 4 };
+    ? { x: point.x + direction.x * along, y: point.y - 12 }
+    : { x: point.x + 14, y: point.y + direction.y * along + 4 };
   const textAnchor = horizontal && direction.x < 0 ? 'end' : 'start';
   return <text className="edge-cardinality" x={position.x} y={position.y} textAnchor={textAnchor} style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{value}</text>;
 }

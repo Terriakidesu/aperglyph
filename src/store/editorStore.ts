@@ -48,7 +48,7 @@ import { createDocument, createEdge, createNode, createPage as buildPage, defaul
 import { editorEvents } from '../core/events';
 import type { Alignment, DistributionAxis, ImportedPageMode, ZOrderAction } from '../core/commands';
 import type { DocumentCommand } from '../core/commands';
-import { layoutNodes } from '../core/layout';
+import { layoutErdNodes, layoutNodes } from '../core/layout';
 import type { LayoutMode } from '../core/layout';
 import { LayoutWorkerClient } from '../spatial/layoutClient';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset, ToolId, Viewport } from '../core/types';
@@ -629,10 +629,17 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       const selected = page.nodes.filter((node) => selectedIds.includes(node.id));
       const targets = selected.length > 1 ? selected : page.nodes;
       let positions: Record<string, Point>;
-      try {
-        positions = await layoutClient.layout(targets, page.edges, mode);
-      } catch {
-        positions = layoutNodes(targets, page.edges, mode);
+      const useErdLayout = document.diagramType === 'erd'
+        && targets.every((node) => node.type === 'entity')
+        && ['hierarchical', 'dag', 'horizontal', 'vertical', 'tree'].includes(mode);
+      if (useErdLayout) {
+        positions = layoutErdNodes(targets, page.edges, mode === 'horizontal' ? 'horizontal' : 'vertical');
+      } else {
+        try {
+          positions = await layoutClient.layout(targets, page.edges, mode);
+        } catch {
+          positions = layoutNodes(targets, page.edges, mode);
+        }
       }
       if (Object.keys(positions).length === 0) return;
       const current = get();

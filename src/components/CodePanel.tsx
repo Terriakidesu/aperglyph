@@ -5,7 +5,7 @@ import type { CodeLanguage, IRDiagnostic } from '../core/diagramIR';
 import type { ImportedPageMode } from '../core/commands';
 import { editorEvents } from '../core/events';
 import { useEditorStore } from '../store/editorStore';
-import { edgeRoute, edgeRouting, pointsToPath } from '../core/routing';
+import { edgeRoute, edgeRouting, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
 import type { DiagramDocument, DiagramEdge, DiagramNode, Point } from '../core/types';
 import { NodeGraphic } from './NodeGraphic';
 import { LeftDockHeader, type LeftPanelId } from './DockHeader';
@@ -168,16 +168,27 @@ function CodePreview({ document, language }: { document: DiagramDocument | null;
   const nodes = page?.nodes.filter((node) => !node.hidden).sort((left, right) => (left.zIndex ?? 0) - (right.zIndex ?? 0)) ?? [];
   const edges = page?.edges ?? [];
   if (!page || nodes.length === 0) return <div className="code-preview-empty"><Info size={18} /><span>The source is valid, but it does not contain drawable objects yet.</span></div>;
-  const bounds = previewBounds(nodes);
-  return <div className="code-preview-stage"><svg className="code-preview-svg" viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} role="img" aria-label={`${codeLanguageLabel(language)} generated diagram preview`}><g className="code-preview-edge-layer">{edges.map((edge) => { const source = edge.source.nodeId ? nodes.find((node) => node.id === edge.source.nodeId) : undefined; const target = edge.target.nodeId ? nodes.find((node) => node.id === edge.target.nodeId) : undefined; const route = edgeRoute(edge, source, target, nodes); if (route.length < 2) return null; const path = pointsToPath(route, [], edgeRouting(edge) === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0); const middle = route[Math.floor(route.length / 2)] ?? route[0]; return <g key={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity=".65" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} opacity={edge.style.opacity ?? 1} />{typeof edge.data.label === 'string' && edge.data.relationship !== 'foreign-key' && <text x={middle.x} y={middle.y - 7} className="code-preview-edge-label" textAnchor="middle">{edge.data.label}</text>}</g>; })}</g><g className="code-preview-node-layer">{nodes.map((node) => <g key={node.id} transform={`translate(${node.position.x} ${node.position.y})`}><NodeGraphic node={node} diagramType={document.diagramType} /></g>)}</g></svg></div>;
+  const routes: Array<{ edge: DiagramEdge; points: Point[] }> = [];
+  edges.forEach((edge) => {
+    const source = edge.source.nodeId ? nodes.find((node) => node.id === edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodes.find((node) => node.id === edge.target.nodeId) : undefined;
+    const offset = parallelEdgeOffset(edge, edges);
+    const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
+    routes.push({ edge, points: edgeRoute(routedEdge, source, target, nodes, {
+      otherRoutes: routes.map((entry) => entry.points),
+      lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
+    }) });
+  });
+  const bounds = previewBounds(nodes, routes.flatMap((entry) => entry.points));
+  return <div className="code-preview-stage"><svg className="code-preview-svg" viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} role="img" aria-label={`${codeLanguageLabel(language)} generated diagram preview`}><g className="code-preview-edge-layer">{routes.map(({ edge, points }) => { if (points.length < 2) return null; const path = pointsToPath(points, [], edgeRouting(edge) === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0); const middle = points[Math.floor(points.length / 2)] ?? points[0]; return <g key={edge.id}><path d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity=".65" /><path d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} opacity={edge.style.opacity ?? 1} />{typeof edge.data.label === 'string' && edge.data.relationship !== 'foreign-key' && <text x={middle.x} y={middle.y - 7} className="code-preview-edge-label" textAnchor="middle">{edge.data.label}</text>}</g>; })}</g><g className="code-preview-node-layer">{nodes.map((node) => <g key={node.id} transform={`translate(${node.position.x} ${node.position.y})`}><NodeGraphic node={node} diagramType={document.diagramType} /></g>)}</g></svg></div>;
 }
 
-function previewBounds(nodes: DiagramNode[]): { x: number; y: number; width: number; height: number } {
+function previewBounds(nodes: DiagramNode[], routePoints: Point[] = []): { x: number; y: number; width: number; height: number } {
   const padding = 64;
-  const minX = Math.min(...nodes.map((node) => node.position.x));
-  const minY = Math.min(...nodes.map((node) => node.position.y));
-  const maxX = Math.max(...nodes.map((node) => node.position.x + node.size.width));
-  const maxY = Math.max(...nodes.map((node) => node.position.y + node.size.height));
+  const minX = Math.min(...nodes.map((node) => node.position.x), ...routePoints.map((point) => point.x));
+  const minY = Math.min(...nodes.map((node) => node.position.y), ...routePoints.map((point) => point.y));
+  const maxX = Math.max(...nodes.map((node) => node.position.x + node.size.width), ...routePoints.map((point) => point.x));
+  const maxY = Math.max(...nodes.map((node) => node.position.y + node.size.height), ...routePoints.map((point) => point.y));
   return { x: minX - padding, y: minY - padding, width: Math.max(240, maxX - minX + padding * 2), height: Math.max(180, maxY - minY + padding * 2) };
 }
 

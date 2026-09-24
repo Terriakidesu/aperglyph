@@ -239,26 +239,31 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
   const outlineOnly = options.outlineOnly === true;
   const exportBackground = outlineOnly ? '#ffffff' : background;
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const routeEntries = edges
-    .filter((edge) => edgeRouting(edge) === 'orthogonal')
-    .map((edge) => {
-      const offset = parallelEdgeOffset(edge, edges);
-      const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
-      return {
-        id: edge.id,
-        points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
-          lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
-        }),
-        crossingPriority: edge.routing?.crossingPriority ?? 0,
-      };
+  const edgeMap = new Map(edges.map((edge) => [edge.id, edge]));
+  const routeEntries: Array<{ id: string; points: Point[]; crossingPriority?: number }> = [];
+  edges.forEach((edge) => {
+    const offset = parallelEdgeOffset(edge, edges);
+    const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
+    routeEntries.push({
+      id: edge.id,
+      points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
+        otherRoutes: routeEntries.map((entry) => entry.points),
+        lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
+      }),
+      crossingPriority: edge.routing?.crossingPriority ?? 0,
     });
-  const routeJumps = calculateRouteJumps(routeEntries);
+  });
+  const routeJumps = calculateRouteJumps(routeEntries.filter((entry) => {
+    const edge = edgeMap.get(entry.id);
+    return edge ? edgeRouting(edge) === 'orthogonal' : false;
+  }));
+  const routeById = new Map(routeEntries.map((entry) => [entry.id, entry.points]));
   const edgeMarkup = edges.map((edge) => {
     const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
     const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
     const offset = parallelEdgeOffset(edge, edges);
     const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
-    const route = edgeRoute(routedEdge, source, target, nodes, {
+    const route = routeById.get(edge.id) ?? edgeRoute(routedEdge, source, target, nodes, {
       lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
     });
     if (route.length < 2) return '';
@@ -345,8 +350,8 @@ function svgEdgeCardinality(edge: DiagramEdge): { start: string; end: string } |
 function svgCardinalityLabel(point: Point, neighbor: Point, value: string, edge: DiagramEdge, outlineOnly: boolean): string {
   const direction = directionBetween(point, neighbor);
   const horizontal = Math.abs(direction.x) >= Math.abs(direction.y);
-  const x = horizontal ? point.x + direction.x * 22 : point.x + 11;
-  const y = horizontal ? point.y - 10 : point.y + direction.y * 22 + 4;
+  const x = horizontal ? point.x + direction.x * 30 : point.x + 14;
+  const y = horizontal ? point.y - 12 : point.y + direction.y * 30 + 4;
   const anchor = horizontal && direction.x < 0 ? 'end' : 'start';
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${escapeXml(outlineOnly ? '#000000' : edge.style.labelColor)}" font-family="monospace" font-size="9" font-weight="600" opacity="${edge.style.opacity ?? 1}">${escapeXml(value)}</text>`;
 }

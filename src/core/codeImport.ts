@@ -1,6 +1,6 @@
 import { createDocument, createEdge, createNode, defaultEdgeStyle } from './document';
 import { entityAutoHeight, entityAutoWidth, entityFieldPortOffset, normalizeEntityFields, type EntityField } from './erd';
-import { layoutNodes } from './layout';
+import { layoutErdNodes, layoutNodes } from './layout';
 import { parseErdSql } from './erdSql';
 import { nodeCenter } from './geometry';
 import type { DiagramDocument, DiagramEdge, DiagramNode, DiagramType, NodeStyle, Point, Size } from './types';
@@ -192,12 +192,9 @@ export function compileDiagramIR(ir: DiagramIR, options: CompileOptions = {}): D
 
   const shouldLayout = options.layout !== false && !(options.preserveLayout || ir.metadata?.preserveLayout === true);
   if (shouldLayout && normalNodes.length > 0) {
-    const layoutEdges = ir.type === 'erd'
-      ? importedEdges.map((edge) => edge.data.relationship === 'foreign-key'
-        ? { ...edge, source: edge.target, target: edge.source }
-        : edge)
-      : importedEdges;
-    const positions = layoutNodes(normalNodes, layoutEdges, layoutModeForDirection(ir.direction));
+    const positions = ir.type === 'erd'
+      ? layoutErdNodes(normalNodes, importedEdges, ir.direction === 'LR' || ir.direction === 'RL' ? 'horizontal' : 'vertical')
+      : layoutNodes(normalNodes, importedEdges, layoutModeForDirection(ir.direction));
     const reversed = reverseLayout(positions, normalNodes, ir.direction);
     const margin = 84;
     normalNodes.forEach((node) => {

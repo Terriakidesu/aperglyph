@@ -99,6 +99,26 @@ describe('connector routing', () => {
     expect(route.some((point) => point.y !== route[0].y)).toBe(true);
   });
 
+  it('uses a nearby corridor for a second ERD relationship into an upper table', () => {
+    const field = (id: string, name: string) => ({ id, name, type: 'bigint', primaryKey: name === 'id', foreignKey: name !== 'id', unique: false, nullable: false });
+    const booking = createNode('entity', { x: -26, y: 181 }, { size: { width: 220, height: 142 }, data: { fields: [field('b0', 'id'), field('b1', 'customer_id'), field('b2', 'staff_id'), field('b3', 'package_id')] } });
+    const transaction = createNode('entity', { x: -26, y: 359 }, { size: { width: 220, height: 115 }, data: { fields: [field('t0', 'id'), field('t1', 'booking_id'), field('t2', 'package_id')] } });
+    const customer = createNode('entity', { x: -298, y: 84 }, { size: { width: 220, height: 61 }, data: { fields: [field('c0', 'id')] } });
+    const staff = createNode('entity', { x: -26, y: 84 }, { size: { width: 220, height: 61 }, data: { fields: [field('s0', 'id')] } });
+    const service = createNode('entity', { x: 246, y: 84 }, { size: { width: 220, height: 61 }, data: { fields: [field('p0', 'id')] } });
+    const payment = createNode('entity', { x: -26, y: 510 }, { size: { width: 220, height: 88 } });
+    const edge = createEdge({ nodeId: transaction.id, port: 'right', anchorId: 'field-2-right', offset: 0.88 }, { nodeId: service.id, port: 'left', anchorId: 'field-0-left', offset: 0.5 }, { type: 'relationship', routing: { mode: 'auto' }, data: { relationship: 'foreign-key' } });
+    const route = edgeRoute(edge, transaction, service, [customer, staff, service, booking, transaction, payment], {
+      otherRoutes: [
+        [{ x: -26, y: 255.5 }, { x: -50, y: 255.5 }, { x: -50, y: 165 }, { x: -54, y: 165 }, { x: -54, y: 131.5 }, { x: -78, y: 131.5 }],
+        [{ x: 194, y: 282.5 }, { x: 218, y: 282.5 }, { x: 218, y: 131.5 }, { x: 194, y: 131.5 }],
+        [{ x: 194, y: 309.5 }, { x: 220, y: 309.5 }, { x: 220, y: 339 }, { x: 222, y: 339 }, { x: 222, y: 131.5 }, { x: 246, y: 131.5 }],
+        [{ x: 194, y: 433.5 }, { x: 222, y: 433.5 }, { x: 222, y: 228.5 }, { x: 194, y: 228.5 }],
+      ],
+    });
+    expect(Math.max(...route.map((point) => point.x)), JSON.stringify(route)).toBeLessThan(320);
+  });
+
   it('uses the previous route as a stability preference when it remains clear', () => {
     const source = createNode('rectangle', { x: 0, y: 0 });
     const target = createNode('rectangle', { x: 300, y: 180 });
