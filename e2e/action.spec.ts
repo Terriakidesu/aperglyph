@@ -163,6 +163,12 @@ test.describe('diagram editing workflow', () => {
     await expect.poll(() => root.getAttribute('transform')).not.toBe(beforePan);
     await expect(page.getByLabel('Zoom percentage')).toHaveText(beforeZoom ?? '100%');
 
+    const pinchPrevented = await canvas.evaluate((element, point) => {
+      const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: point.clientX, clientY: point.clientY });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, { clientX, clientY });
+    expect(pinchPrevented).toBe(true);
     await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX, clientY });
     await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
   });

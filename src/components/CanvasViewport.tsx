@@ -483,6 +483,14 @@ export function CanvasViewport({ onImportFile, view = DEFAULT_CANVAS_VIEW }: Can
   }, []);
 
   useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const preventBrowserWheelAction = (event: WheelEvent) => event.preventDefault();
+    stage.addEventListener('wheel', preventBrowserWheelAction, { capture: true, passive: false });
+    return () => stage.removeEventListener('wheel', preventBrowserWheelAction, true);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Space' && !event.repeat) setSpacePressed(true);
     };
