@@ -222,6 +222,20 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'Done' }).click();
   });
 
+  test('matches multi-selection dimensions through the arrange inspector', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const rectangle = page.getByTitle('Drag Rectangle onto the canvas');
+    await rectangle.click();
+    await page.getByLabel('Node width').fill('260');
+    await rectangle.click();
+    await page.locator('svg.diagram-canvas').click({ position: { x: 640, y: 520 } });
+    await page.keyboard.press('Control+a');
+    await expect(page.getByTitle('Match selected widths')).toBeVisible();
+    await page.getByTitle('Match selected widths').click();
+    const widths = await page.locator('[data-node-id]').evaluateAll((nodes) => nodes.map((node) => node.querySelector(':scope > rect')?.getAttribute('width')));
+    expect(new Set(widths).size).toBe(1);
+  });
+
   test('makes editor controls discoverable and keyboard accessible', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     const selectTool = page.getByRole('button', { name: 'Select tool' });

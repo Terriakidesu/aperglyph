@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument, createEdge, createNode, serializeProject } from '../core/document';
-import { documentToSvg, sanitizeSvg } from './files';
+import { contentBounds, documentToSvg, pageExportBounds, sanitizeSvg } from './files';
 
 describe('native file helpers', () => {
   it('produces a self-contained SVG scene', () => {
@@ -9,6 +9,15 @@ describe('native file helpers', () => {
     const svg = documentToSvg(document.pages[0].nodes, [], '#10131c', 800, 600);
     expect(svg).toContain('<svg');
     expect(svg).toContain('>rectangle</text>');
+  });
+
+  it('uses the centered canvas page coordinates for full-page export bounds', () => {
+    expect(pageExportBounds(1600, 1000)).toEqual({ x: -800, y: -500, width: 1600, height: 1000 });
+    expect(contentBounds([], [], 1600, 1000)).toEqual(pageExportBounds(1600, 1000));
+    const node = createNode('rectangle', { x: -90, y: -44 });
+    const svg = documentToSvg([node], [], '#10131c', 1600, 1000, { viewBox: pageExportBounds(1600, 1000) });
+    expect(svg).toContain('viewBox="-800 -500 1600 1000"');
+    expect(svg).toContain('translate(-90 -44)');
   });
 
   it('exports an ink-saving outline-only SVG suitable for printing', () => {

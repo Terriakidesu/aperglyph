@@ -49,7 +49,7 @@ export function downloadSvg(document: DiagramDocument, pageId = document.pages[0
 
 function downloadSvgPage(document: DiagramDocument, page: DiagramDocument['pages'][number], options: Omit<ExportOptions, 'pageId' | 'scale'>, suffix = ''): void {
   const scene = exportScene(page, options.selectionIds);
-  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : pageExportBounds(page.settings.width, page.settings.height);
   const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { ...options, viewBox: bounds });
   downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safeFilename(document.name)}${suffix}.svg`);
 }
@@ -59,7 +59,7 @@ export async function downloadPng(document: DiagramDocument, options: ExportOpti
   const scale = options.scale ?? 2;
   for (const [index, page] of pages.entries()) {
     const scene = exportScene(page, options.selectionIds);
-    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : pageExportBounds(page.settings.width, page.settings.height);
     const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * scale), Math.round(bounds.height * scale));
     const suffix = pages.length > 1 ? `-${index + 1}-${safeFilename(page.name)}` : '';
@@ -73,7 +73,7 @@ export async function downloadPdf(document: DiagramDocument, options: ExportOpti
   const pages = options.pageId ? document.pages.filter((page) => page.id === options.pageId) : document.pages;
   for (const page of pages) {
     const scene = exportScene(page, options.selectionIds);
-    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+    const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : pageExportBounds(page.settings.width, page.settings.height);
     const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: options.transparent, outlineOnly: options.outlineOnly, viewBox: bounds });
     const png = await renderSvgToPng(svg, Math.round(bounds.width * (options.scale ?? 2)), Math.round(bounds.height * (options.scale ?? 2)));
     const image = await pdf.embedPng(await png.arrayBuffer());
@@ -91,7 +91,7 @@ export function printDocument(document: DiagramDocument, options: ExportOptions 
   const page = document.pages.find((candidate) => candidate.id === (options.pageId ?? document.pages[0]?.id)) ?? document.pages[0];
   if (!page) return;
   const scene = exportScene(page, options.selectionIds);
-  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : { x: 0, y: 0, width: page.settings.width, height: page.settings.height };
+  const bounds = options.contentBounds ? contentBounds(scene.nodes, scene.edges, page.settings.width, page.settings.height, options.padding ?? 32) : pageExportBounds(page.settings.width, page.settings.height);
   const svg = documentToSvg(scene.nodes, scene.edges, page.settings.background, bounds.width, bounds.height, { transparent: false, outlineOnly: options.outlineOnly ?? true, viewBox: bounds });
   const printWindow = globalThis.window?.open('', '_blank');
   if (!printWindow) {
@@ -428,13 +428,17 @@ function exportScene(page: { nodes: DiagramNode[]; edges: DiagramEdge[] }, selec
   return { nodes, edges };
 }
 
-function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number, padding = 32): { x: number; y: number; width: number; height: number } {
+export function pageExportBounds(pageWidth: number, pageHeight: number): { x: number; y: number; width: number; height: number } {
+  return { x: -pageWidth / 2, y: -pageHeight / 2, width: pageWidth, height: pageHeight };
+}
+
+export function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWidth: number, pageHeight: number, padding = 32): { x: number; y: number; width: number; height: number } {
   const points = [
     ...nodes.flatMap((node) => [node.position, { x: node.position.x + node.size.width, y: node.position.y + node.size.height }]),
     ...edges.flatMap((edge) => [edge.source.point, edge.target.point].filter((point): point is Point => Boolean(point))),
     ...edges.flatMap((edge) => edge.waypoints),
   ];
-  if (points.length === 0) return { x: 0, y: 0, width: pageWidth, height: pageHeight };
+  if (points.length === 0) return pageExportBounds(pageWidth, pageHeight);
   const minX = Math.min(...points.map((point) => point.x)) - padding;
   const minY = Math.min(...points.map((point) => point.y)) - padding;
   const maxX = Math.max(...points.map((point) => point.x)) + padding;

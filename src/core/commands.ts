@@ -596,6 +596,51 @@ export class RotateNodesCommand implements DocumentCommand {
   }
 }
 
+export type NodeSizeMatchAxis = 'width' | 'height' | 'both';
+
+export class MatchNodeSizeCommand implements DocumentCommand {
+  readonly label: string;
+  constructor(private readonly pageId: string, private readonly nodeIds: string[], private readonly referenceId: string, private readonly axis: NodeSizeMatchAxis) {
+    this.label = this.axis === 'both' ? 'Match selection size' : `Match selection ${this.axis}`;
+  }
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const page = getPage(next, this.pageId);
+    const reference = page?.nodes.find((node) => node.id === this.referenceId);
+    if (!page || !reference) return next;
+    const ids = new Set(this.nodeIds);
+    page.nodes = page.nodes.map((node) => {
+      if (!ids.has(node.id) || node.id === reference.id || node.locked) return node;
+      return {
+        ...node,
+        size: {
+          width: this.axis === 'height' ? node.size.width : reference.size.width,
+          height: this.axis === 'width' ? node.size.height : reference.size.height,
+        },
+      };
+    });
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
+export class ResetNodeRotationCommand implements DocumentCommand {
+  readonly label = 'Reset rotation';
+  constructor(private readonly pageId: string, private readonly nodeIds: string[]) {}
+
+  execute(document: DiagramDocument): DiagramDocument {
+    const next = cloneDocument(document);
+    const ids = new Set(this.nodeIds);
+    next.pages = next.pages.map((page) => page.id !== this.pageId ? page : {
+      ...page,
+      nodes: page.nodes.map((node) => ids.has(node.id) && !node.locked ? { ...node, rotation: 0 } : node),
+    });
+    next.updatedAt = Date.now();
+    return next;
+  }
+}
+
 export class AlignNodesCommand implements DocumentCommand {
   readonly label: string;
   constructor(private readonly pageId: string, private readonly nodeIds: string[], private readonly alignment: Alignment) {

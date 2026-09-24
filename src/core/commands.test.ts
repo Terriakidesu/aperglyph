@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, FitNodesToTextCommand, GroupNodesCommand, LayoutNodesCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, UpdateShapeDefaultsCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
+import { AlignNodesCommand, ChangeNodeShapeCommand, CommandManager, CreateEdgeCommand, CreateNodeAndEdgeCommand, CreateNodeCommand, CreatePageCommand, DeleteNodesCommand, DistributeNodesCommand, DuplicateSelectionCommand, FitNodesToTextCommand, GroupNodesCommand, LayoutNodesCommand, MatchNodeSizeCommand, MoveNodesCommand, RenamePageCommand, ResetEdgeCommand, ResetNodeRotationCommand, ReorderNodesCommand, RotateNodesCommand, SetZOrderCommand, UngroupNodesCommand, UpdateEdgeCommand, UpdateNodesCommand, UpdatePageDataCommand, UpdatePageGuidesCommand, UpdateShapeDefaultsCommand, clipboardBounds, inferDuplicateOffset, parseClipboardPayload, selectionClipboard, offsetClipboard, serializeClipboardPayload } from './commands';
 import { createDocument, createEdge, createNode, createPage } from './document';
 import { edgeRoute } from './routing';
 
@@ -242,6 +242,22 @@ describe('command history', () => {
     const fitted = new CommandManager().execute(new FitNodesToTextCommand(pageId, [node.id]), document);
     expect(fitted.pages[0].nodes[0].size.height).toBeLessThan(220);
     expect(fitted.pages[0].nodes[0].size.height).toBeGreaterThanOrEqual(32);
+  });
+
+  it('matches selected dimensions to the primary node and resets rotation', () => {
+    const document = createDocument();
+    const pageId = document.pages[0].id;
+    const reference = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 240, height: 96 } });
+    const other = createNode('ellipse', { x: 300, y: 0 }, { size: { width: 84, height: 180 } });
+    other.rotation = 135;
+    document.pages[0].nodes.push(reference, other);
+    const manager = new CommandManager();
+    const matchedWidth = manager.execute(new MatchNodeSizeCommand(pageId, [reference.id, other.id], reference.id, 'width'), document);
+    expect(matchedWidth.pages[0].nodes.find((node) => node.id === other.id)?.size).toEqual({ width: 240, height: 180 });
+    const matchedAll = manager.execute(new MatchNodeSizeCommand(pageId, [reference.id, other.id], reference.id, 'both'), matchedWidth);
+    expect(matchedAll.pages[0].nodes.find((node) => node.id === other.id)?.size).toEqual({ width: 240, height: 96 });
+    const reset = manager.execute(new ResetNodeRotationCommand(pageId, [other.id]), matchedAll);
+    expect(reset.pages[0].nodes.find((node) => node.id === other.id)?.rotation).toBe(0);
   });
 
   it('duplicates, aligns, distributes, rotates, and reorders selection geometry', () => {

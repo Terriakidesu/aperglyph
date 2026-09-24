@@ -49,6 +49,8 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const ungroupSelection = useEditorStore((state) => state.ungroupSelection);
   const nudgeSelection = useEditorStore((state) => state.nudgeSelection);
   const fitSelectionToText = useEditorStore((state) => state.fitSelectionToText);
+  const matchSelectionSize = useEditorStore((state) => state.matchSelectionSize);
+  const resetSelectionRotation = useEditorStore((state) => state.resetSelectionRotation);
   const addNode = useEditorStore((state) => state.createNode);
   const createPage = useEditorStore((state) => state.createPage);
   const autoLayout = useEditorStore((state) => state.autoLayout);
@@ -90,6 +92,10 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'reset-connector', label: 'Reset connector route', hint: 'Selection', run: () => resetEdge() },
     { id: 'duplicate', label: 'Duplicate selection', hint: 'Selection', shortcut: '⌘D', run: () => duplicateSelection() },
     { id: 'fit-text', label: 'Fit shapes to text', hint: 'Arrange', run: () => fitSelectionToText() },
+    { id: 'match-width', label: 'Match selection width', hint: 'Arrange', run: () => matchSelectionSize('width') },
+    { id: 'match-height', label: 'Match selection height', hint: 'Arrange', run: () => matchSelectionSize('height') },
+    { id: 'match-size', label: 'Match selection size', hint: 'Arrange', run: () => matchSelectionSize('both') },
+    { id: 'reset-rotation', label: 'Reset selection rotation', hint: 'Arrange', run: () => resetSelectionRotation() },
     { id: 'select-connectors', label: 'Select all connectors', hint: 'Selection', run: () => selectAllConnectors() },
     { id: 'select-same-type', label: 'Select same shape type', hint: 'Selection', run: () => selectSameType() },
     { id: 'select-connected', label: 'Select connected objects', hint: 'Selection', run: () => selectConnected() },
@@ -310,7 +316,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, groupSelection, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
+    }, [clearFormatPainter, copySelection, cutSelection, deleteSelection, duplicateSelection, fitSelectionToText, groupSelection, matchSelectionSize, nudgeSelection, page?.nodes, page?.settings.gridSize, page?.settings.snapToGrid, pasteClipboardAt, pastePayload, pastePayloadAt, primarySelectedId, redo, resetSelectionRotation, rotateSelection, selectAll, selectAllConnectors, selectConnected, selectDescendants, selectSameType, selectedIds, setTool, ungroupSelection, undo]);
 
   useEffect(() => {
     const unsubscribeShortcuts = editorEvents.on('ui:shortcuts', () => setShowShortcuts(true));

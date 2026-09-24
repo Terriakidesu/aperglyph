@@ -16,6 +16,7 @@ import {
   FitNodesToTextCommand,
   GroupNodesCommand,
   LayoutNodesCommand,
+  MatchNodeSizeCommand,
   MoveNodesCommand,
   RenamePageCommand,
   ReorderPageCommand,
@@ -23,6 +24,7 @@ import {
   ResetEdgeCommand,
   ReorderNodesCommand,
   RotateNodesCommand,
+  ResetNodeRotationCommand,
   SetZOrderCommand,
   UngroupNodesCommand,
   UpdateEdgeCommand,
@@ -83,6 +85,8 @@ interface EditorStore {
   reorderNodes: (nodeIds: string[], targetId: string) => void;
   nudgeSelection: (delta: Point) => void;
   fitSelectionToText: () => void;
+  matchSelectionSize: (axis: 'width' | 'height' | 'both') => void;
+  resetSelectionRotation: () => void;
   updateNode: (nodeId: string, changes: NodePatch, label?: string) => void;
   updateNodes: (nodeIds: string[], changes: NodePatch, label?: string) => void;
   copyStyle: () => void;
@@ -307,6 +311,23 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (nodeIds.length === 0) return;
       const next = manager.execute(new FitNodesToTextCommand(activePageId, nodeIds), document);
       updateDocument(next, 'Fit shapes to text');
+    },
+    matchSelectionSize: (axis) => {
+      const { activePageId, document, primarySelectedId, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const nodeIds = selectedIds.filter((id) => page?.nodes.some((node) => node.id === id));
+      const referenceId = primarySelectedId && nodeIds.includes(primarySelectedId) ? primarySelectedId : nodeIds[0];
+      if (!referenceId || nodeIds.length < 2) return;
+      const next = manager.execute(new MatchNodeSizeCommand(activePageId, nodeIds, referenceId, axis), document);
+      updateDocument(next, axis === 'both' ? 'Match selection size' : `Match selection ${axis}`);
+    },
+    resetSelectionRotation: () => {
+      const { activePageId, document, selectedIds } = get();
+      const page = getActivePage(document, activePageId);
+      const nodeIds = selectedIds.filter((id) => page?.nodes.some((node) => node.id === id));
+      if (nodeIds.length === 0) return;
+      const next = manager.execute(new ResetNodeRotationCommand(activePageId, nodeIds), document);
+      updateDocument(next, 'Reset rotation');
     },
     updateNode: (nodeId, changes, label) => {
       const { activePageId, document } = get();
