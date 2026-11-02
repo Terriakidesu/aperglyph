@@ -136,8 +136,8 @@ export function layoutErdNodes(nodes: DiagramNode[], edges: DiagramEdge[], direc
 
   const maxWidth = Math.max(...nodes.map((node) => node.size.width));
   const maxHeight = Math.max(...nodes.map((node) => node.size.height));
-  const crossGap = Math.max(52, Math.min(92, maxWidth * 0.22));
-  const layerGap = Math.max(36, Math.min(58, maxHeight * 0.2));
+  const crossGap = Math.max(48, Math.min(72, maxWidth * 0.18));
+  const layerGap = Math.max(30, Math.min(48, maxHeight * 0.16));
   const positions: Record<string, Point> = {};
   let layerOffset = 0;
 

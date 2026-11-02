@@ -18,14 +18,14 @@ describe('ERD semantic model', () => {
   });
 
   it('fits an entity to its current row count', () => {
-    expect(entityAutoHeight(['id · uuid', 'name · varchar'])).toBe(88);
-    expect(entityAutoHeight(['id · uuid', 'name · varchar', 'created · date'])).toBe(115);
-    expect(entityAutoHeight([])).toBe(61);
+    expect(entityAutoHeight(['id · uuid', 'name · varchar'])).toBe(80);
+    expect(entityAutoHeight(['id · uuid', 'name · varchar', 'created · date'])).toBe(105);
+    expect(entityAutoHeight([])).toBe(55);
   });
 
   it('provides a usable minimum size for each table layout', () => {
-    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field')).toEqual({ width: 120, height: 88 });
-    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field-type-nullability', true)).toEqual({ width: 222, height: 109 });
+    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field')).toEqual({ width: 120, height: 80 });
+    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field-type-nullability', true)).toEqual({ width: 222, height: 101 });
   });
 
   it('supports selectable entity column variants and row anchors', () => {
@@ -36,8 +36,8 @@ describe('ERD semantic model', () => {
     expect(entityFieldValue(field, 'key')).toBe('PK');
     expect(entityFieldValue(field, 'field')).toBe('id');
     expect(entityFieldValue(field, 'type')).toBe('uuid');
-    expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(74.5 / 88);
-    expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(109);
+    expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(67.5 / 80);
+    expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(101);
   });
 
   it('shows all key markers together and accepts UK as a unique-field shorthand', () => {
@@ -50,14 +50,14 @@ describe('ERD semantic model', () => {
 
   it('distributes extra resized height across field rows and anchors', () => {
     const metrics = entityLayoutMetrics(['id · uuid', 'name · varchar', 'created · date'], 300);
-    expect(metrics.fieldTop).toBe(34);
-    expect(metrics.rowHeight).toBeCloseTo(266 / 3);
+    expect(metrics.fieldTop).toBe(30);
+    expect(metrics.rowHeight).toBeCloseTo(270 / 3);
     expect(metrics.fieldTop + metrics.rowHeight * metrics.fieldCount).toBeCloseTo(300);
-    expect(entityFieldPortOffset(['id · uuid', 'name · varchar', 'created · date'], 1, false, 300)).toBeCloseTo((34 + metrics.rowHeight * 1.5) / 300);
+    expect(entityFieldPortOffset(['id · uuid', 'name · varchar', 'created · date'], 1, false, 300)).toBeCloseTo((30 + metrics.rowHeight * 1.5) / 300);
 
     const headings = entityLayoutMetrics(['id · uuid'], 150, true);
-    expect(headings.fieldTop).toBe(55);
-    expect(headings.rowHeight).toBe(95);
+    expect(headings.fieldTop).toBe(51);
+    expect(headings.rowHeight).toBe(99);
   });
 
   it('parses pasted attributes with compact flags', () => {

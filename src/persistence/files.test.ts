@@ -153,7 +153,7 @@ describe('native file helpers', () => {
     expect(svg).toContain('>FK, UK</text>');
     expect(svg).toContain('stroke="#111111"');
     expect(svg).toContain('fill="#ffffff"');
-    expect(svg).toContain('<line x1="54" y1="34" x2="54" y2="88"');
+    expect(svg).toContain('<line x1="54" y1="30" x2="54" y2="88"');
     expect(svg).not.toContain('>uuid</text>');
     expect(svg).not.toContain('<line x1="0" y1="61"');
   });

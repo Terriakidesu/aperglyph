@@ -43,9 +43,9 @@ export interface EntityColumn {
 
 export interface ErdDiagnostic extends Diagnostic {}
 
-export const ERD_HEADER_HEIGHT = 34;
+export const ERD_HEADER_HEIGHT = 30;
 export const ERD_COLUMN_HEADER_HEIGHT = 21;
-export const ERD_ROW_HEIGHT = 27;
+export const ERD_ROW_HEIGHT = 25;
 
 export interface EntityLayoutMetrics {
   fieldTop: number;
@@ -93,10 +93,10 @@ export function entityAutoWidth(fields: unknown, variant: unknown = 'key-field',
   const nullableWidth = columns.includes('nullable') ? (compact ? 58 : 62) : 0;
   const longestField = Math.max(1, ...normalized.map((field) => field.name.length));
   const longestType = Math.max(1, ...normalized.map((field) => field.type.length));
-  const fieldWidth = columns.includes('field') ? Math.max(compact ? 72 : 48, longestField * (compact ? 6.1 : 6.6) + (compact ? 15 : 18)) : 0;
+  const fieldWidth = columns.includes('field') ? Math.max(compact ? 72 : 48, longestField * (compact ? 8.1 : 8.4) + (compact ? 15 : 18)) : 0;
   const typeWidth = columns.includes('type') ? Math.max(compact ? 64 : 58, Math.min(compact ? 132 : 150, longestType * (compact ? 5.6 : 6) + (compact ? 15 : 18))) : 0;
   const natural = keyWidth + fieldWidth + typeWidth + nullableWidth;
-  const minimum = compact ? 220 : 120;
+  const minimum = compact ? 160 : 120;
   const maximum = compact ? 400 : Number.POSITIVE_INFINITY;
   return Math.round(Math.min(maximum, Math.max(minimum, natural)));
 }

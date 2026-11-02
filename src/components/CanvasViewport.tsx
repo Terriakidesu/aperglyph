@@ -9,7 +9,7 @@ import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath, sortRoutesForJumps } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, RouteConstraint, Size, Viewport } from '../core/types';
@@ -2033,6 +2033,11 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
   }, [routeEntries]);
   const edgeRoutes = useMemo(() => new Map(routeEntries.map((entry) => [entry.id, entry.points])), [routeEntries]);
   const edgeJumps = useMemo(() => calculateRouteJumps(routeEntries.filter((entry) => renderedEdges.some((edge) => edge.id === entry.id && edgeRouting(edge) === 'orthogonal'))), [renderedEdges, routeEntries]);
+  const edgePaintOrder = useMemo(() => sortRoutesForJumps(renderedEdges.map((edge) => ({
+    edge,
+    id: edge.id,
+    crossingPriority: selectedIds.includes(edge.id) ? 1_000_000 : edge.routing?.crossingPriority ?? 0,
+  }))).map(({ edge }) => edge), [renderedEdges, selectedIds]);
   const editBox = useMemo(() => {
     if (!textEdit || !page) return null;
     if (textEdit.kind === 'node') {
@@ -2136,7 +2141,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
              ? <line className="canvas-guide preview" x1={guidePreview.position} y1={guideWorld.top} x2={guidePreview.position} y2={guideWorld.bottom} />
               : <line className="canvas-guide preview" x1={guideWorld.left} y1={guidePreview.position} x2={guideWorld.right} y2={guidePreview.position} />)}</g>}
           {groupBounds.length > 0 && <g className="group-bounds-layer">{groupBounds.map((group) => { const label = `Group · ${group.members.length} objects`; return <g key={group.id} className={group.selected ? 'group-boundary selected' : 'group-boundary'}><rect className="group-boundary-outline" x={group.bounds.x} y={group.bounds.y} width={group.bounds.width} height={group.bounds.height} rx="10" /><rect className="group-boundary-label-bg" x={group.bounds.x + 8} y={group.bounds.y - 18} width={Math.max(104, label.length * 5.7 + 14)} height="16" rx="4" /><text className="group-boundary-label" x={group.bounds.x + 15} y={group.bounds.y - 7}>{label}</text></g>; })}</g>}
-          <g className="edge-layer">{renderedEdges.map((edge) => {
+           <g className="edge-layer">{edgePaintOrder.map((edge) => {
           const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
           const previewWaypoints = waypointPreview?.edgeId === edge.id
             ? (() => { const next = previewEdge.waypoints.slice(); if (waypointPreview.index < next.length) next[waypointPreview.index] = waypointPreview.point; else next.splice(Math.min(waypointPreview.index, next.length), 0, waypointPreview.point); return next; })()
@@ -2186,15 +2191,16 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
   if (route.length < 2) return null;
   const start = route[0];
   const end = route[route.length - 1];
-  const label = edge.data?.relationship === 'foreign-key' ? null : typeof edge.data?.label === 'string' ? edge.data.label : null;
-  const cardinality = edgeCardinality(edge);
+  const isErd = diagramType === 'erd';
+  const label = isErd || edge.data?.relationship === 'foreign-key' ? null : typeof edge.data?.label === 'string' ? edge.data.label : null;
+  const cardinality = isErd ? null : edgeCardinality(edge);
   const labelPoint = labelPointOverride ?? labelPointForEdge(edge, route);
   const startDirection = endpointDirection(start, route[1], source);
   const endDirection = endpointDirection(end, route.at(-2) ?? start, target);
   const curveStartDirection = source ? startDirection : { x: -startDirection.x, y: -startDirection.y };
   const curveEndDirection = target ? { x: -endDirection.x, y: -endDirection.y } : endDirection;
   const jumpStyle = edge.style.jumpStyle ?? 'arc';
-  const isErd = diagramType === 'erd';
+  const strokeColor = isErd ? '#111111' : edge.style.stroke;
   const renderedJumps = jumpStyle === 'arc' ? jumps : [];
    const routing = edgeRouting(edge);
     const path = routing === 'curved' && route.length <= 2 ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps, routing === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0);
@@ -2215,7 +2221,7 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
     {!isErd && <path className="edge-shadow" d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" pointerEvents="none" />}
     {selected && <path className="edge-selection" d={path} fill="none" stroke="#a28fff" strokeWidth={isErd ? edge.style.strokeWidth + 2 : edge.style.strokeWidth + 5} opacity={isErd ? 0.18 : 0.22} pointerEvents="none" />}
     {masks.map((mask, index) => <path key={`jump-mask-${index}`} d={mask} fill="none" stroke={background} strokeWidth={edge.style.strokeWidth + 4} strokeLinecap="round" pointerEvents="none" />)}
-     <path className="edge-visible" d={path} fill="none" stroke={edge.style.stroke} strokeWidth={edge.style.strokeWidth} opacity={edge.style.opacity ?? 1} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
+      <path className="edge-visible" d={path} fill="none" stroke={strokeColor} strokeWidth={edge.style.strokeWidth} opacity={edge.style.opacity ?? 1} strokeDasharray={isErd ? undefined : edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
     <path className="edge-hit-area" d={path} fill="none" stroke="#ffffff" strokeOpacity="0" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} pointerEvents="stroke" />
      {segmentHandles}
      {waypointHandles}
@@ -2253,7 +2259,8 @@ function EdgeMarkersView({ edge, source, target, obstacles, route: providedRoute
   const end = route[route.length - 1];
   const startDirection = markerDirection(start, route[1]);
   const endDirection = markerDirection(end, route.at(-2) ?? start);
-  return <>{renderEndpointMarker(start, startDirection, edge.style.startMarker, edge.style.stroke, markerFill, 'start', edge.style.opacity ?? 1)}{renderEndpointMarker(end, endDirection, edge.style.endMarker, edge.style.stroke, markerFill, 'end', edge.style.opacity ?? 1)}</>;
+  const markerStroke = edge.data?.relationship === 'foreign-key' ? '#111111' : edge.style.stroke;
+  return <>{renderEndpointMarker(start, startDirection, edge.style.startMarker, markerStroke, markerFill, 'start', edge.style.opacity ?? 1)}{renderEndpointMarker(end, endDirection, edge.style.endMarker, markerStroke, markerFill, 'end', edge.style.opacity ?? 1)}</>;
 }
 
 function EdgeEndpointHandles({ edge, source, target, obstacles, selected, hovered, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; hovered: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {

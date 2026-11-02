@@ -980,5 +980,10 @@ body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user
   .code-workspace-body { grid-template-columns: 1fr; grid-template-rows: minmax(260px, 1fr) minmax(220px, .8fr); overflow-y: auto; }
   .code-workspace-source { border-right: 0; border-bottom: 1px solid #2a3246; }
   .code-workspace-footer { align-items: stretch; flex-direction: column; min-height: 112px; flex-basis: 112px; }
-  .code-workspace-footer-status, .code-workspace-footer-actions { justify-content: space-between; }
+.code-workspace-footer-status, .code-workspace-footer-actions { justify-content: space-between; }
 }
+
+/* ERD tables prioritize readable keys and field names at normal zoom. */
+.node-entity-title { font-size: 16px; }
+.node-field-name { fill: #111111; font: 14px var(--mono); }
+.node-field-key { fill: #111111; font: 600 12px var(--mono); }

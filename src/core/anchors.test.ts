@@ -27,6 +27,6 @@ describe('shape connection anchors', () => {
     });
     const anchors = connectionAnchorPoints(node, shape?.anchors);
     expect(anchors.map((anchor) => anchor.anchor.id)).toEqual(['top', 'bottom', 'field-0-left', 'field-0-right', 'field-1-left', 'field-1-right']);
-    expect(anchors.find((anchor) => anchor.anchor.id === 'field-1-right')?.point).toEqual({ x: 260, y: 94.5 });
+    expect(anchors.find((anchor) => anchor.anchor.id === 'field-1-right')?.point).toEqual({ x: 260, y: 93.5 });
   });
 });

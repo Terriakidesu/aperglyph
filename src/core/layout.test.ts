@@ -45,7 +45,7 @@ describe('automatic layout', () => {
     layers.forEach((layer) => layer.sort((left, right) => positions[left.id].x - positions[right.id].x));
     layers.forEach((layer) => layer.slice(1).forEach((node, index) => {
       const previous = layer[index];
-      expect(positions[node.id].x).toBeGreaterThanOrEqual(positions[previous.id].x + previous.size.width + 52);
+      expect(positions[node.id].x).toBeGreaterThanOrEqual(positions[previous.id].x + previous.size.width + 32);
     }));
   });
 });

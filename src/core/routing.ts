@@ -1,6 +1,7 @@
 import { nodeCenter, nodeConnectionPoint, nodeLocalVectorToWorld } from './geometry';
 import { connectionAnchorPoints, entityFieldAnchors } from './anchors';
 import { normalizeEntityFields } from './erd';
+import { routeOrthogonalWithWasm } from './routingWasm';
 import type { DiagramEdge, DiagramNode, EdgeMarker, Endpoint, OrthogonalRoutingMode, Point, PortDirection, RouteConstraint } from './types';
 
 export const NODE_CLEARANCE = 16;
@@ -11,6 +12,7 @@ export const CARDINALITY_MARKER_GAP = 8;
 const EPSILON = 0.001;
 const JUMP_HALF_LENGTH = 8;
 const JUMP_HEIGHT = 7;
+const JUMP_BEND_CLEARANCE = 12;
 
 export interface RoutingEndpoint {
   point: Point;
@@ -24,6 +26,7 @@ export interface RouteOptions {
   otherRoutes?: ReadonlyArray<Point[]>;
   lane?: RoutingLane;
   constraints?: RouteConstraint[];
+  simpleRouting?: boolean;
 }
 
 export interface RoutingLane {
@@ -36,6 +39,14 @@ export interface RouteJump {
   segmentIndex: number;
   point: Point;
   orientation: 'horizontal' | 'vertical';
+}
+
+/** Paint the lower-priority route first so a bridge and its mask stay visible. */
+export function sortRoutesForJumps<T extends { id: string; crossingPriority?: number }>(routes: ReadonlyArray<T>): T[] {
+  return [...routes].sort((left, right) => {
+    const priority = (left.crossingPriority ?? 0) - (right.crossingPriority ?? 0);
+    return priority || left.id.localeCompare(right.id);
+  });
 }
 
 export type EdgeRouting = 'straight' | 'orthogonal' | 'curved';
@@ -90,8 +101,13 @@ export function parallelRoutingLane(edge: DiagramEdge, edges: DiagramEdge[]): Ro
  * taking a dogleg through a nearby shape.
  */
 export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: DiagramNode, obstacles: DiagramNode[] = [], options: RouteOptions = {}): Point[] {
-  const sourceEndpoint = semanticFieldEndpoint(edge, edge.source, source, 'source');
-  const targetEndpoint = semanticFieldEndpoint(edge, edge.target, target, 'target');
+  let sourceEndpoint = semanticFieldEndpoint(edge, edge.source, source, 'source');
+  let targetEndpoint = semanticFieldEndpoint(edge, edge.target, target, 'target');
+  if (edge.data?.relationship === 'foreign-key' && source?.type === 'entity' && target?.type === 'entity' && source.id !== target.id && edge.waypoints.length === 0) {
+    const sourceIsLeft = nodeCenter(source).x < nodeCenter(target).x;
+    sourceEndpoint = faceEntityEndpoint(sourceEndpoint, sourceIsLeft ? 'right' : 'left');
+    targetEndpoint = faceEntityEndpoint(targetEndpoint, sourceIsLeft ? 'left' : 'right');
+  }
   const start = resolveEndpointPoint(sourceEndpoint, source, targetEndpoint.point ?? (target ? nodeCenter(target) : undefined));
   const end = resolveEndpointPoint(targetEndpoint, target, sourceEndpoint.point ?? (source ? nodeCenter(source) : undefined));
   if (!start || !end) return [];
@@ -117,9 +133,9 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   let current = startExit;
   const mode = orthogonalRoutingMode(edge);
   const constraints = edge.routing?.constraints ?? options.constraints ?? [];
-  const routeOptions = { ...options, constraints };
+  const routeOptions = { ...options, constraints, simpleRouting: mode === 'simple' };
   if (mode === 'simple' && edge.waypoints.length === 0) {
-    appendRoute(route, simpleOrthogonalRoute(current, endEntry, rectangles));
+    appendRoute(route, simpleOrthogonalRoute(current, endEntry, rectangles, routeOptions));
     current = endEntry;
   } else {
     const destinations = edge.waypoints.length > 0
@@ -235,6 +251,15 @@ function semanticFieldEndpoint(edge: DiagramEdge, endpoint: Endpoint, node: Diag
   return { ...endpoint, anchorId: `field-${index}-${port}` };
 }
 
+function faceEntityEndpoint(endpoint: Endpoint, port: 'left' | 'right'): Endpoint {
+  const fieldAnchor = /^field-(\d+)-(?:left|right)$/.exec(endpoint.anchorId ?? '');
+  return {
+    ...endpoint,
+    port,
+    ...(fieldAnchor ? { anchorId: `field-${fieldAnchor[1]}-${port}` } : {}),
+  };
+}
+
 export function pointsToPath(points: Point[], jumps: readonly RouteJump[] = [], cornerRadius = 0): string {
   if (points.length === 0) return '';
   if (cornerRadius > EPSILON && jumps.length === 0) return roundedOrthogonalPath(normalizeRoute(points), cornerRadius);
@@ -302,8 +327,10 @@ export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: 
         for (let rightSegment = 0; rightSegment < right.points.length - 1; rightSegment += 1) {
           const crossing = orthogonalCrossing(left.points[leftSegment], left.points[leftSegment + 1], right.points[rightSegment], right.points[rightSegment + 1]);
           if (!crossing) continue;
-          const leftWins = (left.crossingPriority ?? 0) > (right.crossingPriority ?? 0)
-            || ((left.crossingPriority ?? 0) === (right.crossingPriority ?? 0) && left.id.localeCompare(right.id) > 0);
+          const crowdedJunction = routes.some((candidate, candidateIndex) => candidateIndex !== leftIndex && candidateIndex !== rightIndex
+            && candidate.points.some((point) => distanceBetween(point, crossing.point) < JUMP_HALF_LENGTH + JUMP_BEND_CLEARANCE));
+          if (crowdedJunction) continue;
+          const leftWins = sortRoutesForJumps([left, right])[1] === left;
           const jumper = leftWins ? left : right;
           const jumperSegment = leftWins ? leftSegment : rightSegment;
           const jumperCrossing = leftWins
@@ -311,7 +338,7 @@ export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: 
             : crossing;
           if (!jumperCrossing) continue;
           const routeJumps = jumps.get(jumper.id) ?? [];
-          if (!routeJumps.some((jump) => distanceBetween(jump.point, crossing.point) < JUMP_HALF_LENGTH * 2)) {
+          if (!routeJumps.some((jump) => distanceBetween(jump.point, crossing.point) < JUMP_HALF_LENGTH * 2 + 8)) {
             routeJumps.push({ segmentIndex: jumperSegment, point: jumperCrossing.point, orientation: jumperCrossing.orientation });
             jumps.set(jumper.id, routeJumps);
           }
@@ -345,7 +372,8 @@ function orthogonalCrossing(leftStart: Point, leftEnd: Point, rightStart: Point,
   const verticalStart = leftHorizontal ? rightStart : leftStart;
   const verticalEnd = leftHorizontal ? rightEnd : leftEnd;
   const point = { x: verticalStart.x, y: horizontalStart.y };
-  if (!strictlyBetween(point.x, horizontalStart.x, horizontalEnd.x, JUMP_HALF_LENGTH) || !strictlyBetween(point.y, verticalStart.y, verticalEnd.y, JUMP_HALF_LENGTH)) return null;
+  const clearance = JUMP_HALF_LENGTH + JUMP_BEND_CLEARANCE;
+  if (!strictlyBetween(point.x, horizontalStart.x, horizontalEnd.x, clearance) || !strictlyBetween(point.y, verticalStart.y, verticalEnd.y, clearance)) return null;
   return { point, orientation: leftHorizontal ? 'vertical' : 'horizontal' };
 }
 
@@ -398,6 +426,7 @@ function normalizeDirection(direction: Point): Point {
 interface Rect { left: number; right: number; top: number; bottom: number }
 interface GraphPoint extends Point { index: number }
 interface SearchState { point: number; direction: number; key: string }
+interface SearchQueueEntry { state: SearchState; priority: number; order: number }
 
 function legacyOrthogonalRoute(start: Point, end: Point, waypoints: Point[]): Point[] {
   const points = [start, ...waypoints, end];
@@ -417,29 +446,31 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
   if (laneRoute) return laneRoute;
   if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0) && !(options.constraints?.some((constraint) => constraint.strength === 'soft'))) return [from, to];
 
+  const accelerated = routeOrthogonalWithWasm(from, to, obstacles, options);
+  if (accelerated) return accelerated;
+  const shortcuts = options.lane || options.constraints?.some((constraint) => constraint.strength === 'hard')
+    ? []
+    : directOrthogonalRoutes(from, to, obstacles, options.otherRoutes);
   const points = visibilityGraphPoints(from, to, obstacles, options.lane, options.otherRoutes);
   const graph = buildVisibilityGraph(points, obstacles);
   const start = points.findIndex((point) => samePoint(point, from));
   const goal = points.findIndex((point) => samePoint(point, to));
   if (start < 0 || goal < 0) return fallbackOrthogonalRoute(from, to, obstacles);
-  const shortcuts = options.lane || options.constraints?.some((constraint) => constraint.strength === 'hard')
-    ? []
-    : directOrthogonalRoutes(from, to, obstacles, options.otherRoutes);
-  const open: SearchState[] = [{ point: start, direction: -1, key: stateKey(start, -1) }];
-  const states = new Map<string, SearchState>(open.map((state) => [state.key, state]));
-  const scores = new Map<string, number>([[open[0].key, 0]]);
+  const initial: SearchState = { point: start, direction: -1, key: stateKey(start, -1) };
+  const open: SearchQueueEntry[] = [{ state: initial, priority: Math.abs(from.x - to.x) + Math.abs(from.y - to.y), order: 0 }];
+  const states = new Map<string, SearchState>([[initial.key, initial]]);
+  const scores = new Map<string, number>([[initial.key, 0]]);
   const parents = new Map<string, string>();
+  let queueOrder = 1;
   const maxStates = Math.max(2000, points.length * 4);
 
   while (open.length > 0 && states.size <= maxStates) {
-    let bestIndex = 0;
-    let bestScore = Number.POSITIVE_INFINITY;
-    open.forEach((state, index) => {
-      const point = points[state.point];
-      const score = (scores.get(state.key) ?? Number.POSITIVE_INFINITY) + Math.abs(point.x - to.x) + Math.abs(point.y - to.y);
-      if (score < bestScore) { bestScore = score; bestIndex = index; }
-    });
-    const current = open.splice(bestIndex, 1)[0];
+    const currentEntry = popSearchQueue(open);
+    if (!currentEntry) break;
+    const current = currentEntry.state;
+    const currentPoint = points[current.point];
+    const currentScore = scores.get(current.key) ?? Number.POSITIVE_INFINITY;
+    if (currentEntry.priority > currentScore + Math.abs(currentPoint.x - to.x) + Math.abs(currentPoint.y - to.y) + EPSILON) continue;
     if (current.point === goal) return preferredRoute(reconstructRoute(current.key, states, parents, points), shortcuts, options);
 
     for (const neighbor of graph[current.point]) {
@@ -460,11 +491,50 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
       states.set(key, next);
       scores.set(key, cost);
       parents.set(key, current.key);
-      open.push(next);
+      pushSearchQueue(open, {
+        state: next,
+        priority: cost + Math.abs(toPoint.x - to.x) + Math.abs(toPoint.y - to.y),
+        order: queueOrder++,
+      });
     }
   }
 
   return preferredRoute(fallbackOrthogonalRoute(from, to, obstacles), shortcuts, options);
+}
+
+function pushSearchQueue(queue: SearchQueueEntry[], entry: SearchQueueEntry): void {
+  queue.push(entry);
+  let index = queue.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (searchQueueBefore(queue[parent], entry)) break;
+    queue[index] = queue[parent];
+    index = parent;
+  }
+  queue[index] = entry;
+}
+
+function popSearchQueue(queue: SearchQueueEntry[]): SearchQueueEntry | undefined {
+  if (queue.length === 0) return undefined;
+  const first = queue[0];
+  const last = queue.pop()!;
+  if (queue.length === 0) return first;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    if (left >= queue.length) break;
+    const child = right < queue.length && searchQueueBefore(queue[right], queue[left]) ? right : left;
+    if (searchQueueBefore(last, queue[child])) break;
+    queue[index] = queue[child];
+    index = child;
+  }
+  queue[index] = last;
+  return first;
+}
+
+function searchQueueBefore(left: SearchQueueEntry, right: SearchQueueEntry): boolean {
+  return left.priority < right.priority || (left.priority === right.priority && left.order < right.order);
 }
 
 function directOrthogonalRoutes(from: Point, to: Point, obstacles: Rect[], otherRoutes: ReadonlyArray<Point[]> = []): Point[][] {
@@ -528,6 +598,7 @@ function preferredRoute(primary: Point[], shortcuts: Point[][], options: RouteOp
 
 function routeCost(route: Point[], options: RouteOptions): number {
   let cost = 0;
+  const turnPenalty = options.simpleRouting ? 96 : 42;
   route.slice(0, -1).forEach((point, index) => {
     const next = route[index + 1];
     cost += Math.abs(next.x - point.x) + Math.abs(next.y - point.y);
@@ -537,7 +608,7 @@ function routeCost(route: Point[], options: RouteOptions): number {
       const previous = route[index - 1];
       const previousDirection = directionCode(previous, point);
       const nextDirection = directionCode(point, next);
-      if (previousDirection !== nextDirection) cost += 42;
+      if (previousDirection !== nextDirection) cost += turnPenalty;
     }
   });
   return cost + routeChangePenalty(route[0], route[1] ?? route[0], options.previousRoute);
@@ -550,16 +621,33 @@ function directionCode(from: Point, to: Point): number {
   return dy >= 0 ? 3 : 2;
 }
 
-function simpleOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Point[] {
-  if (sameAxis(from, to) && clearSegment(from, to, obstacles)) return [from, to];
+function simpleOrthogonalRoute(from: Point, to: Point, obstacles: Rect[], options: RouteOptions = {}): Point[] {
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && (options.otherRoutes?.length ?? 0) === 0) return [from, to];
   const horizontalFirst = Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
-  const candidates = horizontalFirst
-    ? [[{ x: to.x, y: from.y }], [{ x: from.x, y: to.y }]]
-    : [[{ x: from.x, y: to.y }], [{ x: to.x, y: from.y }]];
-  for (const [bend] of candidates) {
-    if (clearSegment(from, bend, obstacles) && clearSegment(bend, to, obstacles)) return [from, bend, to];
+  const bends = horizontalFirst
+    ? [{ x: to.x, y: from.y }, { x: from.x, y: to.y }]
+    : [{ x: from.x, y: to.y }, { x: to.x, y: from.y }];
+  const candidates: Point[][] = bends.map((bend) => [from, bend, to]);
+  const otherRoutes = options.otherRoutes ?? [];
+  if (otherRoutes.length > 0) {
+    const channelXs = uniqueSorted([
+      (from.x + to.x) / 2,
+      from.x - ROUTING_LANE_SPACING, from.x + ROUTING_LANE_SPACING,
+      to.x - ROUTING_LANE_SPACING, to.x + ROUTING_LANE_SPACING,
+    ]);
+    const channelYs = uniqueSorted([
+      (from.y + to.y) / 2,
+      from.y - ROUTING_LANE_SPACING, from.y + ROUTING_LANE_SPACING,
+      to.y - ROUTING_LANE_SPACING, to.y + ROUTING_LANE_SPACING,
+    ]);
+    channelXs.forEach((x) => candidates.push([from, { x, y: from.y }, { x, y: to.y }, to]));
+    channelYs.forEach((y) => candidates.push([from, { x: from.x, y }, { x: to.x, y }, to]));
   }
-  return fallbackOrthogonalRoute(from, to, obstacles);
+  const clear = (candidate: Point[]) => candidate.slice(0, -1).every((point, index) => clearSegment(point, candidate[index + 1], obstacles));
+  const routes = candidates.map(normalizeRoute).filter(clear);
+  if (routes.length === 0) return routeBetween(from, to, obstacles, { ...options, otherRoutes: [], simpleRouting: true });
+  if (otherRoutes.length === 0) return routes[0];
+  return routes.reduce((best, candidate) => routeCost(candidate, options) < routeCost(best, options) ? candidate : best);
 }
 
 function explicitLaneRoute(from: Point, to: Point, obstacles: Rect[], lane: RoutingLane): Point[] | null {
@@ -702,14 +790,17 @@ function reconstructRoute(key: string, states: Map<string, SearchState>, parents
 
 function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): number {
   const routes = options.otherRoutes ?? [];
+  const overlapBase = options.simpleRouting ? 160 : 900;
+  const overlapScale = options.simpleRouting ? 0.7 : 2;
+  const crossingCost = options.simpleRouting ? 16 : 220;
   let penalty = 0;
   routes.forEach((route) => {
     for (let index = 0; index < route.length - 1; index += 1) {
       const existingStart = route[index];
       const existingEnd = route[index + 1];
       const overlap = overlappingLength(from, to, existingStart, existingEnd);
-      if (overlap > EPSILON) penalty += 120 + overlap * 0.5;
-      else if (segmentsCross(from, to, existingStart, existingEnd)) penalty += 800;
+      if (overlap > EPSILON) penalty += overlapBase + overlap * overlapScale;
+      else if (segmentsCross(from, to, existingStart, existingEnd)) penalty += crossingCost;
       else {
         const separation = parallelSegmentSeparation(from, to, existingStart, existingEnd);
         if (separation !== null && separation < ROUTING_LANE_SPACING + 4) penalty += 24 + (ROUTING_LANE_SPACING + 4 - separation) * 4;
@@ -831,15 +922,12 @@ function axisSegmentDistance(leftStart: Point, leftEnd: Point, rightStart: Point
 
 function fallbackOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Point[] {
   const levels = uniqueSorted([from.y, to.y, ...obstacles.flatMap((rect) => [rect.top - 1, rect.bottom + 1])]);
-  for (const y of levels) {
-    const bends = [{ x: from.x, y }, { x: to.x, y }];
-    if (clearSegment(from, bends[0], obstacles) && clearSegment(bends[0], bends[1], obstacles) && clearSegment(bends[1], to, obstacles)) return [from, ...bends, to];
-  }
   const columns = uniqueSorted([from.x, to.x, ...obstacles.flatMap((rect) => [rect.left - 1, rect.right + 1])]);
-  for (const x of columns) {
-    const bends = [{ x, y: from.y }, { x, y: to.y }];
-    if (clearSegment(from, bends[0], obstacles) && clearSegment(bends[0], bends[1], obstacles) && clearSegment(bends[1], to, obstacles)) return [from, ...bends, to];
-  }
+  const candidates = [
+    ...levels.map((y) => [from, { x: from.x, y }, { x: to.x, y }, to]),
+    ...columns.map((x) => [from, { x, y: from.y }, { x, y: to.y }, to]),
+  ].map((route) => normalizeRoute(route)).filter((route) => route.slice(0, -1).every((point, index) => clearSegment(point, route[index + 1], obstacles)));
+  if (candidates.length > 0) return candidates.reduce((best, candidate) => routeCost(candidate, {}) < routeCost(best, {}) ? candidate : best);
   // A route must remain orthogonal even when every detour is blocked. The
   // caller can still edit this dogleg, but it must never silently become a
   // diagonal connector.

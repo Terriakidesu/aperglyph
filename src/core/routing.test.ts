@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection, sortRoutesForJumps } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -42,7 +42,22 @@ describe('connector routing', () => {
     const edge = createEdge({ nodeId: source.id, port: 'right', anchorId: 'field-1-right', offset: 0.8 }, { nodeId: target.id, port: 'left' });
     const route = edgeRoute(edge, source, target);
     expect(route[0].x).toBe(200);
-    expect(route[0].y).toBeCloseTo(34 + (300 - 34) * 0.5);
+    expect(route[0].y).toBeCloseTo(30 + (300 - 30) * 0.5);
+  });
+
+  it('faces ERD foreign-key endpoints toward the referenced table', () => {
+    const source = createNode('entity', { x: 400, y: 0 }, { size: { width: 200, height: 80 }, data: { fields: [{ id: 'source-id', name: 'source_id' }, { id: 'ref', name: 'reference_id' }] } });
+    const target = createNode('entity', { x: 0, y: 0 }, { size: { width: 200, height: 55 }, data: { fields: [{ id: 'target-id', name: 'target_id' }] } });
+    const edge = createEdge(
+      { nodeId: source.id, port: 'right', anchorId: 'field-1-right' },
+      { nodeId: target.id, port: 'left', anchorId: 'field-0-left' },
+      { type: 'relationship', data: { relationship: 'foreign-key' }, routing: { mode: 'simple' } },
+    );
+    const route = edgeRoute(edge, source, target, [source, target]);
+    expect(route[0].x).toBe(400);
+    expect(route.at(-1)?.x).toBe(200);
+    expect(route[0].y).toBeGreaterThan(30);
+    expect(route.at(-1)?.y).toBeGreaterThan(30);
   });
 
   it('derives field anchors for older ERD relationship metadata', () => {
@@ -56,7 +71,7 @@ describe('connector routing', () => {
     const target = createNode('rectangle', { x: 400, y: 0 });
     const edge = createEdge({ nodeId: source.id, port: 'right', offset: 0.85 }, { nodeId: target.id, port: 'left' }, { data: { sourceFieldId: 'account' } });
     const route = edgeRoute(edge, source, target);
-    expect(route[0].y).toBeCloseTo(34 + (300 - 34) * 0.75);
+    expect(route[0].y).toBeCloseTo(30 + (300 - 30) * 0.75);
   });
 
   it('routes orthogonal connectors through axis-aligned bends', () => {
@@ -150,6 +165,43 @@ describe('connector routing', () => {
     expect(simple.length).toBeLessThanOrEqual(5);
   });
 
+  it('uses nearby lanes to avoid reusing an occupied path in simple mode', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 100 } });
+    const target = createNode('rectangle', { x: 276, y: 100 }, { size: { width: 100, height: 100 } });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', routing: { mode: 'simple' } });
+    const occupied = [{ x: 124, y: 50 }, { x: 252, y: 50 }, { x: 252, y: 150 }];
+    const route = edgeRoute(edge, source, target, [source, target], { otherRoutes: [occupied] });
+    expect(route).toContainEqual({ x: 124, y: 150 });
+    expect(route).not.toContainEqual({ x: 252, y: 50 });
+  });
+
+  it('chooses the shorter clear corridor when direct doglegs are blocked', () => {
+    const edge = createEdge({ point: { x: 0, y: 70 } }, { point: { x: 100, y: 70 } }, { type: 'orthogonal', routing: { mode: 'simple' } });
+    const blocker = createNode('rectangle', { x: 40, y: 30 }, { size: { width: 20, height: 60 } });
+    const lowerCorridor = blocker.position.y + blocker.size.height + NODE_CLEARANCE;
+    expect(edgeRoute(edge, undefined, undefined, [blocker])).toEqual([
+      { x: 0, y: 70 },
+      { x: 0, y: lowerCorridor },
+      { x: 100, y: lowerCorridor },
+      { x: 100, y: 70 },
+    ]);
+  });
+
+  it('uses an obstacle-aware search instead of crossing a table when no simple corridor is clear', () => {
+    const edge = createEdge({ point: { x: 0, y: 100 } }, { point: { x: 400, y: 100 } }, { type: 'orthogonal', routing: { mode: 'simple' } });
+    const obstacles = [
+      createNode('rectangle', { x: 150, y: 80 }, { size: { width: 100, height: 40 } }),
+      createNode('rectangle', { x: -5, y: 0 }, { size: { width: 10, height: 80 } }),
+      createNode('rectangle', { x: -5, y: 120 }, { size: { width: 10, height: 80 } }),
+      createNode('rectangle', { x: 395, y: 0 }, { size: { width: 10, height: 80 } }),
+      createNode('rectangle', { x: 395, y: 120 }, { size: { width: 10, height: 80 } }),
+    ];
+    const route = edgeRoute(edge, undefined, undefined, obstacles);
+    expect(route.length).toBeGreaterThan(4);
+    expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
+    expect(route.slice(1).some((point, index) => obstacles.some((node) => segmentCrossesRect(route[index], point, node)))).toBe(false);
+  });
+
   it('normalizes duplicate and collinear points and rounds orthogonal corners', () => {
     expect(normalizeRoute([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 20 }])).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 20 }]);
     expect(MIN_SEGMENT_LENGTH).toBe(12);
@@ -227,6 +279,38 @@ describe('connector routing', () => {
     const jumps = calculateRouteJumps(routes);
     expect(jumps.get('horizontal')).toEqual([{ segmentIndex: 0, point: { x: 50, y: 50 }, orientation: 'horizontal' }]);
     expect(jumps.get('vertical')).toHaveLength(0);
+  });
+
+  it('keeps bridge clear of route endpoints and nearby bends', () => {
+    const routes = [
+      { id: 'bent', points: [{ x: 0, y: 50 }, { x: 25, y: 50 }, { x: 100, y: 50 }] },
+      { id: 'near-bend', points: [{ x: 19, y: 0 }, { x: 19, y: 100 }] },
+      { id: 'near-endpoint', points: [{ x: 70, y: 0 }, { x: 70, y: 65 }] },
+    ];
+    const jumps = calculateRouteJumps(routes);
+    expect(jumps.get('bent')).toHaveLength(0);
+    expect(jumps.get('near-bend')).toHaveLength(0);
+    expect(jumps.get('near-endpoint')).toHaveLength(0);
+  });
+
+  it('does not bridge a clear crossing crowded by a nearby connector junction', () => {
+    const routes = [
+      { id: 'horizontal', points: [{ x: 0, y: 50 }, { x: 100, y: 50 }] },
+      { id: 'vertical', points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] },
+      { id: 'branch', points: [{ x: 50, y: 50 }, { x: 50, y: 90 }] },
+    ];
+    const jumps = calculateRouteJumps(routes);
+    expect(jumps.get('horizontal')).toHaveLength(0);
+    expect(jumps.get('vertical')).toHaveLength(0);
+  });
+
+  it('paints the selected or later-id route last for consistent bridges', () => {
+    const routes = sortRoutesForJumps([
+      { id: 'z-route', crossingPriority: 1 },
+      { id: 'b-route', crossingPriority: 0 },
+      { id: 'a-route', crossingPriority: 0 },
+    ]);
+    expect(routes.map((route) => route.id)).toEqual(['a-route', 'b-route', 'z-route']);
   });
 });
 

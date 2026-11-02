@@ -7,6 +7,8 @@
 use std::cmp::Ordering;
 use wasm_bindgen::prelude::*;
 
+mod routing;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
     pub x: f64,
@@ -217,6 +219,40 @@ pub fn layout_hierarchy(
         }
     }
     positions
+}
+
+/// Find an obstacle-aware orthogonal path. Inputs are packed rectangles and
+/// connector segments so the browser can batch geometry across the WASM edge.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn route_orthogonal(
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+    obstacles: &[f64],
+    other_routes: &[f64],
+    previous_route: &[f64],
+    simple_routing: bool,
+    lane_index: i32,
+    lane_count: u32,
+    lane_spacing: f64,
+    soft_constraints: &[f64],
+) -> Vec<f64> {
+    routing::route_orthogonal(
+        start_x,
+        start_y,
+        end_x,
+        end_y,
+        obstacles,
+        other_routes,
+        previous_route,
+        simple_routing,
+        lane_index,
+        lane_count,
+        lane_spacing,
+        soft_constraints,
+    )
 }
 
 #[cfg(test)]
