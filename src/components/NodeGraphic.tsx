@@ -37,7 +37,7 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
       const isView = node.data.view === true;
       const showColumnHeaders = node.data.columnHeaders === true;
       const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-      const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+      const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
       const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
       const textColor = node.style.textColor;
       const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
@@ -46,7 +46,8 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
         <rect width={width} height={ERD_HEADER_HEIGHT} rx={node.style.radius} fill={headerFill} />
         <line x1="0" y1={ERD_HEADER_HEIGHT} x2={width} y2={ERD_HEADER_HEIGHT} stroke={node.style.stroke} strokeWidth="1" />
         {showColumnHeaders && <g className="entity-column-headers"><rect y={ERD_HEADER_HEIGHT} width={width} height={ERD_COLUMN_HEADER_HEIGHT} fill={headerFill} opacity="0.42" /><line x1="0" y1={fieldTop} x2={width} y2={fieldTop} stroke={node.style.stroke} strokeOpacity="0.55" />{columns.map((column) => <text key={column.id} className="node-field-column-header" x={column.id === 'key' ? column.x + column.width / 2 : column.x + 7} y={ERD_HEADER_HEIGHT + 15} textAnchor={column.id === 'key' ? 'middle' : undefined}>{column.label}</text>)}</g>}
-        {fields.map((field, index) => { const y = fieldTop + index * rowHeight; const baseline = y + rowHeight / 2 + 4; return <g key={field.id}><rect x="0" y={y} width={width} height={rowHeight} fill={striped && index % 2 === 1 ? stripeFill : rowFill} /><line x1="0" y1={y + rowHeight} x2={width} y2={y + rowHeight} stroke={node.style.stroke} strokeOpacity="0.34" />{columns.slice(0, -1).map((column) => <line key={`divider-${column.id}`} x1={column.x + column.width} y1={y} x2={column.x + column.width} y2={y + rowHeight} stroke={node.style.stroke} strokeOpacity="0.45" />)}{columns.map((column) => { const value = entityFieldValue(field, column.id); if (!value) return null; const isKey = column.id === 'key'; return <text key={column.id} className={isKey ? 'node-field-key' : column.id === 'field' ? 'node-field-name' : 'node-field-type'} style={{ fill: textColor, textDecoration: column.id === 'field' && field.primaryKey ? 'underline' : undefined, fontStyle: column.id === 'field' && field.foreignKey ? 'italic' : undefined }} x={isKey ? column.x + column.width / 2 : column.x + 7} y={baseline} textAnchor={isKey ? 'middle' : undefined}>{value}</text>; })}</g>; })}
+        {fields.map((field, index) => { const y = fieldTop + index * rowHeight; const baseline = y + rowHeight / 2 + 4; return <g key={field.id}><rect x="0" y={y} width={width} height={rowHeight} fill={striped && index % 2 === 1 ? stripeFill : rowFill} />{columns.map((column) => { const value = entityFieldValue(field, column.id); if (!value) return null; const isKey = column.id === 'key'; return <text key={column.id} className={isKey ? 'node-field-key' : column.id === 'field' ? 'node-field-name' : 'node-field-type'} style={{ fill: textColor }} x={isKey ? column.x + column.width / 2 : column.x + 7} y={baseline} textAnchor={isKey ? 'middle' : undefined}>{value}</text>; })}</g>; })}
+        {columns.slice(0, -1).map((column) => <line key={`divider-${column.id}`} x1={column.x + column.width} y1={fieldTop} x2={column.x + column.width} y2={height} stroke={node.style.stroke} strokeOpacity="0.7" />)}
          {showLabel && <text className="node-entity-title" style={{ fill: node.style.textColor === '#f4f5fa' ? '#ffffff' : textColor, fontSize: node.style.fontSize, fontWeight: node.style.fontWeight }} x={width / 2} y="23" textAnchor="middle">{label}</text>}
          <rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={node.data.associative || isView ? '5 3' : undefined} />
          {isWeak && <rect x="4" y="4" width={Math.max(0, width - 8)} height={Math.max(0, height - 8)} rx={Math.max(0, node.style.radius - 2)} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} />}
@@ -80,18 +81,18 @@ function CompactEntityPreview({ node }: { node: DiagramNode }) {
   const rowDivider = bodyTop + bodyHeight / 2;
   const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
   const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-  const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+  const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
   const isView = node.data.view === true;
   const isAssociative = node.data.associative === true;
   const isWeak = node.data.weak === true;
+  const striped = node.data.striped !== false;
   const strokeDasharray = isAssociative || isView ? '5 3' : undefined;
   return <g opacity={node.style.opacity}>
     <rect width={width} height={height} rx={node.style.radius} fill={rowFill} />
     <rect width={width} height={headerHeight} rx={node.style.radius} fill={headerFill} />
     <line x1="0" y1={headerHeight} x2={width} y2={headerHeight} stroke={node.style.stroke} strokeWidth="1" />
     {bodyHeight > 0 && <>
-      <rect x="0" y={rowDivider} width={width} height={Math.max(0, height - rowDivider)} fill={stripeFill} opacity="0.72" />
-      <line x1="0" y1={rowDivider} x2={width} y2={rowDivider} stroke={node.style.stroke} strokeOpacity="0.45" />
+      {striped && <rect x="0" y={rowDivider} width={width} height={Math.max(0, height - rowDivider)} fill={stripeFill} opacity="0.72" />}
       {keyDivider > 0 && <line x1={keyDivider} y1={bodyTop} x2={keyDivider} y2={height} stroke={node.style.stroke} strokeOpacity="0.45" />}
     </>}
     <rect width={width} height={height} rx={node.style.radius} fill="none" stroke={node.style.stroke} strokeWidth={node.style.strokeWidth} strokeDasharray={strokeDasharray} />

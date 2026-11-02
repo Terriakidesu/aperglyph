@@ -141,7 +141,7 @@ export function compileDiagramIR(ir: DiagramIR, options: CompileOptions = {}): D
       size: { width: Math.max(40, size.width), height: Math.max(32, height) },
       boundary: shape?.boundary,
       container: shape?.container,
-      style: { ...(shape?.defaultStyle ?? {}), ...(compactEntity ? { fontSize: 10, fontWeight: 500, radius: 4 } : {}), ...(sourceNode.style ?? {}) },
+      style: { ...(shape?.defaultStyle ?? {}), ...(compactEntity ? { fontSize: 13, fontWeight: 500, radius: 8 } : {}), ...(sourceNode.style ?? {}) },
       data,
     });
     node.zIndex = 0;
@@ -174,7 +174,7 @@ export function compileDiagramIR(ir: DiagramIR, options: CompileOptions = {}): D
       {
         type: edgeTypeForIR(ir.type, sourceEdge.relationship, routing),
         routing: routing === 'orthogonal' ? { mode: 'auto' } : undefined,
-        style: { ...defaultEdgeStyle, startMarker, endMarker, dash: sourceEdge.dash ?? dashForRelationship(sourceEdge.relationship) },
+        style: { ...defaultEdgeStyle, ...(ir.type === 'erd' ? { stroke: '#111111', strokeWidth: 1.4 } : {}), startMarker, endMarker, dash: sourceEdge.dash ?? dashForRelationship(sourceEdge.relationship) },
         data: {
           ...(sourceEdge.data ?? {}),
           ...(sourceEdge.label && !foreignKey ? { label: sourceEdge.label } : {}),

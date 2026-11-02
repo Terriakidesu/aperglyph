@@ -37,43 +37,45 @@ export function createTemplateDocument(
       createEdge({ nodeId: build.id }, { nodeId: intake.id }, { data: { label: 'Iterate' } }),
     );
   } else if (type === 'erd') {
+    const entityStyle = { fill: '#ffffff', stroke: '#111111', strokeWidth: 1.25, textColor: '#111111', radius: 8 };
+    const entityData = (data: Record<string, unknown>) => ({ ...data, entityVariant: 'key-field', columnHeaders: false, striped: false, headerFill: '#ffffff' });
     const users = createNode('entity', { x: -430, y: -180 }, {
       library: 'erd', size: { width: 230, height: 142 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'Users', striped: true, headerFill: '#272147', fields: ['UserID · uuid · PK', 'CoachID · uuid · FK', 'Name · varchar', 'HabitNum · integer'] },
+      style: entityStyle,
+      data: entityData({ label: 'Users', fields: ['UserID · uuid · PK', 'CoachID · uuid · FK', 'Name · varchar', 'HabitNum · integer'] }),
     });
     const coach = createNode('entity', { x: -430, y: 70 }, {
       library: 'erd', size: { width: 230, height: 88 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'Coach', striped: true, headerFill: '#272147', fields: ['CoachID · uuid · PK', 'Name · varchar'] },
+      style: entityStyle,
+      data: entityData({ label: 'Coach', fields: ['CoachID · uuid · PK', 'Name · varchar'] }),
     });
     const userHabits = createNode('entity', { x: -110, y: -45 }, {
       library: 'erd', size: { width: 230, height: 115 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'UserHabits', striped: true, headerFill: '#272147', associative: true, fields: ['UserHabitID · uuid · PK', 'UserID · uuid · FK', 'HabitID · uuid · FK'] },
+      style: entityStyle,
+      data: entityData({ label: 'UserHabits', associative: true, fields: ['UserHabitID · uuid · PK', 'UserID · uuid · FK', 'HabitID · uuid · FK'] }),
     });
     const habits = createNode('entity', { x: 190, y: -180 }, {
       library: 'erd', size: { width: 220, height: 88 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'Habits', striped: true, headerFill: '#272147', fields: ['HabitID · uuid · PK', 'HabitName · varchar'] },
+      style: entityStyle,
+      data: entityData({ label: 'Habits', fields: ['HabitID · uuid · PK', 'HabitName · varchar'] }),
     });
     const checkins = createNode('entity', { x: 520, y: -180 }, {
       library: 'erd', size: { width: 230, height: 142 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'Checkins', striped: true, headerFill: '#272147', fields: ['HabitCheckinID · uuid · PK', 'HabitID · uuid · FK', 'UserID · uuid · FK', 'CheckinDate · date'] },
+      style: entityStyle,
+      data: entityData({ label: 'Checkins', fields: ['HabitCheckinID · uuid · PK', 'HabitID · uuid · FK', 'UserID · uuid · FK', 'CheckinDate · date'] }),
     });
     const comments = createNode('entity', { x: 520, y: 70 }, {
       library: 'erd', size: { width: 230, height: 196 },
-      style: { fill: '#171b28', stroke: '#8f7dff', textColor: '#f4f5fa', radius: 2 },
-      data: { label: 'Comments', striped: true, headerFill: '#272147', fields: ['CommentID · uuid · PK', 'HabitCheckinID · uuid · FK', 'UserID · uuid · FK', 'CoachID · uuid · FK', 'CommentDate · date', 'CommentText · text'] },
+      style: entityStyle,
+      data: entityData({ label: 'Comments', fields: ['CommentID · uuid · PK', 'HabitCheckinID · uuid · FK', 'UserID · uuid · FK', 'CoachID · uuid · FK', 'CommentDate · date', 'CommentText · text'] }),
     });
     page.nodes.push(users, coach, userHabits, habits, checkins, comments);
     page.edges.push(
-      createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'crowfoot', endMarker: 'bar' }, data: { label: 'N : 1' } }),
-       createEdge({ nodeId: users.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(users.data.fields, 0) }, { nodeId: userHabits.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(userHabits.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-       createEdge({ nodeId: habits.id, port: 'left', anchorId: 'field-0-left', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: userHabits.id, port: 'right', anchorId: 'field-2-right', offset: entityFieldPortOffset(userHabits.data.fields, 2) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-       createEdge({ nodeId: habits.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: checkins.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(checkins.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
-      createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' }, data: { label: '1 : N' } }),
+      createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'crowfoot', endMarker: 'bar' } }),
+      createEdge({ nodeId: users.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(users.data.fields, 0) }, { nodeId: userHabits.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(userHabits.data.fields, 1) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: habits.id, port: 'left', anchorId: 'field-0-left', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: userHabits.id, port: 'right', anchorId: 'field-2-right', offset: entityFieldPortOffset(userHabits.data.fields, 2) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: habits.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: checkins.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(checkins.data.fields, 1) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
     );
   } else if (type === 'dfd') {
     const source = createNode('external', { x: -370, y: -40 }, {

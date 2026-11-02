@@ -1065,7 +1065,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       : -1;
     const branchLabel = branchCount === 0 ? 'Yes' : branchCount === 1 ? 'No' : undefined;
     const edgeOptions = document.diagramType === 'erd'
-      ? { type: 'orthogonal' as const, style: { startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
+      ? { type: 'orthogonal' as const, style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
       : document.diagramType === 'dfd'
         ? { type: 'orthogonal' as const }
         : branchLabel

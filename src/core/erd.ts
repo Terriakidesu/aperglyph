@@ -54,8 +54,8 @@ export interface EntityLayoutMetrics {
 }
 
 export const entityVariantOptions: Array<{ value: EntityVariant; label: string }> = [
-  { value: 'key-field-type', label: 'Key · Field · Data type' },
   { value: 'key-field', label: 'Key · Field' },
+  { value: 'key-field-type', label: 'Key · Field · Data type' },
   { value: 'field-type', label: 'Field · Data type' },
   { value: 'field', label: 'Field only' },
   { value: 'field-nullability', label: 'Field · Nullability' },
@@ -64,15 +64,15 @@ export const entityVariantOptions: Array<{ value: EntityVariant; label: string }
 ];
 
 export function normalizeEntityVariant(value: unknown): EntityVariant {
-  return entityVariantOptions.some((option) => option.value === value) ? value as EntityVariant : 'key-field-type';
+  return entityVariantOptions.some((option) => option.value === value) ? value as EntityVariant : 'key-field';
 }
 
-export function entityAutoHeight(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): number {
+export function entityAutoHeight(fields: unknown, variant: unknown = 'key-field', columnHeaders = false): number {
   return ERD_HEADER_HEIGHT + (columnHeaders ? ERD_COLUMN_HEADER_HEIGHT : 0) + Math.max(1, normalizeEntityFields(fields).length) * ERD_ROW_HEIGHT;
 }
 
 /** Minimum usable bounds for an entity table, based on its visible columns and rows. */
-export function entityMinimumSize(fields: unknown, variant: unknown = 'key-field-type', columnHeaders = false): Size {
+export function entityMinimumSize(fields: unknown, variant: unknown = 'key-field', columnHeaders = false): Size {
   const columns = entityColumns(variant, 0);
   const columnWidth = columns.reduce((total, column) => total + column.width, 0);
   return {
@@ -86,10 +86,10 @@ export function entityMinimumSize(fields: unknown, variant: unknown = 'key-field
  * entity freely, but generated schemas should not inherit a large generic
  * rectangle just because the source format did not provide geometry.
  */
-export function entityAutoWidth(fields: unknown, variant: unknown = 'key-field-type', compact = false): number {
+export function entityAutoWidth(fields: unknown, variant: unknown = 'key-field', compact = false): number {
   const normalized = normalizeEntityFields(fields);
   const columns = columnsForVariant(variant);
-  const keyWidth = columns.includes('key') ? (compact ? 30 : 38) : 0;
+  const keyWidth = columns.includes('key') ? 54 : 0;
   const nullableWidth = columns.includes('nullable') ? (compact ? 58 : 62) : 0;
   const longestField = Math.max(1, ...normalized.map((field) => field.name.length));
   const longestType = Math.max(1, ...normalized.map((field) => field.type.length));
@@ -119,7 +119,7 @@ export function entityLayoutMetrics(fields: unknown, height: number, columnHeade
 
 export function entityColumns(variant: unknown, width: number, compact = false): EntityColumn[] {
   const ids = columnsForVariant(variant);
-  const keyWidth = ids.includes('key') ? (compact ? 30 : 38) : 0;
+  const keyWidth = ids.includes('key') ? 54 : 0;
   const typeWidth = ids.includes('type') ? Math.min(compact ? 132 : 82, Math.max(compact ? 82 : 58, width * (compact ? 0.28 : 0.3))) : 0;
   const nullableWidth = ids.includes('nullable') ? (compact ? 58 : 62) : 0;
   const fieldWidth = Math.max(48, width - keyWidth - typeWidth - nullableWidth);
@@ -133,14 +133,14 @@ export function entityColumns(variant: unknown, width: number, compact = false):
 }
 
 export function entityFieldValue(field: EntityField, column: EntityColumnId): string {
-  if (column === 'key') return field.primaryKey && field.foreignKey ? 'PK/FK' : field.primaryKey ? 'PK' : field.foreignKey ? 'FK' : field.unique ? 'UQ' : '';
+  if (column === 'key') return [field.primaryKey ? 'PK' : '', field.foreignKey ? 'FK' : '', field.unique ? 'UK' : ''].filter(Boolean).join(', ');
   if (column === 'field') return field.name;
   if (column === 'type') return field.type;
   return field.nullable ? 'NULL' : 'NOT NULL';
 }
 
 export function entityFieldPortOffset(fields: unknown, index: number, columnHeaders = false, nodeHeight?: number): number {
-  const height = nodeHeight ?? entityAutoHeight(fields, 'key-field-type', columnHeaders);
+  const height = nodeHeight ?? entityAutoHeight(fields, 'key-field', columnHeaders);
   const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, columnHeaders);
   return (fieldTop + index * rowHeight + rowHeight / 2) / Math.max(1, height);
 }
@@ -193,7 +193,7 @@ export function parseEntityFields(raw: string): EntityField[] {
       type,
       primaryKey: flags.has('PK') || flags.has('PRIMARY') || flags.has('PRIMARY KEY'),
       foreignKey: flags.has('FK') || flags.has('FOREIGN') || flags.has('FOREIGN KEY'),
-      unique: flags.has('UQ') || flags.has('UNIQUE'),
+      unique: flags.has('UQ') || flags.has('UK') || flags.has('UNIQUE'),
       nullable: !(flags.has('NN') || flags.has('NOT') || flags.has('NOT NULL')),
     });
   });
@@ -212,7 +212,7 @@ export function normalizeEntityFields(value: unknown): EntityField[] {
         type: parts[1] ?? 'varchar',
         primaryKey: flags.has('PK') || flags.has('PRIMARY KEY'),
         foreignKey: flags.has('FK') || flags.has('FOREIGN KEY'),
-        unique: flags.has('UQ') || flags.has('UNIQUE'),
+        unique: flags.has('UQ') || flags.has('UK') || flags.has('UNIQUE'),
         nullable: !flags.has('NN') && !flags.has('NOT NULL'),
       });
     }
@@ -285,7 +285,7 @@ export function relationshipForForeignKey(page: DiagramDocument['pages'][number]
     { nodeId: target.id, port: 'left', ...(targetField ? { anchorId: `field-${targetFields.indexOf(targetField)}-left` } : {}), ...(targetField ? { offset: entityFieldPortOffset(targetFields, targetFields.indexOf(targetField), target.data.columnHeaders === true, target.size.height) } : {}) },
     {
       type: 'orthogonal',
-      style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
+      style: { stroke: '#111111', strokeWidth: 1.4, startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
       data: { cardinality: { source: field.nullable ? '0..N' : 'N', target: '1' }, relationship: 'foreign-key', sourceFieldId: field.id, targetFieldId: targetField?.id, sourceFieldIds, targetFieldIds },
     },
   );
@@ -316,12 +316,13 @@ export function foreignKeyForRelationship(document: DiagramDocument, pageId: str
   if (fields.length === 0) return next;
   source.data.fields = [...sourceFields, ...fields];
   source.size.height = entityAutoHeight(source.data.fields, source.data.entityVariant, source.data.columnHeaders === true);
+  edge.style = { ...edge.style, stroke: '#111111', strokeWidth: 1.4 };
   edge.data = { ...edge.data, relationship: 'foreign-key', constraintId, sourceFieldId: fields[0].id, targetFieldId: targetKeys[0].id, sourceFieldIds: fields.map((field) => field.id), targetFieldIds: targetKeys.map((field) => field.id) };
   return next;
 }
 
 export function entityFieldLabel(field: EntityField): string {
-  const flags = [field.primaryKey ? 'PK' : '', field.foreignKey ? 'FK' : '', field.unique ? 'UQ' : '', field.nullable ? '' : 'NN'].filter(Boolean).join(' ');
+  const flags = [field.primaryKey ? 'PK' : '', field.foreignKey ? 'FK' : '', field.unique ? 'UK' : '', field.nullable ? '' : 'NN'].filter(Boolean).join(' ');
   return `${field.name} · ${field.type}${flags ? ` · ${flags}` : ''}`;
 }
 
@@ -385,7 +386,7 @@ function isRecord(value: unknown): value is Record<string, any> {
 }
 
 function isFieldFlag(value: string): boolean {
-  return ['PK', 'FK', 'UQ', 'NN', 'PRIMARY', 'PRIMARY KEY', 'FOREIGN', 'FOREIGN KEY', 'UNIQUE', 'NOT', 'NOT NULL'].includes(value.toUpperCase().replace(/[:,]$/, ''));
+  return ['PK', 'FK', 'UQ', 'UK', 'NN', 'PRIMARY', 'PRIMARY KEY', 'FOREIGN', 'FOREIGN KEY', 'UNIQUE', 'NOT', 'NOT NULL'].includes(value.toUpperCase().replace(/[:,]$/, ''));
 }
 
 function isReferentialAction(value: unknown): value is ReferentialAction {

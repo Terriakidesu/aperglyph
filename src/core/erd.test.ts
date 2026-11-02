@@ -25,18 +25,27 @@ describe('ERD semantic model', () => {
 
   it('provides a usable minimum size for each table layout', () => {
     expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field')).toEqual({ width: 120, height: 88 });
-    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field-type-nullability', true)).toEqual({ width: 206, height: 109 });
+    expect(entityMinimumSize(['id · uuid', 'name · varchar'], 'key-field-type-nullability', true)).toEqual({ width: 222, height: 109 });
   });
 
   it('supports selectable entity column variants and row anchors', () => {
     expect(entityColumns('key-field', 230).map((column) => column.id)).toEqual(['key', 'field']);
     expect(entityColumns('key-field-type', 230).map((column) => column.id)).toEqual(['key', 'field', 'type']);
+    expect(entityColumns(undefined, 230).map((column) => column.id)).toEqual(['key', 'field']);
     const field = normalizeEntityFields(['id · uuid · PK · NN'])[0];
     expect(entityFieldValue(field, 'key')).toBe('PK');
     expect(entityFieldValue(field, 'field')).toBe('id');
     expect(entityFieldValue(field, 'type')).toBe('uuid');
     expect(entityFieldPortOffset(['id · uuid', 'name · varchar'], 1)).toBeCloseTo(74.5 / 88);
     expect(entityAutoHeight(['id · uuid', 'name · varchar'], 'key-field', true)).toBe(109);
+  });
+
+  it('shows all key markers together and accepts UK as a unique-field shorthand', () => {
+    const [field] = normalizeEntityFields(['booking_request_id · uuid · FK · UK']);
+    expect(field).toMatchObject({ foreignKey: true, unique: true });
+    expect(entityFieldValue(field, 'key')).toBe('FK, UK');
+    expect(entityFieldValue({ ...field, primaryKey: true }, 'key')).toBe('PK, FK, UK');
+    expect(parseEntityFields('email varchar UK')[0].unique).toBe(true);
   });
 
   it('distributes extra resized height across field rows and anchors', () => {

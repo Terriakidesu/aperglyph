@@ -96,6 +96,9 @@ export function createDocument(
   const now = Date.now();
   const page = createPage();
   if (diagramType === 'dfd') page.data = { dfdLevel: 0, dataDictionary: [] };
+  if (diagramType === 'erd') {
+    page.settings = { ...page.settings, background: '#ffffff', canvasTheme: 'light', gridVisible: false };
+  }
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     id: createId('doc'),
@@ -561,7 +564,7 @@ function migrateNode(node: DiagramNode): DiagramNode {
   }
   const fieldCount = Math.max(1, Array.isArray(migrated.data.fields) ? migrated.data.fields.length : 0);
   const minimumHeight = 34 + (migrated.data.columnHeaders === true ? 21 : 0) + fieldCount * 27;
-  const minimumWidth = migrated.data.entityVariant === 'key-field-type-nullability' ? 206 : migrated.data.entityVariant === 'key-field-type' || migrated.data.entityVariant === undefined ? 144 : migrated.data.entityVariant === 'key-field-nullability' ? 148 : 120;
+  const minimumWidth = migrated.data.entityVariant === 'key-field-type-nullability' ? 222 : migrated.data.entityVariant === 'key-field-type' ? 160 : migrated.data.entityVariant === 'key-field-nullability' ? 164 : 120;
   return { ...migrated, size: { width: Math.max(migrated.size.width, minimumWidth), height: Math.max(migrated.size.height, minimumHeight, requiredHeight) } };
 }
 

@@ -77,8 +77,8 @@ export const flowchartPlugin: DiagramPlugin = {
 
 const entityDefaults = {
   defaultSize: { width: 230, height: 88 },
-  defaultStyle: { fill: '#171b28', stroke: '#8f7dff', radius: 2, textColor: '#f4f5fa', textWrap: false, autoHeight: false },
-  defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], entityVariant: 'key-field-type', columnHeaders: false, striped: true, headerFill: '#272147' },
+  defaultStyle: { fill: '#ffffff', stroke: '#111111', strokeWidth: 1.25, radius: 8, textColor: '#111111', fontSize: 13, textWrap: false, autoHeight: false },
+  defaultData: { label: 'table_name', fields: ['id · uuid · PK', 'name · varchar'], entityVariant: 'key-field', columnHeaders: false, striped: false, headerFill: '#ffffff' },
   renderer: 'entity',
   anchors: entityFieldAnchors,
 } as const;

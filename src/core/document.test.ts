@@ -54,6 +54,11 @@ describe('AperGlyph document model', () => {
     expect(parsed.pages[0].edges[0]).not.toHaveProperty('computedRoute');
   });
 
+  it('starts ERD pages on a clean white canvas', () => {
+    const document = createDocument('Schema', 'erd');
+    expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light', gridVisible: false });
+  });
+
   it('restores semantic defaults for legacy DFD pages', () => {
     const document = createDocument('Legacy DFD', 'dfd');
     delete (document.pages[0] as { data?: unknown }).data;

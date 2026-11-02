@@ -121,7 +121,7 @@ describe('native file helpers', () => {
     const useCase = createNode('use-case', { x: 0, y: 180 }, { library: 'use-case', size: { width: 180, height: 72 }, data: { label: 'Use case' } });
     const svg = documentToSvg([entity, process, store, useCase], [], '#10131c', 800, 600);
     expect(svg).toContain('>PK</text>');
-    expect(svg).toContain('text-decoration="underline"');
+    expect(svg).not.toContain('text-decoration="underline"');
     expect(svg).toContain('<ellipse cx="60" cy="60" rx="60" ry="60"');
     expect(svg).toContain('<line x1="0" y1="10" x2="160" y2="10"');
     expect(svg).toContain('<ellipse cx="90" cy="36" rx="90" ry="36"');
@@ -137,6 +137,25 @@ describe('native file helpers', () => {
     expect(svg).toContain('>Key</text>');
     expect(svg).toContain('>Field</text>');
     expect(svg).not.toContain('>Data type</text>');
+  });
+
+  it('exports reference-style ERD tables with clean rows and combined key flags', () => {
+    const entity = createNode('entity', { x: 0, y: 0 }, {
+      library: 'erd',
+      size: { width: 230, height: 88 },
+      style: { fill: '#ffffff', stroke: '#111111', textColor: '#111111', radius: 8 },
+      data: { label: 'transaction', entityVariant: 'key-field', striped: false, fields: [
+        { id: 'id', name: 'transaction_id', type: 'uuid', primaryKey: true, foreignKey: false, unique: false, nullable: false },
+        { id: 'booking', name: 'booking_request_id', type: 'uuid', primaryKey: false, foreignKey: true, unique: true, nullable: false },
+      ] },
+    });
+    const svg = documentToSvg([entity], [], '#ffffff', 300, 120);
+    expect(svg).toContain('>FK, UK</text>');
+    expect(svg).toContain('stroke="#111111"');
+    expect(svg).toContain('fill="#ffffff"');
+    expect(svg).toContain('<line x1="54" y1="34" x2="54" y2="88"');
+    expect(svg).not.toContain('>uuid</text>');
+    expect(svg).not.toContain('<line x1="0" y1="61"');
   });
 
   it('exports shared common silhouettes and metadata-driven Gane-Sarson DFD variants', () => {

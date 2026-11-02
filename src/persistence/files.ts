@@ -420,36 +420,44 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
     return `<g transform="${transform}">${primitiveMarkup}${numberMarkup}${labelMarkup}</g>`;
   }
   if (renderer === 'entity') {
-      const fields = normalizeEntityFields(node.data.fields);
-      const columns = entityColumns(node.data.entityVariant, width);
-      const showColumnHeaders = node.data.columnHeaders === true;
-      const striped = node.data.striped !== false;
-      const isWeak = node.data.weak === true;
-      const isView = node.data.view === true;
-         const rowFill = outlineOnly ? outlineFill(typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill) : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-         const stripeFill = outlineOnly ? '#ffffff' : typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
-         const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
-      const headerHeight = ERD_HEADER_HEIGHT;
-      const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
-     const columnHeaders = showColumnHeaders
-       ? `<g><rect y="${headerHeight}" width="${width}" height="${ERD_COLUMN_HEADER_HEIGHT}" fill="${escapeXml(headerFill)}" opacity="0.42"/><line x1="0" y1="${fieldTop}" x2="${width}" y2="${fieldTop}" stroke="${stroke}" stroke-opacity="0.55"/>${columns.map((column) => `<text x="${column.id === 'key' ? column.x + column.width / 2 : column.x + 7}" y="${headerHeight + 15}" fill="${textColor}" font-family="monospace" font-size="9" font-weight="600"${column.id === 'key' ? ' text-anchor="middle"' : ''}>${escapeXml(column.label)}</text>`).join('')}</g>`
-       : '';
-     const fieldMarkup = fields.map((field, index) => {
-       const rowY = fieldTop + index * rowHeight;
-       const values = columns.map((column) => {
-         const value = entityFieldValue(field, column.id);
-         if (!value) return '';
-         const isKey = column.id === 'key';
-         const className = isKey ? ' font-weight="600" font-size="9" text-anchor="middle"' : column.id === 'field' ? ` font-size="10"${field.primaryKey ? ' text-decoration="underline"' : ''}${field.foreignKey ? ' font-style="italic"' : ''}` : ' fill-opacity="0.68" font-size="9"';
-         const x = isKey ? column.x + column.width / 2 : column.x + 7;
-          return `<text x="${x}" y="${rowY + rowHeight / 2 + 4}" fill="${textColor}" font-family="monospace"${className}>${escapeXml(value)}</text>`;
-       }).join('');
-       const dividers = columns.slice(0, -1).map((column) => `<line x1="${column.x + column.width}" y1="${rowY}" x2="${column.x + column.width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.45"/>`).join('');
-       return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/><line x1="0" y1="${rowY + rowHeight}" x2="${width}" y2="${rowY + rowHeight}" stroke="${stroke}" stroke-opacity="0.34"/>${dividers}${values}</g>`;
-     }).join('');
-          const outerFrame = `<rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative || isView ? ' stroke-dasharray="5 3"' : ''}/>`;
-          const weakFrame = isWeak ? `<rect x="4" y="4" width="${Math.max(0, width - 8)}" height="${Math.max(0, height - 8)}" rx="${Math.max(0, radius - 2)}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/>` : '';
-          return `<g transform="${transform}" opacity="${node.style.opacity}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g><text x="${width / 2}" y="23" fill="${textColor}" font-family="monospace" font-size="${node.style.fontSize}" font-weight="${node.style.fontWeight}" text-anchor="middle">${label}</text>${outerFrame}${weakFrame}</g>`;
+    const fields = normalizeEntityFields(node.data.fields);
+    const columns = entityColumns(node.data.entityVariant, width, node.data.compact === true);
+    const showColumnHeaders = node.data.columnHeaders === true;
+    const striped = node.data.striped !== false;
+    const isWeak = node.data.weak === true;
+    const isView = node.data.view === true;
+    const rowFill = outlineOnly
+      ? outlineFill(typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill)
+      : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
+    const stripeFill = outlineOnly
+      ? '#ffffff'
+      : typeof node.data.stripeFill === 'string'
+        ? node.data.stripeFill
+        : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+    const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
+    const headerHeight = ERD_HEADER_HEIGHT;
+    const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
+    const columnHeaders = showColumnHeaders
+      ? `<g><rect y="${headerHeight}" width="${width}" height="${ERD_COLUMN_HEADER_HEIGHT}" fill="${escapeXml(headerFill)}" opacity="0.42"/><line x1="0" y1="${fieldTop}" x2="${width}" y2="${fieldTop}" stroke="${stroke}" stroke-opacity="0.55"/>${columns.map((column) => `<text x="${column.id === 'key' ? column.x + column.width / 2 : column.x + 7}" y="${headerHeight + 15}" fill="${textColor}" font-family="Arial, sans-serif" font-size="9" font-weight="600"${column.id === 'key' ? ' text-anchor="middle"' : ''}>${escapeXml(column.label)}</text>`).join('')}</g>`
+      : '';
+    const fieldMarkup = fields.map((field, index) => {
+      const rowY = fieldTop + index * rowHeight;
+      const values = columns.map((column) => {
+        const value = entityFieldValue(field, column.id);
+        if (!value) return '';
+        const isKey = column.id === 'key';
+        const className = isKey ? ' font-weight="600" font-size="10" text-anchor="middle"' : column.id === 'field' ? ' font-size="11"' : ' fill-opacity="0.68" font-size="9"';
+        const x = isKey ? column.x + column.width / 2 : column.x + 7;
+        return `<text x="${x}" y="${rowY + rowHeight / 2 + 4}" fill="${textColor}" font-family="Arial, sans-serif"${className}>${escapeXml(value)}</text>`;
+      }).join('');
+      return `<g><rect y="${rowY}" width="${width}" height="${rowHeight}" fill="${escapeXml(striped && index % 2 === 1 ? stripeFill : rowFill)}"/>${values}</g>`;
+    }).join('');
+    const fieldDividers = columns.slice(0, -1)
+      .map((column) => `<line x1="${column.x + column.width}" y1="${fieldTop}" x2="${column.x + column.width}" y2="${height}" stroke="${stroke}" stroke-opacity="0.7"/>`)
+      .join('');
+    const outerFrame = `<rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"${node.data.associative || isView ? ' stroke-dasharray="5 3"' : ''}/>`;
+    const weakFrame = isWeak ? `<rect x="4" y="4" width="${Math.max(0, width - 8)}" height="${Math.max(0, height - 8)}" rx="${Math.max(0, radius - 2)}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}"/>` : '';
+    return `<g transform="${transform}" opacity="${node.style.opacity}"><rect width="${width}" height="${height}" rx="${radius}" fill="${escapeXml(rowFill)}"/><rect width="${width}" height="${headerHeight}" rx="${radius}" fill="${escapeXml(headerFill)}"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${stroke}"/>${columnHeaders}<g>${fieldMarkup}</g>${fieldDividers}<text x="${width / 2}" y="23" fill="${textColor}" font-family="Arial, sans-serif" font-size="${node.style.fontSize}" font-weight="${node.style.fontWeight}" text-anchor="middle">${label}</text>${outerFrame}${weakFrame}</g>`;
    }
    if (renderer === 'boundary') {
        return `<g transform="${transform}"><rect width="${width}" height="${height}" rx="${radius}" fill="none" stroke="${stroke}" stroke-width="${node.style.strokeWidth}" stroke-dasharray="7 5" opacity="${node.style.opacity}"/>${svgTextMarkup(node, rawLabel, width, height, textColor, { align: 'left', vertical: 'top', padding: 18, fontFamily: 'monospace' })}</g>`;
