@@ -97,7 +97,7 @@ export function createDocument(
   const page = createPage();
   if (diagramType === 'dfd') page.data = { dfdLevel: 0, dataDictionary: [] };
   if (diagramType === 'erd') {
-    page.settings = { ...page.settings, background: '#ffffff', canvasTheme: 'light', gridVisible: false };
+    page.settings = { ...page.settings, background: '#ffffff', canvasTheme: 'light', gridVisible: true };
   }
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,

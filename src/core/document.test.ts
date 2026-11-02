@@ -56,7 +56,7 @@ describe('AperGlyph document model', () => {
 
   it('starts ERD pages on a clean white canvas', () => {
     const document = createDocument('Schema', 'erd');
-    expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light', gridVisible: false });
+    expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light', gridVisible: true });
   });
 
   it('restores semantic defaults for legacy DFD pages', () => {
