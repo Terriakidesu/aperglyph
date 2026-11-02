@@ -509,7 +509,7 @@ export function contentBounds(nodes: DiagramNode[], edges: DiagramEdge[], pageWi
   return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
 }
 
-function renderSvgToPng(svg: string, width: number, height: number): Promise<Blob> {
+export function renderSvgToPng(svg: string, width: number, height: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
     const image = new Image();

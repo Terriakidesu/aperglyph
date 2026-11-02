@@ -1,0 +1,10 @@
+.mcp-bridge-status { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 8px; color: #969fb3; background: #101520; border: 1px solid #293249; border-radius: 5px; font: 8px/1.4 var(--mono); }
+.mcp-status-dot { width: 7px; height: 7px; flex: 0 0 7px; background: #626d83; border-radius: 50%; }
+.mcp-status-dot.connected { background: #53d5a8; box-shadow: 0 0 8px rgba(83, 213, 168, .55); }
+.mcp-status-dot.connecting { background: #e4b768; box-shadow: 0 0 8px rgba(228, 183, 104, .4); }
+.mcp-status-dot.error { background: #e47791; }
+.mcp-preference-actions { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+.mcp-preference-actions .text-button { margin-left: auto; font-size: 9px; }
+.mcp-access-toggle { display: grid; gap: 5px; margin-top: 9px; }
+.preference-section .mcp-token-field { display: grid; align-items: stretch; gap: 6px; margin-top: 9px; }
+.preference-section .mcp-token-field input { width: 100%; height: 30px; margin: 0; padding: 0 8px; }

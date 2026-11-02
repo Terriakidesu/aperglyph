@@ -7,6 +7,7 @@ import { AutosaveController, forgetActiveDocument, getRememberedDocumentId, getR
 import { useEditorStore } from './store/editorStore';
 import { EditorScreen } from './components/EditorScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { startMcpBrowserBridge } from './mcp/browserBridge';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -26,6 +27,19 @@ export default function App() {
   const isDirty = useEditorStore((state) => state.isDirty);
   const autosaveRef = useRef<AutosaveController | null>(null);
   const updateSWRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null);
+
+  useEffect(() => startMcpBrowserBridge(), []);
+
+  useEffect(() => {
+    const unsubscribeOpened = editorEvents.on('document:opened', () => setScreen('editor'));
+    const unsubscribeChanged = editorEvents.on('document:changed', () => setScreen('editor'));
+    const unsubscribeFocus = editorEvents.on('editor:focus-requested', () => setScreen('editor'));
+    return () => {
+      unsubscribeOpened();
+      unsubscribeChanged();
+      unsubscribeFocus();
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribeStorageErrors = editorEvents.on('storage:error', ({ error }) => setStorageError(error.message));

@@ -16,6 +16,7 @@ export interface EditorEventMap {
   'ui:preferences': undefined;
   'ui:toggle-properties': undefined;
   'ui:shape-search': { point?: Point };
+  'editor:focus-requested': undefined;
   'diagnostics:changed': { enabled: boolean };
   'history:changed': { canUndo: boolean; canRedo: boolean; lastAction: string | null };
   'node:created': { nodeId: string };
