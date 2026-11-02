@@ -35,6 +35,33 @@ describe('command history', () => {
     expect(moved.pages[0].nodes.map((node) => node.position.y)).toEqual([30, 30]);
   });
 
+  it('applies ERD optimization as one undoable layout command without changing routes', () => {
+    const document = createDocument();
+    document.diagramType = 'erd';
+    const pageId = document.pages[0].id;
+    const parent = createNode('entity', { x: 0, y: 0 });
+    const child = createNode('entity', { x: 0, y: 0 });
+    const edge = {
+      ...createEdge({ nodeId: child.id }, { nodeId: parent.id }, { data: { relationship: 'foreign-key' } }),
+      waypoints: [{ x: 300, y: 88 }],
+    };
+    document.pages[0].nodes.push(parent, child);
+    document.pages[0].edges.push(edge);
+    const manager = new CommandManager();
+    const optimized = manager.execute(new LayoutNodesCommand(pageId, {
+      [child.id]: { x: 420, y: 240 },
+    }, 'ERD connection-aware', 'Optimize ERD layout'), document);
+
+    expect(manager.canUndo).toBe(true);
+    expect(optimized.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual({ x: 420, y: 240 });
+    expect(optimized.pages[0].edges[0]).toEqual(edge);
+    const undone = manager.undo(optimized)!;
+    expect(undone.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual(child.position);
+    const redone = manager.redo(undone)!;
+    expect(redone.pages[0].nodes.find((node) => node.id === child.id)?.position).toEqual({ x: 420, y: 240 });
+    expect(redone.pages[0].edges[0]).toEqual(edge);
+  });
+
   it('moves explicitly owned container children with their container', () => {
     const document = createDocument();
     const pageId = document.pages[0].id;

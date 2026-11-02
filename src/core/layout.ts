@@ -4,6 +4,17 @@ export type LayoutMode = 'hierarchical' | 'dag' | 'horizontal' | 'vertical' | 't
 
 export type ErdLayoutDirection = 'vertical' | 'horizontal';
 
+export interface ErdOptimizationOptions {
+  direction?: ErdLayoutDirection;
+  pinnedIds?: readonly string[];
+}
+
+export interface ErdOptimizationResult {
+  positions: Record<string, Point>;
+  movedIds: string[];
+  score: number;
+}
+
 export function layoutNodes(nodes: DiagramNode[], edges: DiagramEdge[], mode: LayoutMode): Record<string, Point> {
   if (nodes.length === 0) return {};
   if (mode === 'grid' || mode === 'compact') return gridLayout(nodes, mode === 'compact' ? 4 : Math.ceil(Math.sqrt(nodes.length)));
@@ -163,6 +174,226 @@ export function layoutErdNodes(nodes: DiagramNode[], edges: DiagramEdge[], direc
     }
   });
   return packDisconnectedComponents(nodes, positions, parents, children, crossGap, direction);
+}
+
+/**
+ * Deterministic, bounded ERD layout proposal. Only connected entity tables
+ * participate; locked/pinned tables and every unrelated page object remain
+ * fixed obstacles. Manual FK routes are excluded from the scoring pass and
+ * are never rewritten by this function.
+ */
+export function optimizeErdLayout(
+  pageNodes: DiagramNode[],
+  pageEdges: DiagramEdge[],
+  options: ErdOptimizationOptions = {},
+): ErdOptimizationResult {
+  const entities = pageNodes.filter((node) => node.type === 'entity');
+  const entityById = new Map(entities.map((node) => [node.id, node]));
+  const relationshipEdges = pageEdges.filter((edge) => edge.data?.relationship === 'foreign-key'
+    && edge.source.nodeId && edge.target.nodeId
+    && entityById.has(edge.source.nodeId) && entityById.has(edge.target.nodeId));
+  const connectedIds = new Set<string>();
+  relationshipEdges.forEach((edge) => {
+    connectedIds.add(edge.source.nodeId!);
+    connectedIds.add(edge.target.nodeId!);
+  });
+  if (connectedIds.size < 2) return { positions: {}, movedIds: [], score: 0 };
+
+  const connectedNodes = entities.filter((node) => connectedIds.has(node.id));
+  const manualEdges = relationshipEdges.filter((edge) => edge.routing?.mode === 'manual' || edge.waypoints.length > 0);
+  const autoEdges = relationshipEdges.filter((edge) => edge.routing?.mode !== 'manual' && edge.waypoints.length === 0);
+  const direction = options.direction ?? 'vertical';
+  const seeded = layoutErdNodes(connectedNodes, relationshipEdges, direction);
+  const pinned = new Set(options.pinnedIds ?? []);
+  connectedNodes.forEach((node) => { if (node.locked) pinned.add(node.id); });
+  // Preserve the entire hand-routed path, not just its waypoint array: keeping
+  // its endpoint tables fixed prevents the optimizer from pulling a table away
+  // from an authored route that cannot safely be reflowed automatically.
+  manualEdges.forEach((edge) => {
+    if (edge.source.nodeId) pinned.add(edge.source.nodeId);
+    if (edge.target.nodeId) pinned.add(edge.target.nodeId);
+  });
+  const movable = connectedNodes.filter((node) => !pinned.has(node.id));
+  if (movable.length === 0) return { positions: {}, movedIds: [], score: scoreErdLayout(pageNodes, autoEdges, new Map()) };
+
+  const allPositions = new Map(pageNodes.map((node) => [node.id, { ...node.position }]));
+  const movableIds = new Set(movable.map((node) => node.id));
+  const occupied = pageNodes.filter((node) => !movableIds.has(node.id)).map((node) => ({ ...node, position: { ...node.position } }));
+  const degree = new Map<string, number>();
+  relationshipEdges.forEach((edge) => {
+    degree.set(edge.source.nodeId!, (degree.get(edge.source.nodeId!) ?? 0) + 1);
+    degree.set(edge.target.nodeId!, (degree.get(edge.target.nodeId!) ?? 0) + 1);
+  });
+  const pageOrder = new Map(pageNodes.map((node, index) => [node.id, index]));
+  const orderedMovable = [...movable].sort((left, right) => (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0)
+    || pageOrder.get(left.id)! - pageOrder.get(right.id)!);
+  const largest = Math.max(120, ...connectedNodes.map((node) => direction === 'vertical' ? node.size.width : node.size.height));
+  const step = largest + 40;
+
+  orderedMovable.forEach((node) => {
+    const base = seeded[node.id] ?? node.position;
+    const candidates = placementCandidates(base, direction, step);
+    const neighbors = relationshipEdges.flatMap((edge) => edge.source.nodeId === node.id ? [edge.target.nodeId!] : edge.target.nodeId === node.id ? [edge.source.nodeId!] : []);
+    let best = candidates[0] ?? { ...base };
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const candidate of candidates) {
+      const positioned = { ...node, position: candidate };
+      const overlaps = occupied.reduce((total, other) => total + rectangleOverlap(positioned, other, 24), 0);
+      const neighborDistance = neighbors.reduce((total, id) => {
+        const other = allPositions.get(id) ?? entityById.get(id)?.position;
+        if (!other) return total;
+        return total + Math.abs(candidate.x - other.x) + Math.abs(candidate.y - other.y);
+      }, 0);
+      const original = node.position;
+      const displacement = Math.abs(candidate.x - original.x) + Math.abs(candidate.y - original.y);
+      const seedDrift = Math.abs(candidate.x - base.x) + Math.abs(candidate.y - base.y);
+      const cost = overlaps * 1_000_000 + neighborDistance * 0.03 + displacement * 0.015 + seedDrift * 0.02;
+      if (cost < bestCost) { best = candidate; bestCost = cost; }
+      if (overlaps === 0 && seedDrift === 0) break;
+    }
+    allPositions.set(node.id, best);
+    occupied.push({ ...node, position: best });
+  });
+
+  const layers = new Map<string, DiagramNode[]>();
+  movable.forEach((node) => {
+    const seedPosition = seeded[node.id] ?? node.position;
+    const coordinate = direction === 'vertical' ? seedPosition.y : seedPosition.x;
+    const key = String(Math.round(coordinate / 8));
+    layers.set(key, [...(layers.get(key) ?? []), node]);
+  });
+
+  let score = scoreErdLayout(pageNodes, autoEdges, allPositions);
+  for (let pass = 0; pass < 4; pass += 1) {
+    let improved = false;
+    for (const layer of layers.values()) {
+      const ordered = [...layer].sort((left, right) => {
+        const leftPosition = allPositions.get(left.id) ?? left.position;
+        const rightPosition = allPositions.get(right.id) ?? right.position;
+        return (direction === 'vertical' ? leftPosition.x - rightPosition.x : leftPosition.y - rightPosition.y)
+          || pageOrder.get(left.id)! - pageOrder.get(right.id)!;
+      });
+      for (let leftIndex = 0; leftIndex < ordered.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
+          const left = ordered[leftIndex];
+          const right = ordered[rightIndex];
+          const leftPosition = allPositions.get(left.id) ?? left.position;
+          const rightPosition = allPositions.get(right.id) ?? right.position;
+          const candidatePositions = new Map(allPositions);
+          candidatePositions.set(left.id, direction === 'vertical'
+            ? { ...leftPosition, x: rightPosition.x }
+            : { ...leftPosition, y: rightPosition.y });
+          candidatePositions.set(right.id, direction === 'vertical'
+            ? { ...rightPosition, x: leftPosition.x }
+            : { ...rightPosition, y: leftPosition.y });
+          if (hasLayoutCollisions(pageNodes, candidatePositions, 24)) continue;
+          const candidateScore = scoreErdLayout(pageNodes, autoEdges, candidatePositions);
+          if (candidateScore + 1e-6 < score) {
+            allPositions.clear();
+            candidatePositions.forEach((position, id) => allPositions.set(id, position));
+            score = candidateScore;
+            improved = true;
+          }
+        }
+      }
+    }
+    if (!improved) break;
+  }
+
+  const positions: Record<string, Point> = {};
+  connectedNodes.forEach((node) => {
+    const next = allPositions.get(node.id) ?? node.position;
+    if (!pinned.has(node.id) && (Math.abs(next.x - node.position.x) > 0.01 || Math.abs(next.y - node.position.y) > 0.01)) {
+      positions[node.id] = { ...next };
+    }
+  });
+  return { positions, movedIds: Object.keys(positions).sort(), score };
+}
+
+function placementCandidates(base: Point, direction: ErdLayoutDirection, step: number): Point[] {
+  const candidates: Point[] = [{ ...base }];
+  for (let ring = 1; ring <= 12; ring += 1) {
+    for (const sign of [1, -1]) {
+      candidates.push(direction === 'vertical'
+        ? { x: base.x + sign * step * ring, y: base.y }
+        : { x: base.x, y: base.y + sign * step * ring });
+    }
+  }
+  for (let depth = 1; depth <= 4; depth += 1) {
+    for (const cross of [0, 1, -1, 2, -2, 3, -3]) {
+      candidates.push(direction === 'vertical'
+        ? { x: base.x + cross * step, y: base.y + depth * step }
+        : { x: base.x + depth * step, y: base.y + cross * step });
+      if (cross !== 0) candidates.push(direction === 'vertical'
+        ? { x: base.x + cross * step, y: base.y - depth * step }
+        : { x: base.x - depth * step, y: base.y + cross * step });
+    }
+  }
+  return candidates;
+}
+
+function scoreErdLayout(nodes: DiagramNode[], edges: DiagramEdge[], positions: Map<string, Point>): number {
+  const positioned = nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }));
+  let overlaps = 0;
+  for (let left = 0; left < positioned.length; left += 1) {
+    for (let right = left + 1; right < positioned.length; right += 1) overlaps += rectangleOverlap(positioned[left], positioned[right], 24);
+  }
+  let crossings = 0;
+  let length = 0;
+  const nodeById = new Map(positioned.map((node) => [node.id, node]));
+  const segments = edges.flatMap((edge) => {
+    const source = edge.source.nodeId ? nodeById.get(edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodeById.get(edge.target.nodeId) : undefined;
+    if (!source || !target) return [];
+    const start = { x: source.position.x + source.size.width / 2, y: source.position.y + source.size.height / 2 };
+    const end = { x: target.position.x + target.size.width / 2, y: target.position.y + target.size.height / 2 };
+    length += Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+    return [{ start, end }];
+  });
+  for (let left = 0; left < segments.length; left += 1) {
+    for (let right = left + 1; right < segments.length; right += 1) {
+      if (properLineCrossing(segments[left].start, segments[left].end, segments[right].start, segments[right].end)) crossings += 1;
+    }
+  }
+  const bounds = positioned.reduce((current, node) => ({
+    left: Math.min(current.left, node.position.x),
+    top: Math.min(current.top, node.position.y),
+    right: Math.max(current.right, node.position.x + node.size.width),
+    bottom: Math.max(current.bottom, node.position.y + node.size.height),
+  }), { left: Number.POSITIVE_INFINITY, top: Number.POSITIVE_INFINITY, right: Number.NEGATIVE_INFINITY, bottom: Number.NEGATIVE_INFINITY });
+  const area = Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
+  const displacement = positioned.reduce((total, node) => {
+    const original = nodes.find((candidate) => candidate.id === node.id)!;
+    return total + Math.abs(node.position.x - original.position.x) + Math.abs(node.position.y - original.position.y);
+  }, 0);
+  return overlaps * 1_000_000_000 + crossings * 1_000_000 + length * 0.08 + area * 0.00001 + displacement * 0.015;
+}
+
+function rectangleOverlap(left: DiagramNode, right: DiagramNode, gap: number): number {
+  const width = Math.min(left.position.x + left.size.width + gap, right.position.x + right.size.width + gap)
+    - Math.max(left.position.x - gap, right.position.x - gap);
+  const height = Math.min(left.position.y + left.size.height + gap, right.position.y + right.size.height + gap)
+    - Math.max(left.position.y - gap, right.position.y - gap);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+function hasLayoutCollisions(nodes: DiagramNode[], positions: Map<string, Point>, gap: number): boolean {
+  const positioned = nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }));
+  for (let left = 0; left < positioned.length; left += 1) {
+    for (let right = left + 1; right < positioned.length; right += 1) {
+      if (rectangleOverlap(positioned[left], positioned[right], gap) > 0) return true;
+    }
+  }
+  return false;
+}
+
+function properLineCrossing(a: Point, b: Point, c: Point, d: Point): boolean {
+  const orient = (p: Point, q: Point, r: Point) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const abC = orient(a, b, c);
+  const abD = orient(a, b, d);
+  const cdA = orient(c, d, a);
+  const cdB = orient(c, d, b);
+  return abC * abD < -1e-6 && cdA * cdB < -1e-6;
 }
 
 function packDisconnectedComponents(

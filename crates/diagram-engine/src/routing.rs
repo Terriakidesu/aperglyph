@@ -532,7 +532,7 @@ fn connect_side(
 }
 
 fn route_segment_penalty(from: Point, to: Point, routes: &[(Point, Point)], simple: bool) -> f64 {
-    let overlap_base = if simple { 160.0 } else { 900.0 };
+    let overlap_base = if simple { 160.0 } else { 1000.0 };
     let overlap_scale = if simple { 0.7 } else { 2.0 };
     let crossing_cost = if simple { 16.0 } else { 220.0 };
     let mut penalty = 0.0;
@@ -546,7 +546,7 @@ fn route_segment_penalty(from: Point, to: Point, routes: &[(Point, Point)], simp
             parallel_segment_separation(from, to, *existing_start, *existing_end)
         {
             if separation < ROUTING_LANE_SPACING + 4.0 {
-                penalty += 24.0 + (ROUTING_LANE_SPACING + 4.0 - separation) * 4.0;
+                penalty += 28.0 + (ROUTING_LANE_SPACING + 4.0 - separation) * 4.0;
             }
         }
     }
@@ -883,6 +883,33 @@ mod tests {
             !same_y(segment[0], segment[1]) || !almost_equal(segment[0].y, 50.0)
         }));
         assert!(points.len() >= 3);
+    }
+
+    #[test]
+    fn route_cost_prioritizes_separating_shared_paths_and_tight_lanes() {
+        let start = Point { x: 0.0, y: 0.0 };
+        let end = Point { x: 100.0, y: 0.0 };
+        let shared = route_segment_penalty(
+            start,
+            end,
+            &[(Point { x: 20.0, y: 0.0 }, Point { x: 80.0, y: 0.0 })],
+            true,
+        );
+        let tight = route_segment_penalty(
+            start,
+            end,
+            &[(Point { x: 0.0, y: 2.0 }, Point { x: 100.0, y: 2.0 })],
+            true,
+        );
+        let crossing = route_segment_penalty(
+            start,
+            end,
+            &[(Point { x: 50.0, y: -40.0 }, Point { x: 50.0, y: 40.0 })],
+            true,
+        );
+
+        assert!(shared > tight);
+        assert!(tight > crossing);
     }
 
     fn obstacles_rects(values: &[f64]) -> Vec<Rect> {

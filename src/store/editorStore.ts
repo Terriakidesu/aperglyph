@@ -48,7 +48,7 @@ import { createDocument, createEdge, createNode, createPage as buildPage, defaul
 import { editorEvents } from '../core/events';
 import type { Alignment, DistributionAxis, ImportedPageMode, ZOrderAction } from '../core/commands';
 import type { DocumentCommand } from '../core/commands';
-import { layoutErdNodes, layoutNodes } from '../core/layout';
+import { layoutErdNodes, layoutNodes, optimizeErdLayout as buildErdLayoutProposal } from '../core/layout';
 import type { LayoutMode } from '../core/layout';
 import { LayoutWorkerClient } from '../spatial/layoutClient';
 import type { ClipboardPayload, DiagramDocument, DiagramEdge, DiagramGuide, DiagramNode, EdgePatch, NodePatch, NodeStyle, PageSettingsPatch, Point, StylePreset, ToolId, Viewport } from '../core/types';
@@ -125,6 +125,7 @@ interface EditorStore {
   groupSelection: () => void;
   ungroupSelection: () => void;
   autoLayout: (mode?: LayoutMode) => Promise<void>;
+  optimizeErdLayout: (pinnedIds?: string[]) => Promise<number>;
   createPage: (name?: string) => void;
   applyImportedDocument: (document: DiagramDocument, mode: ImportedPageMode) => void;
   renameDocument: (name: string) => void;
@@ -646,6 +647,32 @@ export const useEditorStore = create<EditorStore>((set, get) => {
       if (current.document !== document || current.activePageId !== activePageId) return;
       const next = manager.execute(new LayoutNodesCommand(activePageId, positions, mode), document);
       updateDocument(next, `Auto layout · ${mode}`);
+    },
+    optimizeErdLayout: async (pinnedIds = []) => {
+      const { activePageId, document } = get();
+      if (document.diagramType !== 'erd') return 0;
+      const page = getActivePage(document, activePageId);
+      if (!page) return 0;
+      const direction = 'vertical';
+      let positions: Record<string, Point>;
+      try {
+        positions = await layoutClient.optimizeErd(page.nodes, page.edges, direction, pinnedIds);
+      } catch {
+        positions = buildErdLayoutProposal(page.nodes, page.edges, { direction, pinnedIds }).positions;
+      }
+      const current = get();
+      if (current.document !== document || current.activePageId !== activePageId) return 0;
+      const movedIds = Object.keys(positions).filter((id) => {
+        const node = page.nodes.find((candidate) => candidate.id === id);
+        const position = positions[id];
+        return Boolean(node && !node.locked && position
+          && (Math.abs(node.position.x - position.x) > 0.01 || Math.abs(node.position.y - position.y) > 0.01));
+      });
+      if (movedIds.length === 0) return 0;
+      const proposed = Object.fromEntries(movedIds.map((id) => [id, positions[id]]));
+      const next = manager.execute(new LayoutNodesCommand(activePageId, proposed, 'ERD connection-aware', 'Optimize ERD layout'), document);
+      updateDocument(next, 'Optimize ERD layout');
+      return movedIds.length;
     },
     createPage: (name) => {
       const { document, activePageId } = get();

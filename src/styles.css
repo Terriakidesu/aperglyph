@@ -25,6 +25,18 @@
 html, body, #root { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
 body { min-height: 100vh; overflow: hidden; background: var(--bg); }
 .resume-screen { min-height: 100vh; display: grid; place-items: center; color: var(--purple-bright); background: var(--bg); font: 11px var(--mono); }
+.storage-unavailable-screen { display: grid; min-height: 100vh; place-items: center; padding: 32px; color: var(--text); background: var(--bg); }
+.storage-unavailable-screen section { width: min(560px, 100%); padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 24px 72px #0005; }
+.storage-unavailable-screen h1 { margin: 0 0 14px; font-size: 22px; }
+.storage-unavailable-screen p { color: var(--muted-strong); line-height: 1.55; }
+.storage-unavailable-screen .primary-button { margin-top: 12px; }
+.workspace-import-modal { width: min(560px, calc(100vw - 36px)); padding: 0 0 18px; color: #e4e7ef; background: #151a27; border: 1px solid #353d54; border-radius: 11px; box-shadow: 0 20px 70px rgba(0,0,0,.45); }
+.workspace-import-summary, .workspace-import-note { margin: 16px 20px; color: #aab1c1; font: 11px/1.6 var(--mono); }
+.workspace-import-collisions { display: grid; gap: 6px; margin: 0 20px; padding: 12px; background: #101522; border: 1px solid #2c354a; border-radius: 6px; font: 10px/1.5 var(--mono); }
+.workspace-import-collisions strong { color: #e5e7ef; }
+.workspace-import-collisions span { color: #9ba5bb; }
+.workspace-import-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 18px 20px 0; }
+.workspace-import-actions button { min-height: 32px; padding: 0 11px; font-size: 10px; }
 button, input { font: inherit; }
 button { color: inherit; border: 0; cursor: pointer; }
 button:disabled { cursor: default; opacity: .35; }
@@ -987,3 +999,16 @@ body.panel-resizing, body.panel-resizing * { cursor: col-resize !important; user
 .node-entity-title { font-size: 16px; }
 .node-field-name { fill: #111111; font: 14px var(--mono); }
 .node-field-key { fill: #111111; font: 600 12px var(--mono); }
+
+/* Workspace document context actions and safe desktop close recovery. */
+.workspace-context-menu { position: fixed; z-index: 60; width: 216px; display: grid; gap: 2px; padding: 6px; background: #151a27; border: 1px solid #3b4560; border-radius: 7px; box-shadow: 0 14px 32px rgba(0,0,0,.42); }
+.workspace-context-menu strong { overflow: hidden; padding: 5px 8px 7px; color: #aeb8ce; font: 600 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-context-menu button { width: 100%; padding: 8px; color: #cbd0df; background: transparent; border-radius: 4px; font: 10px var(--mono); text-align: left; }
+.workspace-context-menu button:hover { color: #fff; background: #252b40; }
+.workspace-context-menu .context-danger { color: #f0a9b9; }
+.workspace-context-menu .context-danger:hover { background: #422536; }
+.close-recovery-backdrop { z-index: 120; }
+.close-recovery-modal { width: min(480px, calc(100vw - 36px)); padding: 22px; color: #e4e7ef; background: #151a27; border: 1px solid #4b416e; border-radius: 10px; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+.close-recovery-modal h2 { margin: 0 0 8px; font: 600 20px var(--display); }
+.close-recovery-modal p { margin: 0; color: #9ba5bb; font: 11px/1.6 var(--mono); }
+.close-recovery-modal > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }

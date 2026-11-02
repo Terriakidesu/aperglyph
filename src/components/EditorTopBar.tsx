@@ -7,6 +7,9 @@ import { copySelectionPng, copySelectionSvg, createWorkspaceBackup, deleteDocume
 import type { DocumentSnapshot } from '../persistence';
 import { useEditorStore } from '../store/editorStore';
 import { LogoMark } from './LogoMark';
+import { isDesktopApp } from '../persistence/nativeStorage';
+import { openNativeWdiag, saveNativeWdiag, saveNativeWorkspaceBackup } from '../persistence/nativeFiles';
+import { parseProject } from '../core/document';
 
 interface EditorTopBarProps {
   onExit: () => void;
@@ -103,8 +106,33 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
       editorEvents.emit('storage:error', { error: new Error('Unable to open this diagram file.') });
     }
   };
+  const openNativeFile = async () => {
+    try {
+      const raw = await openNativeWdiag();
+      if (raw) onOpenDocument?.(parseProject(raw));
+      setDocumentMenuOpen(false);
+    } catch (error) {
+      editorEvents.emit('storage:error', { error: error instanceof Error ? error : new Error('Unable to open this .wdiag file.') });
+    }
+  };
+  const openDocumentFile = () => {
+    if (isDesktopApp()) void openNativeFile();
+    else fileInputRef.current?.click();
+  };
+  const saveProjectFromMenu = async () => {
+    try {
+      if (isDesktopApp()) await saveNativeWdiag(document);
+      else downloadProject(document);
+    } catch (error) {
+      editorEvents.emit('storage:error', { error: error instanceof Error ? error : new Error('Unable to export this .wdiag file.') });
+    }
+  };
   const createBackup = async () => {
-    try { downloadWorkspaceBackup(await createWorkspaceBackup(), `${document.name}-workspace-backup.json`); } catch { editorEvents.emit('storage:error', { error: new Error('Unable to create a workspace backup.') }); }
+    try {
+      const backup = await createWorkspaceBackup();
+      if (isDesktopApp()) await saveNativeWorkspaceBackup(backup, `${document.name}-workspace-backup.json`);
+      else downloadWorkspaceBackup(backup, `${document.name}-workspace-backup.json`);
+    } catch { editorEvents.emit('storage:error', { error: new Error('Unable to create a workspace backup.') }); }
     setDocumentMenuOpen(false);
   };
 
@@ -145,7 +173,7 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
 
   return <>
     <header className="editor-topbar">
-      <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title-wrap"><div className="document-title">{editingTitle ? <input className="document-title-input" aria-label="Document title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitTitle(); } if (event.key === 'Escape') { setTitleDraft(document.name); setEditingTitle(false); } }} autoFocus /> : <button className="document-title-button" title="Rename document" onClick={() => setEditingTitle(true)}><strong>{document.name}</strong></button>}<button className="document-menu-toggle" title="Document menu" aria-label="Document menu" aria-expanded={documentMenuOpen} onClick={() => setDocumentMenuOpen((open) => !open)}><ChevronDown size={13} /></button><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div>{documentMenuOpen && <DocumentMenu onRename={() => { setDocumentMenuOpen(false); setEditingTitle(true); }} onNew={() => { useEditorStore.getState().reset(); rememberActiveDocument(useEditorStore.getState().document.id); setDocumentMenuOpen(false); }} onOpen={() => fileInputRef.current?.click()} onDuplicate={duplicateCurrentDocument} onInfo={() => { setDocumentMenuOpen(false); setDocumentInfoOpen(true); }} onBackup={() => void createBackup()} onPrint={() => { printDocument(document, { pageId: activePageId, contentBounds: true, padding: 32, outlineOnly: true }); setDocumentMenuOpen(false); }} />}{documentInfoOpen && <DocumentInfo document={document} onClose={() => setDocumentInfoOpen(false)} />}</div><input ref={fileInputRef} className="visually-hidden" type="file" accept=".wdiag,.mmd,.mermaid,.puml,.plantuml,.sql,.dot,.gv,.dbml,.csv,.json,.svg,image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }} /></div>
+      <div className="editor-brand-wrap"><button className="back-to-home" onClick={onExit} aria-label="Back to workspace"><X size={17} /></button><LogoMark compact /><span className="topbar-divider" /><div className="document-title-wrap"><div className="document-title">{editingTitle ? <input className="document-title-input" aria-label="Document title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitTitle(); } if (event.key === 'Escape') { setTitleDraft(document.name); setEditingTitle(false); } }} autoFocus /> : <button className="document-title-button" title="Rename document" onClick={() => setEditingTitle(true)}><strong>{document.name}</strong></button>}<button className="document-menu-toggle" title="Document menu" aria-label="Document menu" aria-expanded={documentMenuOpen} onClick={() => setDocumentMenuOpen((open) => !open)}><ChevronDown size={13} /></button><span><span className={`save-dot ${isDirty ? 'dirty' : ''}`} /> {isDirty ? 'Unsaved changes' : 'Saved locally'}</span></div>{documentMenuOpen && <DocumentMenu onRename={() => { setDocumentMenuOpen(false); setEditingTitle(true); }} onNew={() => { useEditorStore.getState().reset(); void rememberActiveDocument(useEditorStore.getState().document.id); setDocumentMenuOpen(false); }} onOpen={openDocumentFile} onSaveAs={() => { setDocumentMenuOpen(false); void saveProjectFromMenu(); }} onDuplicate={duplicateCurrentDocument} onInfo={() => { setDocumentMenuOpen(false); setDocumentInfoOpen(true); }} onBackup={() => void createBackup()} onPrint={() => { printDocument(document, { pageId: activePageId, contentBounds: true, padding: 32, outlineOnly: true }); setDocumentMenuOpen(false); }} />}{documentInfoOpen && <DocumentInfo document={document} onClose={() => setDocumentInfoOpen(false)} />}</div><input ref={fileInputRef} className="visually-hidden" type="file" accept=".wdiag,.mmd,.mermaid,.puml,.plantuml,.sql,.dot,.gv,.dbml,.csv,.json,.svg,image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }} /></div>
           <div className="editor-actions"><div className="history-actions"><button className="icon-button" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)" aria-label="Undo"><Undo2 size={17} /></button><button className="icon-button" disabled={!canRedo} onClick={redo} title="Redo (⌘⇧Z)" aria-label="Redo"><Redo2 size={17} /></button></div><span className="topbar-divider" />
         {onDiagnostics && <button className={`secondary-button diagnostics-button ${diagnosticCount > 0 ? 'has-diagnostics' : ''}`} onClick={onDiagnostics} title={diagnosticCount > 0 ? `Open diagnostics · ${diagnosticCount} issues` : 'No active diagnostics'} aria-label="Open diagnostics">{diagnosticCount > 0 ? <><AlertTriangle size={14} /><span className="diagnostics-label">Diagnostics</span><span>{diagnosticCount}</span></> : <CheckCircle2 size={14} />}</button>}
          <div className="view-menu-wrap"><button className={`secondary-button topbar-view ${viewOpen ? 'active' : ''}`} onClick={() => setViewOpen((open) => !open)} title="Canvas view" aria-haspopup="menu" aria-expanded={viewOpen}><Eye size={14} /> View</button>{viewOpen && <ViewMenu view={view} gridVisible={gridVisible} onViewChange={onViewChange} onToggleGrid={onToggleGrid} onFitPage={onFitPage} onFitSelection={onFitSelection} onZoom100={onZoom100} onToggleFocus={onToggleFocus} onToggleFullscreen={onToggleFullscreen} onTogglePresentation={onTogglePresentation} fullscreen={fullscreen} focusMode={focusMode} presentationMode={presentationMode} />}</div>
@@ -157,8 +185,8 @@ export function EditorTopBar({ onExit, onDiagnostics, diagnosticCount = 0, view,
   </>;
 }
 
-function DocumentMenu({ onRename, onNew, onOpen, onDuplicate, onInfo, onBackup, onPrint }: { onRename: () => void; onNew: () => void; onOpen: () => void; onDuplicate: () => void; onInfo: () => void; onBackup: () => void; onPrint: () => void }) {
-  return <div className="topbar-menu document-menu" onPointerDown={(event) => event.stopPropagation()}><strong>Document</strong><button onClick={onRename}>Rename</button><button onClick={onNew}>New diagram</button><button onClick={onOpen}>Open / Import</button><button onClick={onDuplicate}>Duplicate document</button><div className="view-menu-divider" /><button onClick={onInfo}><FileText size={13} /> Document information</button><button onClick={onBackup}>Workspace backup</button><button onClick={onPrint}>Print</button></div>;
+function DocumentMenu({ onRename, onNew, onOpen, onSaveAs, onDuplicate, onInfo, onBackup, onPrint }: { onRename: () => void; onNew: () => void; onOpen: () => void; onSaveAs: () => void; onDuplicate: () => void; onInfo: () => void; onBackup: () => void; onPrint: () => void }) {
+  return <div className="topbar-menu document-menu" onPointerDown={(event) => event.stopPropagation()}><strong>Document</strong><button onClick={onRename}>Rename</button><button onClick={onNew}>New diagram</button><button onClick={onOpen}>Open .wdiag…</button><button onClick={onSaveAs}>Save As .wdiag…</button><button onClick={onDuplicate}>Duplicate document</button><div className="view-menu-divider" /><button onClick={onInfo}><FileText size={13} /> Document information</button><button onClick={onBackup}>Workspace backup</button><button onClick={onPrint}>Print</button></div>;
 }
 
 function DocumentInfo({ document, onClose }: { document: DiagramDocument; onClose: () => void }) {
@@ -216,7 +244,7 @@ function ExportMenu({ document, activePageId, selectionIds, area, scale, padding
     <strong>Export diagram</strong>
     <div className="export-area" role="group" aria-label="Export area"><span>Area</span><button className={area === 'page' ? 'active' : ''} onClick={() => setArea('page')}>Page</button><button className={area === 'content' ? 'active' : ''} onClick={() => setArea('content')}>Content</button><button disabled={!selectionIds} className={area === 'selection' ? 'active' : ''} onClick={() => selectionIds && setArea('selection')}>Selection</button></div>
     <div className="export-options"><label>Scale<select value={scale} onChange={(event) => setScale(Number(event.target.value) as ExportScale)}><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label><label>Padding<input aria-label="Export padding" type="number" min="0" max="240" step="4" value={padding} onChange={(event) => setPadding(Math.min(240, Math.max(0, Number(event.target.value) || 0)))} /></label><button className={transparent ? 'export-toggle active' : 'export-toggle'} onClick={() => setTransparent(!transparent)}>Transparent background</button><button className={outlineOnly ? 'export-toggle active' : 'export-toggle'} onClick={() => setOutlineOnly(!outlineOnly)}>{outlineOnly ? 'Color export' : 'Outline-only for print'}</button></div>
-    <button onClick={() => { downloadProject(document); close(); }}>AperGlyph project (.wdiag)</button>
+    <button onClick={() => { close(); if (isDesktopApp()) void saveNativeWdiag(document).catch((error: unknown) => editorEvents.emit("storage:error", { error: error instanceof Error ? error : new Error("Unable to export this .wdiag file.") })); else downloadProject(document); }}>AperGlyph project (.wdiag)</button>
     <button onClick={() => { downloadMermaid(document, activePageId); close(); }}>Mermaid (.mmd)</button>
     <button onClick={() => { downloadPlantUml(document, activePageId); close(); }}>PlantUML (.puml)</button>
     {document.diagramType === 'erd' && <button onClick={() => { downloadSql(document, activePageId); close(); }}>SQL schema (.sql)</button>}

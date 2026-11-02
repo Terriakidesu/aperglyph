@@ -1,3 +1,5 @@
+import { deleteNativePreference, getNativePreference, isDesktopApp, setNativePreference } from './nativeStorage';
+
 const ACTIVE_DOCUMENT_KEY = 'aperglyph-active-document';
 
 function storage(): Storage | null {
@@ -8,7 +10,8 @@ function storage(): Storage | null {
   }
 }
 
-export function rememberActiveDocument(documentId: string): void {
+export async function rememberActiveDocument(documentId: string): Promise<void> {
+  if (isDesktopApp()) return setNativePreference(`aperglyph.${ACTIVE_DOCUMENT_KEY}`, documentId);
   try {
     storage()?.setItem(ACTIVE_DOCUMENT_KEY, documentId);
   } catch {
@@ -16,7 +19,8 @@ export function rememberActiveDocument(documentId: string): void {
   }
 }
 
-export function getRememberedDocumentId(): string | null {
+export async function getRememberedDocumentId(): Promise<string | null> {
+  if (isDesktopApp()) return getNativePreference(`aperglyph.${ACTIVE_DOCUMENT_KEY}`);
   try {
     return storage()?.getItem(ACTIVE_DOCUMENT_KEY) ?? null;
   } catch {
@@ -24,7 +28,8 @@ export function getRememberedDocumentId(): string | null {
   }
 }
 
-export function forgetActiveDocument(): void {
+export async function forgetActiveDocument(): Promise<void> {
+  if (isDesktopApp()) return deleteNativePreference(`aperglyph.${ACTIVE_DOCUMENT_KEY}`);
   try {
     storage()?.removeItem(ACTIVE_DOCUMENT_KEY);
   } catch {

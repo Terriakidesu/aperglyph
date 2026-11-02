@@ -1,5 +1,6 @@
 import { migrateDocument } from '../core/document';
 import type { DiagramDocument } from '../core/types';
+import { deleteNativeTemplate, isDesktopApp, listNativeTemplates, saveNativeTemplate } from './nativeStorage';
 
 const TEMPLATE_KEY = 'aperglyph.local-templates';
 
@@ -10,7 +11,8 @@ export interface LocalTemplate {
   document: DiagramDocument;
 }
 
-export function listLocalTemplates(): LocalTemplate[] {
+export async function listLocalTemplates(): Promise<LocalTemplate[]> {
+  if (isDesktopApp()) return listNativeTemplates();
   if (typeof globalThis.localStorage === 'undefined') return [];
   try {
     const parsed = JSON.parse(globalThis.localStorage.getItem(TEMPLATE_KEY) ?? '[]') as unknown;
@@ -21,10 +23,18 @@ export function listLocalTemplates(): LocalTemplate[] {
   }
 }
 
-export function saveLocalTemplate(document: DiagramDocument, name: string): LocalTemplate | null {
-  if (!name.trim() || typeof globalThis.localStorage === 'undefined') return null;
+export async function saveLocalTemplate(document: DiagramDocument, name: string): Promise<LocalTemplate | null> {
+  if (!name.trim() || (!isDesktopApp() && typeof globalThis.localStorage === 'undefined')) return null;
   const template: LocalTemplate = { id: `template_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: name.trim(), createdAt: Date.now(), document: structuredClone(document) };
-  const templates = [template, ...listLocalTemplates()].slice(0, 100);
+  if (isDesktopApp()) {
+    try {
+      await saveNativeTemplate(template);
+      return template;
+    } catch {
+      return null;
+    }
+  }
+  const templates = [template, ...(await listLocalTemplates())].slice(0, 100);
   try {
     globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates));
     return template;
@@ -33,17 +43,19 @@ export function saveLocalTemplate(document: DiagramDocument, name: string): Loca
   }
 }
 
-export function deleteLocalTemplate(id: string): void {
+export async function deleteLocalTemplate(id: string): Promise<void> {
+  if (isDesktopApp()) return deleteNativeTemplate(id);
   if (typeof globalThis.localStorage === 'undefined') return;
   try {
-    globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(listLocalTemplates().filter((template) => template.id !== id)));
+    globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify((await listLocalTemplates()).filter((template) => template.id !== id)));
   } catch {
     // Local templates are optional and never block editing.
   }
 }
 
 /** Replace local templates during an explicit workspace restore. */
-export function replaceLocalTemplates(templates: LocalTemplate[]): void {
+export async function replaceLocalTemplates(templates: LocalTemplate[]): Promise<void> {
+  if (isDesktopApp()) return;
   if (typeof globalThis.localStorage === 'undefined') return;
   const safeTemplates = templates.slice(0, 100).map((template) => ({
     id: template.id,
@@ -53,6 +65,25 @@ export function replaceLocalTemplates(templates: LocalTemplate[]): void {
   }));
   try {
     globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(safeTemplates));
+  } catch {
+    // Templates are optional and never block editing.
+  }
+}
+
+/** Merge backup templates by stable ID, preserving local-only templates. */
+export async function mergeLocalTemplates(templates: LocalTemplate[]): Promise<void> {
+  if (isDesktopApp()) return;
+  if (typeof globalThis.localStorage === 'undefined') return;
+  const existing = await listLocalTemplates();
+  const merged = new Map(existing.map((template) => [template.id, template]));
+  templates.forEach((template) => merged.set(template.id, {
+    id: template.id,
+    name: template.name.trim().slice(0, 256),
+    createdAt: Number.isFinite(template.createdAt) ? template.createdAt : Date.now(),
+    document: structuredClone(migrateDocument(template.document)),
+  }));
+  try {
+    globalThis.localStorage.setItem(TEMPLATE_KEY, JSON.stringify([...merged.values()].slice(-100)));
   } catch {
     // Templates are optional and never block editing.
   }

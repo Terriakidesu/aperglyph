@@ -1,19 +1,23 @@
 import { migrateDocument, validateProjectDocument } from '../core/document';
 import type { DiagramDocument } from '../core/types';
 import {
-  getRecoverySnapshot,
   listAllDocumentSnapshots,
+  listDocumentSummaries,
   listDocuments,
+  listRecoverySnapshots,
+  listTrashedDocumentSummaries,
   listTrashedDocuments,
   restoreWorkspaceData,
   type DocumentSnapshot,
+  type RecoverySnapshot,
   type StoredDocument,
 } from './indexedDb';
-import { listLocalTemplates, replaceLocalTemplates, type LocalTemplate } from './templates';
+import { listLocalTemplates, mergeLocalTemplates, replaceLocalTemplates, type LocalTemplate } from './templates';
 import { forgetActiveDocument } from './session';
+import { exportNativeWorkspaceSnapshot, isDesktopApp, listNativePreferences } from './nativeStorage';
 
 export const WORKSPACE_BACKUP_FORMAT = 'aperglyph-workspace';
-export const WORKSPACE_BACKUP_VERSION = 1;
+export const WORKSPACE_BACKUP_VERSION = 2;
 const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const MAX_BACKUP_DOCUMENTS = 5000;
 const MAX_BACKUP_TEMPLATES = 100;
@@ -28,7 +32,7 @@ export interface WorkspaceBackup {
   snapshots: DocumentSnapshot[];
   templates: LocalTemplate[];
   preferences: Record<string, string>;
-  recovery: { document: DiagramDocument; savedAt: number } | null;
+  recovery: RecoverySnapshot[];
 }
 
 export interface WorkspaceRestoreResult {
@@ -38,24 +42,82 @@ export interface WorkspaceRestoreResult {
   preferences: number;
 }
 
+export interface WorkspaceBackupPreview {
+  counts: {
+    documents: number;
+    snapshots: number;
+    templates: number;
+    preferences: number;
+    recovery: number;
+  };
+  collisions: {
+    documents: number;
+    snapshots: number;
+    templates: number;
+    preferences: number;
+    recovery: number;
+  };
+}
+
 export async function createWorkspaceBackup(): Promise<string> {
-  const [documents, trashedDocuments, snapshots, recovery] = await Promise.all([
-    listDocuments(),
-    listTrashedDocuments(),
-    listAllDocumentSnapshots(),
-    getRecoverySnapshot(),
-  ]);
+  const [documents, snapshots, recovery, templates, preferences] = isDesktopApp()
+    ? await exportNativeWorkspaceSnapshot().then((snapshot) => [
+      snapshot.documents,
+      snapshot.snapshots,
+      snapshot.recovery,
+      snapshot.templates,
+      Object.fromEntries(snapshot.preferences),
+    ] as const)
+    : await Promise.all([
+      Promise.all([listDocuments(), listTrashedDocuments()]).then(([saved, trashed]) => [...saved, ...trashed]),
+      listAllDocumentSnapshots(),
+      listRecoverySnapshots(),
+      listLocalTemplates(),
+      readPreferences(),
+    ]);
   const backup: WorkspaceBackup = {
     format: WORKSPACE_BACKUP_FORMAT,
     formatVersion: WORKSPACE_BACKUP_VERSION,
     exportedAt: Date.now(),
-    documents: [...documents, ...trashedDocuments].map((record) => structuredClone(record)),
+    documents: documents.map((record) => structuredClone(record)),
     snapshots: snapshots.map((snapshot) => structuredClone(snapshot)),
-    templates: listLocalTemplates().map((template) => structuredClone(template)),
-    preferences: readPreferences(),
-    recovery: recovery ? { document: structuredClone(recovery.document), savedAt: recovery.savedAt } : null,
+    templates: templates.map((template) => structuredClone(template)),
+    preferences,
+    recovery: recovery.map((snapshot) => structuredClone(snapshot)),
   };
   return JSON.stringify(backup, null, 2);
+}
+
+export async function previewWorkspaceBackup(raw: string): Promise<WorkspaceBackupPreview> {
+  const backup = parseWorkspaceBackup(raw);
+  const [existingDocuments, existingSnapshots, existingTemplates, existingPreferences, existingRecovery] = await Promise.all([
+    Promise.all([listDocumentSummaries(), listTrashedDocumentSummaries()]).then(([active, trashed]) => [...active, ...trashed]),
+    listAllDocumentSnapshots(),
+    listLocalTemplates(),
+    readPreferences(),
+    listRecoverySnapshots(),
+  ]);
+  const documentIds = new Set(existingDocuments.map((record) => record.id));
+  const snapshotIds = new Set(existingSnapshots.map((snapshot) => snapshot.id));
+  const templateIds = new Set(existingTemplates.map((template) => template.id));
+  const preferenceKeys = new Set(Object.keys(existingPreferences));
+  const recoveryIds = new Set(existingRecovery.map((snapshot) => snapshot.document.id));
+  return {
+    counts: {
+      documents: backup.documents.length,
+      snapshots: backup.snapshots.length,
+      templates: backup.templates.length,
+      preferences: Object.keys(backup.preferences).length,
+      recovery: backup.recovery.length,
+    },
+    collisions: {
+      documents: backup.documents.filter((record) => documentIds.has(record.id)).length,
+      snapshots: backup.snapshots.filter((snapshot) => snapshotIds.has(snapshot.id)).length,
+      templates: backup.templates.filter((template) => templateIds.has(template.id)).length,
+      preferences: Object.keys(backup.preferences).filter((key) => preferenceKeys.has(key)).length,
+      recovery: backup.recovery.filter((snapshot) => recoveryIds.has(snapshot.document.id)).length,
+    },
+  };
 }
 
 export function parseWorkspaceBackup(raw: string): WorkspaceBackup {
@@ -66,7 +128,7 @@ export function parseWorkspaceBackup(raw: string): WorkspaceBackup {
   } catch {
     throw new Error('This file is not valid JSON.');
   }
-  if (!isRecord(value) || value.format !== WORKSPACE_BACKUP_FORMAT || value.formatVersion !== WORKSPACE_BACKUP_VERSION) {
+  if (!isRecord(value) || value.format !== WORKSPACE_BACKUP_FORMAT || (value.formatVersion !== 1 && value.formatVersion !== WORKSPACE_BACKUP_VERSION)) {
     throw new Error('This file is not a supported AperGlyph workspace backup.');
   }
   if (!Array.isArray(value.documents) || value.documents.length > MAX_BACKUP_DOCUMENTS) throw new Error('The workspace backup contains too many documents.');
@@ -77,7 +139,7 @@ export function parseWorkspaceBackup(raw: string): WorkspaceBackup {
   const snapshots = value.snapshots.map((snapshot, index) => parseSnapshot(snapshot, `snapshots[${index}]`));
   const templates = value.templates.map((template, index) => parseTemplate(template, `templates[${index}]`));
   const preferences = parsePreferences(value.preferences);
-  const recovery = value.recovery === null || value.recovery === undefined ? null : parseRecovery(value.recovery);
+  const recovery = parseRecoveries(value.recovery);
 
   return {
     format: WORKSPACE_BACKUP_FORMAT,
@@ -100,13 +162,20 @@ export function parseWorkspaceBackup(raw: string): WorkspaceBackup {
 export async function restoreWorkspaceBackup(raw: string, options: { replace?: boolean } = {}): Promise<WorkspaceRestoreResult> {
   const backup = parseWorkspaceBackup(raw);
   const replace = options.replace !== false;
-  await restoreWorkspaceData(backup.documents, backup.snapshots, backup.recovery, replace);
+  await restoreWorkspaceData(backup.documents, backup.snapshots, backup.recovery, replace, backup.templates, backup.preferences);
+  // Desktop restore commits all backup components in one SQLite transaction.
+  // The browser backend keeps templates and preferences in localStorage.
+  if (!isDesktopApp()) {
+    if (replace) {
+      await replaceLocalTemplates(backup.templates);
+      await restorePreferences(backup.preferences);
+    } else {
+      await mergeLocalTemplates(backup.templates);
+      await mergePreferences(backup.preferences);
+    }
+  }
   if (replace) {
-    // IndexedDB is the authoritative workspace store. Apply optional
-    // localStorage state only after its transaction has committed.
-    replaceLocalTemplates(backup.templates);
-    restorePreferences(backup.preferences);
-    forgetActiveDocument();
+    await forgetActiveDocument();
   }
 
   return {
@@ -181,12 +250,28 @@ function parseTemplate(value: unknown, path: string): LocalTemplate {
   };
 }
 
-function parseRecovery(value: unknown): { document: DiagramDocument; savedAt: number } {
-  if (!isRecord(value) || !isRecord(value.document) || !Number.isFinite(value.savedAt)) throw new Error('recovery is invalid.');
+function parseRecoveries(value: unknown): RecoverySnapshot[] {
+  if (value === null || value === undefined) return [];
+  const records = Array.isArray(value) ? value : [value];
+  if (records.length > MAX_BACKUP_DOCUMENTS) throw new Error('The workspace backup contains too many recovery records.');
+  const latestByDocument = new Map<string, RecoverySnapshot>();
+  records.forEach((record, index) => {
+    const snapshot = parseRecovery(record, `recovery[${index}]`);
+    const existing = latestByDocument.get(snapshot.document.id);
+    if (!existing || snapshot.savedAt > existing.savedAt) latestByDocument.set(snapshot.document.id, snapshot);
+  });
+  return [...latestByDocument.values()].sort((left, right) => right.savedAt - left.savedAt);
+}
+
+function parseRecovery(value: unknown, path: string): RecoverySnapshot {
+  if (!isRecord(value) || !isRecord(value.document) || !Number.isFinite(value.savedAt)) throw new Error(`${path} is invalid.`);
   const errors = validateProjectDocument(value.document);
-  if (errors.length > 0) throw new Error(`recovery.document is invalid: ${errors[0]}`);
+  if (errors.length > 0) throw new Error(`${path}.document is invalid: ${errors[0]}`);
   const document = migrateDocument(value.document as Partial<DiagramDocument>);
-  return { document, savedAt: Number(value.savedAt) };
+  const id = typeof value.id === 'string' && value.id.trim() && value.id !== 'active-recovery'
+    ? value.id.slice(0, 256)
+    : `recovery-${document.id}`;
+  return { id, document, savedAt: Number(value.savedAt) };
 }
 
 function parsePreferences(value: unknown): Record<string, string> {
@@ -194,19 +279,20 @@ function parsePreferences(value: unknown): Record<string, string> {
   if (!isRecord(value)) throw new Error('preferences must be an object.');
   const preferences: Record<string, string> = {};
   for (const [key, item] of Object.entries(value).slice(0, 256)) {
-    if (!/^aperglyph\./.test(key) || key === TEMPLATE_STORAGE_KEY || typeof item !== 'string' || item.length > 200000) continue;
+    if (!/^aperglyph\./.test(key) || key.startsWith('aperglyph.mcp.') || key === TEMPLATE_STORAGE_KEY || typeof item !== 'string' || item.length > 200000) continue;
     preferences[key.slice(0, 256)] = item;
   }
   return preferences;
 }
 
-function readPreferences(): Record<string, string> {
+async function readPreferences(): Promise<Record<string, string>> {
+  if (isDesktopApp()) return listNativePreferences();
   const preferences: Record<string, string> = {};
   if (typeof globalThis.localStorage === 'undefined') return preferences;
   try {
     for (let index = 0; index < globalThis.localStorage.length; index += 1) {
       const key = globalThis.localStorage.key(index);
-      if (!key || !key.startsWith('aperglyph.') || key === TEMPLATE_STORAGE_KEY) continue;
+      if (!key || !key.startsWith('aperglyph.') || key.startsWith('aperglyph.mcp.') || key === TEMPLATE_STORAGE_KEY) continue;
       const value = globalThis.localStorage.getItem(key);
       if (value !== null && value.length <= 200000) preferences[key] = value;
     }
@@ -216,15 +302,24 @@ function readPreferences(): Record<string, string> {
   return preferences;
 }
 
-function restorePreferences(preferences: Record<string, string>): void {
+async function restorePreferences(preferences: Record<string, string>): Promise<void> {
   if (typeof globalThis.localStorage === 'undefined') return;
   try {
     const staleKeys: string[] = [];
     for (let index = 0; index < globalThis.localStorage.length; index += 1) {
       const key = globalThis.localStorage.key(index);
-      if (key?.startsWith('aperglyph.') && key !== TEMPLATE_STORAGE_KEY) staleKeys.push(key);
+      if (key?.startsWith('aperglyph.') && !key.startsWith('aperglyph.mcp.') && key !== TEMPLATE_STORAGE_KEY) staleKeys.push(key);
     }
     staleKeys.forEach((key) => globalThis.localStorage.removeItem(key));
+    Object.entries(preferences).forEach(([key, value]) => globalThis.localStorage.setItem(key, value));
+  } catch {
+    // Preferences are optional and never block document restoration.
+  }
+}
+
+async function mergePreferences(preferences: Record<string, string>): Promise<void> {
+  if (typeof globalThis.localStorage === 'undefined') return;
+  try {
     Object.entries(preferences).forEach(([key, value]) => globalThis.localStorage.setItem(key, value));
   } catch {
     // Preferences are optional and never block document restoration.

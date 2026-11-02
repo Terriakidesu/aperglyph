@@ -58,10 +58,70 @@ describe('workspace backup', () => {
     await saveRecoverySnapshot(document, 1234);
     const raw = await createWorkspaceBackup();
     const parsed = parseWorkspaceBackup(raw);
-    expect(parsed.recovery?.document.id).toBe(document.id);
+    expect(parsed.recovery.some((snapshot) => snapshot.document.id === document.id)).toBe(true);
     await restoreWorkspaceBackup(raw);
-    const restored = await getRecoverySnapshot();
+    const restored = await getRecoverySnapshot(document.id);
     expect(restored?.document.id).toBe(document.id);
     expect(restored?.savedAt).toBe(1234);
+  });
+
+  it('round trips recovery records for multiple documents and accepts older backup versions', async () => {
+    const first = createDocument('First recovery');
+    const second = createDocument('Second recovery');
+    await saveRecoverySnapshot(first, 1100);
+    await saveRecoverySnapshot(second, 2200);
+    const parsed = parseWorkspaceBackup(await createWorkspaceBackup());
+    expect(parsed.recovery.map((snapshot) => snapshot.document.id)).toContain(second.id);
+    expect(parsed.recovery.map((snapshot) => snapshot.document.id)).toContain(first.id);
+    expect(parsed.recovery.find((snapshot) => snapshot.document.id === second.id)?.savedAt).toBe(2200);
+    await restoreWorkspaceBackup(JSON.stringify(parsed));
+    expect((await getRecoverySnapshot(first.id))?.savedAt).toBe(1100);
+    expect((await getRecoverySnapshot(second.id))?.savedAt).toBe(2200);
+
+    const legacy = parseWorkspaceBackup(JSON.stringify({
+      format: 'aperglyph-workspace',
+      formatVersion: 1,
+      exportedAt: 100,
+      documents: [],
+      snapshots: [],
+      templates: [],
+      preferences: {},
+      recovery: { document: first, savedAt: 300 },
+    }));
+    expect(legacy.recovery).toHaveLength(1);
+    expect(legacy.recovery[0].id).toBe(`recovery-${first.id}`);
+  });
+
+  it('previews incoming item counts and ID collisions before applying a restore', async () => {
+    const document = createDocument('Preview collision');
+    await saveDocument(document);
+    const raw = await createWorkspaceBackup();
+    const { previewWorkspaceBackup } = await import('./workspace');
+    const preview = await previewWorkspaceBackup(raw);
+    expect(preview.counts.documents).toBeGreaterThanOrEqual(1);
+    expect(preview.collisions.documents).toBeGreaterThanOrEqual(1);
+  });
+
+  it('merges backups without removing local-only documents and replaces matching records', async () => {
+    const source = createDocument('Imported value');
+    await saveDocument(source);
+    const raw = await createWorkspaceBackup();
+    const localOnly = createDocument('Keep local value');
+    await saveDocument(localOnly);
+    const overwritten = { ...source, name: 'Local collision', updatedAt: source.updatedAt + 100 };
+    await saveDocument(overwritten);
+
+    await restoreWorkspaceBackup(raw, { replace: false });
+
+    const records = await listDocuments();
+    expect(records.some((record) => record.id === localOnly.id)).toBe(true);
+    expect(records.find((record) => record.id === source.id)?.name).toBe('Imported value');
+  });
+
+  it('does not restore a recovery record belonging to another remembered document', async () => {
+    const recoveryDocument = createDocument('Other recovery');
+    await saveRecoverySnapshot(recoveryDocument, 2345);
+    expect(await getRecoverySnapshot('not-the-active-document')).toBeNull();
+    expect((await getRecoverySnapshot(recoveryDocument.id))?.document.id).toBe(recoveryDocument.id);
   });
 });

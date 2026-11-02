@@ -1,7 +1,7 @@
 import { editorEvents } from '../core/events';
-import { documentToSvg } from './files';
 import type { DiagramDocument } from '../core/types';
-import { clearRecoverySnapshot, getSnapshotLimit, saveDocument, saveDocumentSnapshot, saveRecoverySnapshot } from './indexedDb';
+import { clearRecoverySnapshot, getSnapshotLimit, saveDocument, saveDocumentSnapshot, saveDocumentThumbnail, saveRecoverySnapshot } from './indexedDb';
+import { ThumbnailWorkerClient } from './thumbnailClient';
 
 interface AutosaveOptions {
   saveDelay?: number;
@@ -12,12 +12,20 @@ interface AutosaveOptions {
   onError?: (error: Error) => void;
 }
 
+interface PendingDocument {
+  document: DiagramDocument;
+  revision: number;
+}
+
 export class AutosaveController {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingDocument: DiagramDocument | null = null;
+  private readonly pendingDocuments = new Map<string, PendingDocument>();
+  private readonly revisionByDocument = new Map<string, number>();
+  private saveChain: Promise<void> = Promise.resolve();
   private unsubscribeChanged: (() => void) | null = null;
   private unsubscribeOpened: (() => void) | null = null;
+  private readonly thumbnailWorker = new ThumbnailWorkerClient();
   private readonly options: Required<Pick<AutosaveOptions, 'saveDelay' | 'recoveryDelay'>> & Omit<AutosaveOptions, 'saveDelay' | 'recoveryDelay'>;
   private readonly lastSnapshotAt = new Map<string, number>();
 
@@ -39,49 +47,110 @@ export class AutosaveController {
     this.unsubscribeOpened?.();
     this.unsubscribeChanged = null;
     this.unsubscribeOpened = null;
+    this.thumbnailWorker.close();
   }
 
   schedule(document: DiagramDocument): void {
-    this.pendingDocument = structuredClone(document);
+    // Editor commands replace documents immutably. Keep the committed object
+    // reference here instead of cloning the entire graph for each pointer edit;
+    // persistence performs the one required serialization at its boundary.
+    const revision = this.nextRevision(document.id);
+    this.pendingDocuments.set(document.id, { document, revision });
     if (this.saveTimer) clearTimeout(this.saveTimer);
     if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     this.recoveryTimer = setTimeout(() => {
-      if (this.pendingDocument) void this.saveRecovery(this.pendingDocument);
+      const pending = [...this.pendingDocuments.values()].at(-1);
+      if (pending) void this.saveRecovery(pending.document, pending.revision);
     }, this.options.recoveryDelay);
-    this.saveTimer = setTimeout(() => {
-      if (this.pendingDocument) void this.save(this.pendingDocument);
-    }, this.options.saveDelay);
+    this.saveTimer = setTimeout(() => { void this.flushPending().catch(() => undefined); }, this.options.saveDelay);
   }
 
   async flush(document?: DiagramDocument): Promise<void> {
-    const pending = document ?? this.pendingDocument;
-    if (!pending) return;
+    if (document) this.pendingDocuments.set(document.id, { document, revision: this.nextRevision(document.id) });
     if (this.saveTimer) clearTimeout(this.saveTimer);
     if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
-    await this.save(pending);
+    do {
+      await this.flushPending();
+    } while (this.pendingDocuments.size > 0);
   }
 
-  private async save(document: DiagramDocument): Promise<void> {
+  private flushPending(): Promise<void> {
+    if (this.pendingDocuments.size === 0) return this.saveChain;
+    const batch = new Map(this.pendingDocuments);
+    this.pendingDocuments.clear();
+    const next = this.saveChain.catch(() => undefined).then(async () => {
+      const entries = [...batch.entries()];
+      for (let index = 0; index < entries.length; index += 1) {
+        const [documentId, queued] = entries[index];
+        let pending: PendingDocument | undefined = queued;
+        while (pending) {
+          try {
+            await this.save(pending.document, pending.revision);
+          } catch (error) {
+            if (!this.pendingDocuments.has(documentId)) this.pendingDocuments.set(documentId, pending);
+            for (const [remainingId, remaining] of entries.slice(index + 1)) {
+              if (!this.pendingDocuments.has(remainingId)) this.pendingDocuments.set(remainingId, remaining);
+            }
+            throw error;
+          }
+          pending = this.pendingDocuments.get(documentId);
+          if (pending) this.pendingDocuments.delete(documentId);
+        }
+      }
+    });
+    this.saveChain = next;
+    return this.saveChain;
+  }
+
+  private async save(document: DiagramDocument, revision: number): Promise<void> {
     try {
-      await saveDocument(document, createThumbnail(document));
+      const startedAt = performance.now();
+      // A changed document must not display an old thumbnail. The replacement
+      // preview is rendered lazily in a worker after the durable save finishes.
+      await saveDocument(document, null);
+      recordTiming('document-save', startedAt);
+      this.options.onSaved?.(document);
+      editorEvents.emit('storage:saved', { documentId: document.id });
+      void clearRecoverySnapshot(document.id, revision).catch((error) => this.reportError(error));
+      this.scheduleMaintenance(document);
+    } catch (error) {
+      this.reportError(error);
+      throw error;
+    }
+  }
+
+  private scheduleMaintenance(document: DiagramDocument): void {
+    const run = () => { void this.maintain(document); };
+    const idleWindow = globalThis as typeof globalThis & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    };
+    if (idleWindow.requestIdleCallback) idleWindow.requestIdleCallback(run, { timeout: 3000 });
+    else setTimeout(run, 1000);
+  }
+
+  private async maintain(document: DiagramDocument): Promise<void> {
+    try {
+      const startedAt = performance.now();
+      const thumbnail = await this.thumbnailWorker.create(document);
+      recordTiming('thumbnail-worker', startedAt);
+      if (thumbnail) await saveDocumentThumbnail(document.id, document.updatedAt, thumbnail);
+
       const now = Date.now();
       const lastSnapshot = this.lastSnapshotAt.get(document.id) ?? 0;
       if (now - lastSnapshot >= (this.options.snapshotInterval ?? 60 * 60 * 1000)) {
+        const snapshotStartedAt = performance.now();
         await saveDocumentSnapshot(document, { kind: 'automatic', name: 'Automatic snapshot', limit: this.options.snapshotLimit ?? getSnapshotLimit() });
+        recordTiming('snapshot-save', snapshotStartedAt);
         this.lastSnapshotAt.set(document.id, now);
       }
-      await clearRecoverySnapshot();
-      this.pendingDocument = null;
-      this.options.onSaved?.(document);
-      editorEvents.emit('storage:saved', { documentId: document.id });
     } catch (error) {
       this.reportError(error);
     }
   }
 
-  private async saveRecovery(document: DiagramDocument): Promise<void> {
+  private async saveRecovery(document: DiagramDocument, revision: number): Promise<void> {
     try {
-      await saveRecoverySnapshot(document);
+      await saveRecoverySnapshot(document, revision);
     } catch (error) {
       this.reportError(error);
     }
@@ -92,16 +161,22 @@ export class AutosaveController {
     this.options.onError?.(normalized);
     editorEvents.emit('storage:error', { error: normalized });
   }
+
+  private nextRevision(documentId: string): number {
+    const revision = Math.max(Date.now(), (this.revisionByDocument.get(documentId) ?? 0) + 1);
+    this.revisionByDocument.set(documentId, revision);
+    return revision;
+  }
 }
 
-function createThumbnail(document: DiagramDocument): string | undefined {
-  const page = document.pages[0];
-  if (!page) return undefined;
+function recordTiming(name: string, start: number): void {
   try {
-    const svg = documentToSvg(page.nodes.filter((node) => !node.hidden), page.edges, page.settings.background, page.settings.width, page.settings.height);
-    const thumbnail = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-    return thumbnail.length <= 600000 ? thumbnail : undefined;
+    if (typeof performance === 'undefined') return;
+    const measurementName = `aperglyph.persistence.${name}`;
+    const measure = performance.measure(measurementName, { start, end: performance.now() });
+    if (import.meta.env.DEV) console.debug(`[AperGlyph profile] ${measurementName}: ${measure.duration.toFixed(1)} ms`);
+    performance.clearMeasures(measurementName);
   } catch {
-    return undefined;
+    // Performance instrumentation must never make saving fail.
   }
 }

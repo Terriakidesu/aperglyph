@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection, sortRoutesForJumps } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, isValidOrthogonalRoute, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection, sortRoutesForJumps } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -99,6 +99,15 @@ describe('connector routing', () => {
     expect(portDirection('east')).toBe('east');
     expect(portDirection('center')).toBeUndefined();
     expect(NODE_CLEARANCE).not.toBe(PORT_STUB_LENGTH);
+  });
+
+  it('rejects invalid accelerated paths that are diagonal or cross obstacle interiors', () => {
+    const start = { x: 0, y: 50 };
+    const end = { x: 100, y: 50 };
+    const obstacle = { left: 30, top: 30, right: 70, bottom: 70 };
+    expect(isValidOrthogonalRoute([start, { x: 100, y: 100 }, end], start, end, [])).toBe(false);
+    expect(isValidOrthogonalRoute([start, end], start, end, [obstacle])).toBe(false);
+    expect(isValidOrthogonalRoute([start, { x: 0, y: 100 }, { x: 100, y: 100 }, end], start, end, [obstacle])).toBe(true);
   });
 
   it('assigns deterministic lanes to parallel orthogonal connectors', () => {

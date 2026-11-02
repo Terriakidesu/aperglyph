@@ -1,0 +1,46 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "AperGlyph",
+  "version": "0.14.0",
+  "identifier": "app.aperglyph.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "AperGlyph",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"],
+    "category": "Productivity",
+    "shortDescription": "Offline-first diagram editor",
+    "longDescription": "A local-first editor for ERDs, flowcharts, data-flow diagrams, and more.",
+    "fileAssociations": [
+      {
+        "ext": ["wdiag"],
+        "mimeType": "application/x-aperglyph",
+        "name": "AperGlyph diagram",
+        "role": "Editor"
+      }
+    ]
+  },
+  "plugins": {
+    "dialog": {}
+  }
+}

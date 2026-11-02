@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/diagram-engine"]
+members = ["crates/diagram-engine", "crates/desktop-storage", "src-tauri"]
 resolver = "2"

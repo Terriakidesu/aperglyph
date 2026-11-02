@@ -1,12 +1,35 @@
 import { createId, migrateDocument } from '../core/document';
 import type { DiagramDocument } from '../core/types';
+import {
+  clearNativeDocuments,
+  clearNativeRecovery,
+  clearNativeSnapshots,
+  deleteNativeDocument,
+  deleteNativeSnapshot,
+  duplicateNativeDocument,
+  getNativeRecovery,
+  getNativeStorageEstimate,
+  isDesktopApp,
+  listNativeDocuments,
+  listNativeDocumentSummaries,
+  listNativeRecovery,
+  listNativeSnapshots,
+  loadNativeDocument,
+  loadNativeSnapshot,
+  renameNativeDocument,
+  restoreNativeWorkspaceData,
+  saveNativeDocument,
+  saveNativeDocumentThumbnail,
+  saveNativeRecovery,
+  saveNativeSnapshot,
+  updateNativeDocumentMetadata,
+} from './nativeStorage';
 
 const DATABASE_NAME = 'aperglyph-local';
 const DATABASE_VERSION = 3;
 const DOCUMENTS_STORE = 'documents';
 const RECOVERY_STORE = 'recovery';
 const SNAPSHOTS_STORE = 'snapshots';
-const ACTIVE_RECOVERY_ID = 'active-recovery';
 export const DEFAULT_SNAPSHOT_LIMIT = 31;
 export const SNAPSHOT_LIMIT_KEY = 'aperglyph.snapshot-limit';
 
@@ -22,6 +45,8 @@ export interface StoredDocument {
   favorite?: boolean;
   trashedAt?: number;
 }
+
+export type StoredDocumentSummary = Omit<StoredDocument, 'document'>;
 
 export interface RecoverySnapshot {
   id: string;
@@ -72,7 +97,7 @@ export function setSnapshotLimit(value: number): number {
 }
 
 const memoryDocuments = new Map<string, StoredDocument>();
-let memoryRecovery: RecoverySnapshot | null = null;
+const memoryRecovery = new Map<string, RecoverySnapshot>();
 const memorySnapshots = new Map<string, DocumentSnapshot>();
 let databasePromise: Promise<IDBDatabase> | null = null;
 
@@ -116,7 +141,8 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function createStoredDocument(document: DiagramDocument, thumbnail?: string, metadata: Pick<StoredDocument, 'favorite' | 'trashedAt'> = {}): StoredDocument {
+function createStoredDocument(document: DiagramDocument, thumbnail: string | null | undefined, metadata: Pick<StoredDocument, 'favorite' | 'trashedAt'> = {}, existing?: StoredDocument): StoredDocument {
+  const trashedAt = Object.prototype.hasOwnProperty.call(metadata, 'trashedAt') ? metadata.trashedAt : existing?.trashedAt;
   return {
     id: document.id,
     name: document.name,
@@ -125,17 +151,16 @@ function createStoredDocument(document: DiagramDocument, thumbnail?: string, met
     document: structuredClone(document),
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
-    thumbnail,
-    ...metadata,
+    ...(thumbnail === null ? {} : thumbnail !== undefined ? { thumbnail } : existing?.thumbnail ? { thumbnail: existing.thumbnail } : {}),
+    favorite: metadata.favorite ?? existing?.favorite ?? false,
+    ...(trashedAt !== undefined ? { trashedAt } : {}),
   };
 }
 
-export async function saveDocument(document: DiagramDocument, thumbnail?: string, metadata?: Pick<StoredDocument, 'favorite' | 'trashedAt'>): Promise<void> {
+export async function saveDocument(document: DiagramDocument, thumbnail?: string | null, metadata?: Pick<StoredDocument, 'favorite' | 'trashedAt'>): Promise<void> {
+  if (isDesktopApp()) return saveNativeDocument(document, thumbnail);
   const existing = metadata ? undefined : await readStoredDocument(document.id);
-  const record = createStoredDocument(document, thumbnail ?? existing?.thumbnail, {
-    favorite: metadata?.favorite ?? existing?.favorite,
-    trashedAt: metadata?.trashedAt ?? existing?.trashedAt,
-  });
+  const record = createStoredDocument(document, thumbnail, metadata ?? {}, existing);
   if (!supportsIndexedDb()) {
     memoryDocuments.set(record.id, record);
     return;
@@ -146,7 +171,34 @@ export async function saveDocument(document: DiagramDocument, thumbnail?: string
   await transactionComplete(transaction);
 }
 
+/** Update a lazily generated preview only if it still matches the saved revision. */
+export async function saveDocumentThumbnail(id: string, revision: number, thumbnail: string): Promise<boolean> {
+  if (isDesktopApp()) return saveNativeDocumentThumbnail(id, revision, thumbnail);
+  if (!supportsIndexedDb()) {
+    const record = memoryDocuments.get(id);
+    if (!record || record.updatedAt !== revision) return false;
+    memoryDocuments.set(id, { ...record, thumbnail });
+    return true;
+  }
+  const database = await openDatabase();
+  const transaction = database.transaction(DOCUMENTS_STORE, 'readwrite');
+  const transactionDone = transactionComplete(transaction);
+  const store = transaction.objectStore(DOCUMENTS_STORE);
+  const record = await requestResult<StoredDocument | undefined>(store.get(id));
+  if (!record || record.updatedAt !== revision) {
+    await transactionDone;
+    return false;
+  }
+  store.put({ ...record, thumbnail });
+  await transactionDone;
+  return true;
+}
+
 export async function loadDocument(id: string): Promise<DiagramDocument | null> {
+  if (isDesktopApp()) {
+    const record = await loadNativeDocument(id);
+    return record?.document ? migrateDocument(record.document) : null;
+  }
   if (!supportsIndexedDb()) return memoryDocuments.get(id)?.document ? migrateDocument(memoryDocuments.get(id)!.document) : null;
   const database = await openDatabase();
   const record = await requestResult<StoredDocument | undefined>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).get(id));
@@ -154,13 +206,25 @@ export async function loadDocument(id: string): Promise<DiagramDocument | null> 
 }
 
 export async function listDocuments(): Promise<StoredDocument[]> {
+  if (isDesktopApp()) return (await listNativeDocuments()).map((record) => ({ ...record, document: migrateDocument(record.document) }));
   if (!supportsIndexedDb()) return [...memoryDocuments.values()].filter((record) => !record.trashedAt).sort(sortNewest);
   const database = await openDatabase();
   const records = await requestResult<StoredDocument[]>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).getAll());
   return records.filter((record) => !record.trashedAt).sort(sortNewest).map((record) => ({ ...record, document: migrateDocument(record.document) }));
 }
 
+export async function listDocumentSummaries(): Promise<StoredDocumentSummary[]> {
+  if (isDesktopApp()) return listNativeDocumentSummaries(false);
+  return (await listDocuments()).map(({ document: _document, ...summary }) => summary);
+}
+
+export async function listTrashedDocumentSummaries(): Promise<StoredDocumentSummary[]> {
+  if (isDesktopApp()) return listNativeDocumentSummaries(true).then((records) => records.filter((record) => Boolean(record.trashedAt)));
+  return (await listTrashedDocuments()).map(({ document: _document, ...summary }) => summary);
+}
+
 export async function listTrashedDocuments(): Promise<StoredDocument[]> {
+  if (isDesktopApp()) return (await listNativeDocuments(true)).filter((record) => Boolean(record.trashedAt)).map((record) => ({ ...record, document: migrateDocument(record.document) }));
   if (!supportsIndexedDb()) return [...memoryDocuments.values()].filter((record) => Boolean(record.trashedAt)).sort(sortNewest);
   const database = await openDatabase();
   const records = await requestResult<StoredDocument[]>(database.transaction(DOCUMENTS_STORE, 'readonly').objectStore(DOCUMENTS_STORE).getAll());
@@ -168,6 +232,7 @@ export async function listTrashedDocuments(): Promise<StoredDocument[]> {
 }
 
 export async function updateDocumentMetadata(id: string, changes: Pick<StoredDocument, 'favorite' | 'trashedAt'>): Promise<void> {
+  if (isDesktopApp()) return updateNativeDocumentMetadata(id, changes);
   const existing = await readStoredDocument(id);
   if (!existing) return;
   const next = { ...existing, ...changes };
@@ -191,6 +256,7 @@ export async function restoreDocument(id: string): Promise<void> {
 }
 
 export async function renameDocument(id: string, name: string): Promise<DiagramDocument | null> {
+  if (isDesktopApp()) return renameNativeDocument(id, name);
   const existing = await readStoredDocument(id);
   if (!existing || !name.trim()) return null;
   const document = migrateDocument({ ...existing.document, name: name.trim(), updatedAt: Date.now() });
@@ -199,6 +265,7 @@ export async function renameDocument(id: string, name: string): Promise<DiagramD
 }
 
 export async function duplicateDocument(id: string): Promise<DiagramDocument | null> {
+  if (isDesktopApp()) return duplicateNativeDocument(id);
   const existing = await readStoredDocument(id);
   if (!existing) return null;
   const now = Date.now();
@@ -208,6 +275,7 @@ export async function duplicateDocument(id: string): Promise<DiagramDocument | n
 }
 
 export async function deleteDocument(id: string): Promise<void> {
+  if (isDesktopApp()) return deleteNativeDocument(id);
   if (!supportsIndexedDb()) {
     memoryDocuments.delete(id);
   } else {
@@ -222,6 +290,7 @@ export async function deleteDocument(id: string): Promise<void> {
 
 /** Delete every stored document. Used only by an explicit full workspace restore. */
 export async function clearAllDocuments(): Promise<void> {
+  if (isDesktopApp()) return clearNativeDocuments();
   if (!supportsIndexedDb()) {
     memoryDocuments.clear();
     return;
@@ -240,21 +309,30 @@ export async function clearAllDocuments(): Promise<void> {
 export async function restoreWorkspaceData(
   documents: StoredDocument[],
   snapshots: DocumentSnapshot[],
-  recovery: { document: DiagramDocument; savedAt: number } | null,
+  recovery: RecoverySnapshot[],
   replace = true,
+  templates: Array<{ id: string; name: string; createdAt: number; document: DiagramDocument }> = [],
+  preferences: Record<string, string> = {},
 ): Promise<void> {
+  if (isDesktopApp()) {
+    await restoreNativeWorkspaceData(documents, snapshots, recovery, replace, templates, preferences);
+    return;
+  }
   const nextDocuments = documents.map((record) => structuredClone(record));
   const nextSnapshots = snapshots.map((snapshot) => structuredClone(snapshot));
-  const nextRecovery = recovery
-    ? { id: ACTIVE_RECOVERY_ID, document: structuredClone(recovery.document), savedAt: recovery.savedAt }
-    : null;
+  const nextRecovery = recovery.map((snapshot) => ({
+    ...snapshot,
+    id: `recovery-${snapshot.document.id}`,
+    document: structuredClone(snapshot.document),
+  }));
 
   if (!supportsIndexedDb()) {
     const documentsMap = replace ? new Map<string, StoredDocument>() : new Map(memoryDocuments);
     const snapshotsMap = replace ? new Map<string, DocumentSnapshot>() : new Map(memorySnapshots);
     nextDocuments.forEach((record) => documentsMap.set(record.id, record));
     nextSnapshots.forEach((snapshot) => snapshotsMap.set(snapshot.id, snapshot));
-    if (replace || nextRecovery) memoryRecovery = nextRecovery;
+    if (replace) memoryRecovery.clear();
+    nextRecovery.forEach((snapshot) => memoryRecovery.set(snapshot.id, snapshot));
     memoryDocuments.clear();
     documentsMap.forEach((record, id) => memoryDocuments.set(id, record));
     memorySnapshots.clear();
@@ -270,11 +348,11 @@ export async function restoreWorkspaceData(
   if (replace) {
     documentStore.clear();
     snapshotStore.clear();
-    recoveryStore.delete(ACTIVE_RECOVERY_ID);
+    recoveryStore.clear();
   }
   nextDocuments.forEach((record) => documentStore.put(record));
   nextSnapshots.forEach((snapshot) => snapshotStore.put(snapshot));
-  if (nextRecovery) recoveryStore.put(nextRecovery);
+  nextRecovery.forEach((snapshot) => recoveryStore.put(snapshot));
   await transactionComplete(transaction);
 }
 
@@ -287,6 +365,10 @@ export async function saveDocumentSnapshot(document: DiagramDocument, options: {
     kind: options.kind ?? 'automatic',
     ...(options.name?.trim() ? { name: options.name.trim().slice(0, 128) } : {}),
   };
+  if (isDesktopApp()) {
+    await saveNativeSnapshot(snapshot, options.limit ?? getSnapshotLimit());
+    return snapshot;
+  }
   if (!supportsIndexedDb()) {
     memorySnapshots.set(snapshot.id, snapshot);
   } else {
@@ -300,6 +382,7 @@ export async function saveDocumentSnapshot(document: DiagramDocument, options: {
 }
 
 export async function listDocumentSnapshots(documentId: string): Promise<DocumentSnapshot[]> {
+  if (isDesktopApp()) return listNativeSnapshots(documentId);
   const records = !supportsIndexedDb()
     ? [...memorySnapshots.values()]
     : await readAllSnapshots();
@@ -310,6 +393,7 @@ export async function listDocumentSnapshots(documentId: string): Promise<Documen
 }
 
 export async function listAllDocumentSnapshots(): Promise<DocumentSnapshot[]> {
+  if (isDesktopApp()) return listNativeSnapshots();
   const records = !supportsIndexedDb() ? [...memorySnapshots.values()] : await readAllSnapshots();
   return records
     .sort((left, right) => right.savedAt - left.savedAt)
@@ -317,6 +401,7 @@ export async function listAllDocumentSnapshots(): Promise<DocumentSnapshot[]> {
 }
 
 export async function loadDocumentSnapshot(id: string): Promise<DocumentSnapshot | null> {
+  if (isDesktopApp()) return loadNativeSnapshot(id);
   const snapshot = !supportsIndexedDb()
     ? memorySnapshots.get(id)
     : await readSnapshot(id);
@@ -324,6 +409,7 @@ export async function loadDocumentSnapshot(id: string): Promise<DocumentSnapshot
 }
 
 export async function deleteDocumentSnapshot(id: string): Promise<void> {
+  if (isDesktopApp()) return deleteNativeSnapshot(id);
   if (!supportsIndexedDb()) {
     memorySnapshots.delete(id);
     return;
@@ -335,6 +421,7 @@ export async function deleteDocumentSnapshot(id: string): Promise<void> {
 }
 
 export async function clearAllDocumentSnapshots(): Promise<void> {
+  if (isDesktopApp()) return clearNativeSnapshots();
   if (!supportsIndexedDb()) {
     memorySnapshots.clear();
     return;
@@ -360,41 +447,78 @@ export async function pruneDocumentSnapshots(documentId: string, limit = DEFAULT
 }
 
 export async function saveRecoverySnapshot(document: DiagramDocument, savedAt = Date.now()): Promise<void> {
-  const snapshot: RecoverySnapshot = { id: ACTIVE_RECOVERY_ID, document: structuredClone(document), savedAt };
+  if (isDesktopApp()) return saveNativeRecovery(document, savedAt);
+  const snapshot: RecoverySnapshot = { id: `recovery-${document.id}`, document: structuredClone(document), savedAt };
   if (!supportsIndexedDb()) {
-    memoryRecovery = snapshot;
+    const current = memoryRecovery.get(snapshot.id);
+    if (current && current.savedAt >= savedAt) return;
+    memoryRecovery.set(snapshot.id, snapshot);
     return;
   }
   const database = await openDatabase();
   const transaction = database.transaction(RECOVERY_STORE, 'readwrite');
-  transaction.objectStore(RECOVERY_STORE).put(snapshot);
+  const store = transaction.objectStore(RECOVERY_STORE);
+  const records = await requestResult<RecoverySnapshot[]>(store.getAll());
+  const current = records
+    .filter((entry) => entry.document.id === document.id)
+    .sort((left, right) => right.savedAt - left.savedAt)[0];
+  if (!current || current.savedAt < savedAt) {
+    records.filter((entry) => entry.document.id === document.id).forEach((entry) => store.delete(entry.id));
+    store.put(snapshot);
+  }
   await transactionComplete(transaction);
 }
 
-export async function getRecoverySnapshot(): Promise<RecoverySnapshot | null> {
-  if (!supportsIndexedDb()) return memoryRecovery ? { ...memoryRecovery, document: migrateDocument(memoryRecovery.document) } : null;
-  const database = await openDatabase();
-  const snapshot = await requestResult<RecoverySnapshot | undefined>(database.transaction(RECOVERY_STORE, 'readonly').objectStore(RECOVERY_STORE).get(ACTIVE_RECOVERY_ID));
-  return snapshot ? { ...snapshot, document: migrateDocument(snapshot.document) } : null;
+export async function getRecoverySnapshot(documentId?: string): Promise<RecoverySnapshot | null> {
+  if (isDesktopApp()) return getNativeRecovery(documentId);
+  return (await listRecoverySnapshots()).find((snapshot) => !documentId || snapshot.document.id === documentId) ?? null;
 }
 
-export async function clearRecoverySnapshot(): Promise<void> {
+export async function listRecoverySnapshots(): Promise<RecoverySnapshot[]> {
+  if (isDesktopApp()) return listNativeRecovery();
+  const records = !supportsIndexedDb()
+    ? [...memoryRecovery.values()]
+    : await requestResult<RecoverySnapshot[]>(
+      (await openDatabase()).transaction(RECOVERY_STORE, 'readonly').objectStore(RECOVERY_STORE).getAll(),
+    );
+  const latestByDocument = new Map<string, RecoverySnapshot>();
+  records.forEach((snapshot) => {
+    const current = latestByDocument.get(snapshot.document.id);
+    if (!current || snapshot.savedAt > current.savedAt) latestByDocument.set(snapshot.document.id, snapshot);
+  });
+  return [...latestByDocument.values()]
+    .sort((left, right) => right.savedAt - left.savedAt)
+    .map((snapshot) => ({ ...snapshot, document: migrateDocument(snapshot.document) }));
+}
+
+export async function clearRecoverySnapshot(documentId?: string, savedBeforeOrAt?: number): Promise<void> {
+  if (isDesktopApp()) return clearNativeRecovery(documentId, savedBeforeOrAt);
   if (!supportsIndexedDb()) {
-    memoryRecovery = null;
+    for (const [id, snapshot] of memoryRecovery) {
+      if ((!documentId || snapshot.document.id === documentId)
+        && (savedBeforeOrAt === undefined || snapshot.savedAt <= savedBeforeOrAt)) memoryRecovery.delete(id);
+    }
     return;
   }
   const database = await openDatabase();
   const transaction = database.transaction(RECOVERY_STORE, 'readwrite');
-  transaction.objectStore(RECOVERY_STORE).delete(ACTIVE_RECOVERY_ID);
+  const store = transaction.objectStore(RECOVERY_STORE);
+  const records = await requestResult<RecoverySnapshot[]>(store.getAll());
+  records.forEach((snapshot) => {
+    if ((!documentId || snapshot.document.id === documentId)
+      && (savedBeforeOrAt === undefined || snapshot.savedAt <= savedBeforeOrAt)) store.delete(snapshot.id);
+  });
   await transactionComplete(transaction);
 }
 
 export async function requestPersistentStorage(): Promise<boolean> {
+  if (isDesktopApp()) return false;
   if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
   return navigator.storage.persist();
 }
 
 export async function getStorageEstimate(): Promise<StorageEstimate> {
+  if (isDesktopApp()) return getNativeStorageEstimate();
   if (typeof navigator === 'undefined' || !navigator.storage?.estimate) {
     return { usage: 0, quota: 0, usageRatio: 0, persistent: false };
   }

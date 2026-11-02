@@ -61,6 +61,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
   const addNode = useEditorStore((state) => state.createNode);
   const createPage = useEditorStore((state) => state.createPage);
   const autoLayout = useEditorStore((state) => state.autoLayout);
+  const optimizeErdLayout = useEditorStore((state) => state.optimizeErdLayout);
   const resetEdge = useEditorStore((state) => state.resetEdge);
   const updatePageSettings = useEditorStore((state) => state.updatePageSettings);
   const clearFormatPainter = useEditorStore((state) => state.clearFormatPainter);
@@ -137,12 +138,16 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     { id: 'group', label: 'Group selection', hint: 'Selection', shortcut: '⌘G', run: () => groupSelection() },
     { id: 'new-page', label: 'Add page', hint: 'Pages', run: () => createPage() },
     { id: 'auto-layout', label: 'Auto layout', hint: 'Arrange', run: () => { void autoLayout(); } },
+    ...(document.diagramType === 'erd' ? [{ id: 'optimize-erd-layout', label: 'Optimize ERD layout', hint: 'Arrange · may move unlocked tables', run: () => {
+       if (!globalThis.confirm('Optimize this ERD? Eligible unlocked tables may move. Locked tables, tables attached to hand-routed relationships, and unrelated objects stay in place.')) return;
+      void optimizeErdLayout().then((moved) => { if (moved === 0) globalThis.alert('This ERD has no movable connected tables or no safe improvement was found.'); });
+    } }] : []),
     { id: 'toggle-outline', label: 'Show outline', hint: 'Workspace', run: () => { setLeftPanel('outline'); setLeftOpen(true); } },
     { id: 'toggle-code', label: 'Open Code to Diagram', hint: 'Workspace', run: () => { setLeftPanel('code'); setLeftOpen(true); } },
     { id: 'toggle-focus', label: focusMode ? 'Exit focus mode' : 'Enter focus mode', hint: 'Workspace', run: () => setFocusMode((value) => !value) },
     { id: 'toggle-presentation', label: presentationMode ? 'Exit presentation mode' : 'Enter presentation mode', hint: 'Workspace', run: () => setPresentationMode((value) => !value) },
     { id: 'diagnostics', label: 'Open diagnostics', hint: 'Validation', run: () => setShowDiagnostics(true) },
-    { id: 'save-template', label: 'Save current document as template', hint: 'Templates', run: () => { const name = globalThis.prompt('Template name', document.name); if (name?.trim()) saveLocalTemplate(document, name); } },
+    { id: 'save-template', label: 'Save current document as template', hint: 'Templates', run: () => { const name = globalThis.prompt('Template name', document.name); if (name?.trim()) void saveLocalTemplate(document, name); } },
     { id: 'shortcuts', label: 'Open keyboard shortcuts', hint: 'Help', run: () => setShowShortcuts(true) },
     ...(isolatedGroupId ? [{ id: 'exit-group', label: 'Exit group isolation', hint: 'Navigation', run: () => setIsolatedGroupId(null) }] : []),
     ...document.pages.map((candidate) => ({ id: `page-${candidate.id}`, label: `Open page · ${candidate.name}`, hint: 'Pages', run: () => setActivePage(candidate.id) })),
@@ -154,7 +159,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
 
   const updateViewPreferences = (changes: Partial<ViewPreferences>) => setViewPreferences((current) => ({ ...current, ...changes }));
   const openDocument = (next: typeof document) => {
-    rememberActiveDocument(next.id);
+    void rememberActiveDocument(next.id);
     setDocument(next);
   };
 

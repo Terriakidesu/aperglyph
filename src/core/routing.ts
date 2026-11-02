@@ -29,6 +29,17 @@ export interface RouteOptions {
   simpleRouting?: boolean;
 }
 
+/** Validate accelerated paths before they reach the renderer; malformed WASM
+ * output falls back to the TypeScript router instead of drawing diagonals or
+ * paths through table interiors. */
+export function isValidOrthogonalRoute(points: Point[], start: Point, end: Point, obstacles: Rect[]): boolean {
+  if (points.length < 2 || !samePoint(points[0], start) || !samePoint(points.at(-1)!, end)) return false;
+  if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) return false;
+  return points.slice(0, -1).every((point, index) => sameAxis(point, points[index + 1])
+    && !samePoint(point, points[index + 1])
+    && clearSegment(point, points[index + 1], obstacles));
+}
+
 export interface RoutingLane {
   index: number;
   count: number;
@@ -447,7 +458,7 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
   if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0) && !(options.constraints?.some((constraint) => constraint.strength === 'soft'))) return [from, to];
 
   const accelerated = routeOrthogonalWithWasm(from, to, obstacles, options);
-  if (accelerated) return accelerated;
+  if (accelerated && isValidOrthogonalRoute(accelerated, from, to, obstacles)) return normalizeRoute(accelerated);
   const shortcuts = options.lane || options.constraints?.some((constraint) => constraint.strength === 'hard')
     ? []
     : directOrthogonalRoutes(from, to, obstacles, options.otherRoutes);
@@ -790,7 +801,7 @@ function reconstructRoute(key: string, states: Map<string, SearchState>, parents
 
 function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): number {
   const routes = options.otherRoutes ?? [];
-  const overlapBase = options.simpleRouting ? 160 : 900;
+  const overlapBase = options.simpleRouting ? 160 : 1000;
   const overlapScale = options.simpleRouting ? 0.7 : 2;
   const crossingCost = options.simpleRouting ? 16 : 220;
   let penalty = 0;
@@ -803,7 +814,7 @@ function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): num
       else if (segmentsCross(from, to, existingStart, existingEnd)) penalty += crossingCost;
       else {
         const separation = parallelSegmentSeparation(from, to, existingStart, existingEnd);
-        if (separation !== null && separation < ROUTING_LANE_SPACING + 4) penalty += 24 + (ROUTING_LANE_SPACING + 4 - separation) * 4;
+        if (separation !== null && separation < ROUTING_LANE_SPACING + 4) penalty += 28 + (ROUTING_LANE_SPACING + 4 - separation) * 4;
       }
     }
   });

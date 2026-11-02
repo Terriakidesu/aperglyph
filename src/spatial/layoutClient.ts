@@ -1,11 +1,21 @@
 import type { LayoutMode } from '../core/layout';
 import type { DiagramEdge, DiagramNode, Point } from '../core/types';
+import type { ErdLayoutDirection } from '../core/layout';
 
 interface LayoutRequest {
   requestId: number;
   nodes: Array<{ id: string; width: number; height: number }>;
   edges: Array<{ source: number; target: number }>;
   mode: LayoutMode;
+}
+
+interface ErdOptimizationRequest {
+  requestId: number;
+  operation: 'optimize-erd';
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  direction: ErdLayoutDirection;
+  pinnedIds: string[];
 }
 
 interface LayoutResponse {
@@ -45,7 +55,7 @@ export class LayoutWorkerClient {
     if (!this.worker) return Promise.reject(new Error('Layout worker is unavailable.'));
     const indexById = new Map(nodes.map((node, index) => [node.id, index]));
     const requestId = ++this.requestId;
-    const request: LayoutRequest = {
+      const request: LayoutRequest = {
       requestId,
       nodes: nodes.map((node) => ({ id: node.id, width: node.size.width, height: node.size.height })),
       edges: edges.flatMap((edge) => {
@@ -56,6 +66,16 @@ export class LayoutWorkerClient {
       }),
       mode,
     };
+    return new Promise((resolve, reject) => {
+      this.pending.set(requestId, { ids: nodes.map((node) => node.id), resolve, reject });
+      this.worker!.postMessage(request);
+    });
+  }
+
+  optimizeErd(nodes: DiagramNode[], edges: DiagramEdge[], direction: ErdLayoutDirection, pinnedIds: string[] = []): Promise<Record<string, Point>> {
+    if (!this.worker) return Promise.reject(new Error('Layout worker is unavailable.'));
+    const requestId = ++this.requestId;
+    const request: ErdOptimizationRequest = { requestId, operation: 'optimize-erd', nodes, edges, direction, pinnedIds };
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { ids: nodes.map((node) => node.id), resolve, reject });
       this.worker!.postMessage(request);

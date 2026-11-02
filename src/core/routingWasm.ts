@@ -74,20 +74,25 @@ export function routeOrthogonalWithWasm(
     packedConstraints[index * 2 + 1] = constraint.value;
   });
   const lane = options.lane;
-  const packed = wasmRoute(
-    start.x,
-    start.y,
-    end.x,
-    end.y,
-    packedObstacles,
-    packedRoutes,
-    packedPrevious,
-    options.simpleRouting === true,
-    lane?.index ?? -1,
-    lane?.count ?? 0,
-    lane?.spacing ?? 16,
-    packedConstraints,
-  );
+  let packed: Float64Array;
+  try {
+    packed = wasmRoute(
+      start.x,
+      start.y,
+      end.x,
+      end.y,
+      packedObstacles,
+      packedRoutes,
+      packedPrevious,
+      options.simpleRouting === true,
+      lane?.index ?? -1,
+      lane?.count ?? 0,
+      lane?.spacing ?? 16,
+      packedConstraints,
+    );
+  } catch {
+    return null;
+  }
   if (packed.length < 4 || packed.length % 2 !== 0) return null;
   const points: Point[] = [];
   for (let index = 0; index < packed.length; index += 2) {

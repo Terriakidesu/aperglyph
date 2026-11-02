@@ -248,7 +248,7 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
         const loaded = await loadDocument(id);
         if (!loaded) throw new Error(`Document '${id}' could not be found in this browser workspace.`);
         if (useEditorStore.getState().document.id !== active.id || getRevision(active.id) !== sourceRevision) throw new Error('The active document changed while the requested document was loading. Retry the open operation.');
-        rememberActiveDocument(id);
+        await rememberActiveDocument(id);
         useEditorStore.getState().setDocument(loaded);
         return { documentId: loaded.id, name: loaded.name, revision: getRevision(loaded.id) };
       });
@@ -264,7 +264,7 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
         const duplicate = await duplicateDocument(active.id);
         if (!duplicate) throw new Error(`Document '${active.id}' could not be duplicated.`);
         if (useEditorStore.getState().document.id !== active.id || getRevision(active.id) !== sourceRevision) throw new Error('The active document changed while the copy was being created. Retry the duplicate operation.');
-        rememberActiveDocument(duplicate.id);
+        await rememberActiveDocument(duplicate.id);
         useEditorStore.getState().setDocument(duplicate);
         return { documentId: duplicate.id, name: duplicate.name, revision: getRevision(duplicate.id) };
       });
@@ -278,7 +278,7 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
         requireCurrentRevision();
         await flushActiveBeforeSwitch(active.id);
         const created = createDocument(typeof params.name === 'string' ? params.name : 'Untitled diagram', type as DiagramDocument['diagramType']);
-        rememberActiveDocument(created.id);
+        await rememberActiveDocument(created.id);
         useEditorStore.getState().setDocument(created);
         return { documentId: created.id, pageId: created.pages[0].id, revision: getRevision(created.id) };
       });

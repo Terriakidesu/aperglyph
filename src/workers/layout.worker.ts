@@ -1,4 +1,5 @@
-import type { LayoutMode } from '../core/layout';
+import { optimizeErdLayout, type ErdLayoutDirection, type LayoutMode } from '../core/layout';
+import type { DiagramEdge, DiagramNode } from '../core/types';
 
 type WasmLayoutHierarchy = (sizes: Float64Array, edges: Uint32Array, horizontal: boolean, gapX: number, gapY: number) => Float64Array;
 
@@ -14,13 +15,28 @@ interface LayoutRequest {
   mode: LayoutMode;
 }
 
-const scope = self as unknown as { onmessage: ((event: MessageEvent<LayoutRequest>) => void) | null; postMessage: (message: unknown) => void };
+interface ErdOptimizationRequest {
+  requestId: number;
+  operation: 'optimize-erd';
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  direction: ErdLayoutDirection;
+  pinnedIds: string[];
+}
+
+const scope = self as unknown as { onmessage: ((event: MessageEvent<LayoutRequest | ErdOptimizationRequest>) => void) | null; postMessage: (message: unknown) => void };
 let wasmLayout: WasmLayoutHierarchy | null = null;
 const wasmReady = loadWasm();
 
 scope.onmessage = async (event) => {
   const request = event.data;
   try {
+    if ('operation' in request && request.operation === 'optimize-erd') {
+      const result = optimizeErdLayout(request.nodes, request.edges, { direction: request.direction, pinnedIds: request.pinnedIds });
+      scope.postMessage({ requestId: request.requestId, positions: request.nodes.map((node) => result.positions[node.id] ?? node.position) });
+      return;
+    }
+    if (!('mode' in request)) return;
     await wasmReady;
     const positions = wasmLayout && !['grid', 'compact', 'radial'].includes(request.mode)
       ? layoutWithWasm(request)

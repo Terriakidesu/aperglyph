@@ -243,8 +243,8 @@ function expandContainerPositions(nodes: DiagramNode[], requested: Record<string
 
 export class LayoutNodesCommand implements DocumentCommand {
   readonly label: string;
-  constructor(private readonly pageId: string, private readonly positions: Record<string, Point>, mode: string) {
-    this.label = `Auto layout · ${mode}`;
+  constructor(private readonly pageId: string, private readonly positions: Record<string, Point>, mode: string, label?: string) {
+    this.label = label ?? `Auto layout · ${mode}`;
   }
 
   execute(document: DiagramDocument): DiagramDocument {
