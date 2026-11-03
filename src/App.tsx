@@ -244,12 +244,12 @@ export default function App() {
         const current = useEditorStore.getState();
         if (!nativeStorageReadyRef.current && !current.isDirty) {
           allowCloseRef.current = true;
-          await getCurrentWindow().close();
+          await getCurrentWindow().destroy();
           return;
         }
         await withTimeout(autosaveRef.current?.flush(current.isDirty ? current.document : undefined) ?? Promise.resolve(), 15_000);
         allowCloseRef.current = true;
-        await getCurrentWindow().close();
+        await getCurrentWindow().destroy();
       } catch (error) {
         const detail = describeError(error, 'Unknown save failure.');
         setStorageError(`Unable to complete ${closeStage}: ${detail}`);
@@ -329,7 +329,7 @@ export default function App() {
       await withTimeout(autosaveRef.current?.flush(current.isDirty ? current.document : undefined) ?? Promise.resolve(), 15_000);
       setCloseRecoveryPrompt(false);
       allowCloseRef.current = true;
-      await getCurrentWindow().close();
+      await getCurrentWindow().destroy();
     } catch (error) {
       setStorageError(describeError(error, 'Unable to save the native workspace before closing.'));
     }
@@ -341,14 +341,14 @@ export default function App() {
       if (!exported) return;
       setCloseRecoveryPrompt(false);
       allowCloseRef.current = true;
-      await getCurrentWindow().close();
+      await getCurrentWindow().destroy();
     } catch (error) {
       setStorageError(describeError(error, 'Unable to export the current diagram.'));
     }
   };
 
   if (resuming) return <div className="resume-screen" role="status">Restoring your local diagram…</div>;
-  if (nativeStorageFailed) return <main className="storage-unavailable-screen"><section><h1>Workspace unavailable</h1><p>{storageError ?? 'AperGlyph could not open its local workspace database.'}</p><p>Your existing desktop workspace was not replaced. Close the app, check the workspace folder permissions and available disk space, then restart.</p><button className="primary-button" onClick={() => { allowCloseRef.current = true; void getCurrentWindow().close(); }}>Quit AperGlyph</button></section></main>;
+  if (nativeStorageFailed) return <main className="storage-unavailable-screen"><section><h1>Workspace unavailable</h1><p>{storageError ?? 'AperGlyph could not open its local workspace database.'}</p><p>Your existing desktop workspace was not replaced. Close the app, check the workspace folder permissions and available disk space, then restart.</p><button className="primary-button" onClick={() => { allowCloseRef.current = true; void getCurrentWindow().destroy(); }}>Quit AperGlyph</button></section></main>;
   return <><div className="pwa-status" aria-live="polite">{storageError && <span className="pwa-message storage-error"><span>{storageError}</span><button onClick={() => setStorageError(null)}>Dismiss</button></span>}{!isDesktopApp() && !online && <span className="pwa-message offline">Offline mode</span>}{!isDesktopApp() && installPrompt && <span className="pwa-message"><span>Install AperGlyph</span><button onClick={() => void installApp()}>Install</button></span>}{!isDesktopApp() && offlineReady && online && <span className="pwa-message">Ready for offline use <button onClick={() => setOfflineReady(false)}>Dismiss</button></span>}{!isDesktopApp() && updateAvailable && <span className="pwa-message update">New version available <button onClick={() => { void autosaveRef.current?.flush(useEditorStore.getState().document).then(() => updateSWRef.current?.(true)); }}>Save &amp; reload</button></span>}</div>{screen === 'editor' ? <EditorScreen onExit={exitEditor} /> : <HomeScreen onOpen={openDocument} onInstall={installPrompt ? () => void installApp() : undefined} />}{closeRecoveryPrompt && <div className="modal-backdrop close-recovery-backdrop"><div className="close-recovery-modal" role="alertdialog" aria-modal="true" aria-labelledby="close-recovery-title"><h2 id="close-recovery-title">Workspace save failed</h2><p>AperGlyph could not confirm that the latest changes are safely stored. Retry the save, export the current diagram, or cancel closing.</p><div><button className="secondary-button" onClick={() => void exportAndClose()}>Export current diagram &amp; close</button><button className="primary-button" onClick={() => void retryClose()}>Retry save</button><button className="text-button" onClick={() => setCloseRecoveryPrompt(false)}>Cancel close</button></div></div></div>}</>;
 }
 

@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "AperGlyph desktop window capabilities",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-close", "dialog:default"]
+  "permissions": ["core:default", "core:window:allow-close", "core:window:allow-destroy", "dialog:default"]
 }
