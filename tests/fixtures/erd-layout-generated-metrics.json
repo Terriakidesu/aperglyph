@@ -1,0 +1,33 @@
+{
+  "fixture": "Synthetic ERD layout reference (32 tables, 36 FKs)",
+  "before": {
+    "edges": 36,
+    "routeLength": 52865,
+    "turns": 130,
+    "blockedSegments": 0,
+    "invalidSegments": 0,
+    "crossings": 167,
+    "overlapPairs": 27,
+    "overlapLength": 26530,
+    "nearParallelPairs": 48,
+    "tableCollisions": 0,
+    "minimumSegment": 16,
+    "minimumEndpointLead": 24,
+    "layoutArea": 3507500
+  },
+  "after": {
+    "edges": 36,
+    "routeLength": 40028,
+    "turns": 122,
+    "blockedSegments": 0,
+    "invalidSegments": 0,
+    "crossings": 96,
+    "overlapPairs": 14,
+    "overlapLength": 11007,
+    "nearParallelPairs": 20,
+    "tableCollisions": 0,
+    "minimumSegment": 16,
+    "minimumEndpointLead": 24,
+    "layoutArea": 3507500
+  }
+}

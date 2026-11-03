@@ -120,6 +120,14 @@ describe('automatic layout', () => {
     expect(Number.isFinite(first.score)).toBe(true);
     expect(elapsed).toBeLessThan(5_000);
     const positioned = nodes.map((node) => ({ ...node, position: first.positions[node.id] ?? node.position }));
+    const boundsArea = (items: typeof nodes) => {
+      const left = Math.min(...items.map((node) => node.position.x));
+      const top = Math.min(...items.map((node) => node.position.y));
+      const right = Math.max(...items.map((node) => node.position.x + node.size.width));
+      const bottom = Math.max(...items.map((node) => node.position.y + node.size.height));
+      return (right - left) * (bottom - top);
+    };
+    expect(boundsArea(positioned)).toBeLessThanOrEqual(boundsArea(nodes));
     for (let left = 0; left < positioned.length; left += 1) {
       for (let right = left + 1; right < positioned.length; right += 1) {
         const a = positioned[left];

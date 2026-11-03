@@ -1,0 +1,4360 @@
+{
+  "format": "aperglyph",
+  "formatVersion": 1,
+  "document": {
+    "schemaVersion": 1,
+    "id": "doc_erd_layout_generated_reference",
+    "name": "Synthetic ERD layout reference (32 tables, 36 FKs)",
+    "diagramType": "erd",
+    "pages": [
+      {
+        "id": "page_erd_layout_generated_reference",
+        "name": "Generated reference",
+        "nodes": [
+          {
+            "id": "table_users",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2880,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "users",
+              "fields": [
+                {
+                  "id": "field_users_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_users_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_users_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_roles",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1680,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "roles",
+              "fields": [
+                {
+                  "id": "field_roles_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_roles_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_roles_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_permissions",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 480,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "permissions",
+              "fields": [
+                {
+                  "id": "field_permissions_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_permissions_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_permissions_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_projects",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2480,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "projects",
+              "fields": [
+                {
+                  "id": "field_projects_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_projects_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_projects_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_labels",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1280,
+              "y": 1040
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "labels",
+              "fields": [
+                {
+                  "id": "field_labels_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_labels_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_labels_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_environments",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 80,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "environments",
+              "fields": [
+                {
+                  "id": "field_environments_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_environments_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_environments_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_plans",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2080,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 126
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "plans",
+              "fields": [
+                {
+                  "id": "field_plans_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_plans_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_plans_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_integrations",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 880,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "integrations",
+              "fields": [
+                {
+                  "id": "field_integrations_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_integrations_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_integrations_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_28",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_28",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_user_roles",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2880,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "user_roles",
+              "fields": [
+                {
+                  "id": "field_user_roles_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_user_roles_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_user_roles_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_1",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_1",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_2",
+                  "name": "role_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_roles",
+                    "fieldId": "field_roles_id",
+                    "constraintId": "constraint_fk_2",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_role_permissions",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1680,
+              "y": 1040
+            },
+            "size": {
+              "width": 253,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "role_permissions",
+              "fields": [
+                {
+                  "id": "field_role_permissions_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_role_permissions_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_role_permissions_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_3",
+                  "name": "role_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_roles",
+                    "fieldId": "field_roles_id",
+                    "constraintId": "constraint_fk_3",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_4",
+                  "name": "permission_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_permissions",
+                    "fieldId": "field_permissions_id",
+                    "constraintId": "constraint_fk_4",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_project_members",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 480,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "project_members",
+              "fields": [
+                {
+                  "id": "field_project_members_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_project_members_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_project_members_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_5",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_5",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_6",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_6",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_tasks",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2480,
+              "y": 720
+            },
+            "size": {
+              "width": 253,
+              "height": 201
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "tasks",
+              "fields": [
+                {
+                  "id": "field_tasks_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_tasks_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_tasks_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_7",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_7",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_8",
+                  "name": "assignee_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_8",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_9",
+                  "name": "created_by_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_9",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_task_labels",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1280,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "task_labels",
+              "fields": [
+                {
+                  "id": "field_task_labels_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_task_labels_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_task_labels_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_10",
+                  "name": "task_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_tasks",
+                    "fieldId": "field_tasks_id",
+                    "constraintId": "constraint_fk_10",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_11",
+                  "name": "label_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_labels",
+                    "fieldId": "field_labels_id",
+                    "constraintId": "constraint_fk_11",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_task_comments",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 80,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "task_comments",
+              "fields": [
+                {
+                  "id": "field_task_comments_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_task_comments_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_task_comments_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_12",
+                  "name": "task_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_tasks",
+                    "fieldId": "field_tasks_id",
+                    "constraintId": "constraint_fk_12",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_13",
+                  "name": "author_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_13",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_milestones",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2080,
+              "y": 1040
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "milestones",
+              "fields": [
+                {
+                  "id": "field_milestones_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_milestones_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_milestones_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_14",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_14",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_attachments",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 880,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "attachments",
+              "fields": [
+                {
+                  "id": "field_attachments_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_attachments_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_attachments_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_15",
+                  "name": "task_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_tasks",
+                    "fieldId": "field_tasks_id",
+                    "constraintId": "constraint_fk_15",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_repositories",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2880,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "repositories",
+              "fields": [
+                {
+                  "id": "field_repositories_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_repositories_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_repositories_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_16",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_16",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_commits",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1680,
+              "y": 80
+            },
+            "size": {
+              "width": 253,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "commits",
+              "fields": [
+                {
+                  "id": "field_commits_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_commits_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_commits_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_17",
+                  "name": "repository_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_repositories",
+                    "fieldId": "field_repositories_id",
+                    "constraintId": "constraint_fk_17",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_deployments",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 480,
+              "y": 720
+            },
+            "size": {
+              "width": 262,
+              "height": 201
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "deployments",
+              "fields": [
+                {
+                  "id": "field_deployments_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_deployments_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_deployments_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_18",
+                  "name": "repository_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_repositories",
+                    "fieldId": "field_repositories_id",
+                    "constraintId": "constraint_fk_18",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_19",
+                  "name": "environment_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_environments",
+                    "fieldId": "field_environments_id",
+                    "constraintId": "constraint_fk_19",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_20",
+                  "name": "deployed_by_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_20",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_workflows",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2480,
+              "y": 1040
+            },
+            "size": {
+              "width": 253,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "workflows",
+              "fields": [
+                {
+                  "id": "field_workflows_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_workflows_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_workflows_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_21",
+                  "name": "repository_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_repositories",
+                    "fieldId": "field_repositories_id",
+                    "constraintId": "constraint_fk_21",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_workflow_runs",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1280,
+              "y": 400
+            },
+            "size": {
+              "width": 270,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "workflow_runs",
+              "fields": [
+                {
+                  "id": "field_workflow_runs_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_workflow_runs_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_workflow_runs_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_22",
+                  "name": "workflow_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_workflows",
+                    "fieldId": "field_workflows_id",
+                    "constraintId": "constraint_fk_22",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_23",
+                  "name": "triggered_by_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_23",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_artifacts",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 80,
+              "y": 1040
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "artifacts",
+              "fields": [
+                {
+                  "id": "field_artifacts_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_artifacts_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_artifacts_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_24",
+                  "name": "run_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_workflow_runs",
+                    "fieldId": "field_workflow_runs_id",
+                    "constraintId": "constraint_fk_24",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_notifications",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2080,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "notifications",
+              "fields": [
+                {
+                  "id": "field_notifications_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_notifications_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_notifications_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_25",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_25",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_audit_logs",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 880,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "audit_logs",
+              "fields": [
+                {
+                  "id": "field_audit_logs_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_audit_logs_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_audit_logs_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_26",
+                  "name": "actor_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_26",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_settings",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2880,
+              "y": 1040
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "settings",
+              "fields": [
+                {
+                  "id": "field_settings_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_settings_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_settings_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_27",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_27",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_webhooks",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1680,
+              "y": 400
+            },
+            "size": {
+              "width": 262,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "webhooks",
+              "fields": [
+                {
+                  "id": "field_webhooks_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_webhooks_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_webhooks_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_29",
+                  "name": "integration_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_integrations",
+                    "fieldId": "field_integrations_id",
+                    "constraintId": "constraint_fk_29",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_invoices",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 480,
+              "y": 1040
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "invoices",
+              "fields": [
+                {
+                  "id": "field_invoices_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_invoices_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_invoices_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_30",
+                  "name": "project_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_projects",
+                    "fieldId": "field_projects_id",
+                    "constraintId": "constraint_fk_30",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_subscriptions",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2480,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 176
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "subscriptions",
+              "fields": [
+                {
+                  "id": "field_subscriptions_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_subscriptions_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_subscriptions_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_31",
+                  "name": "plan_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_plans",
+                    "fieldId": "field_plans_id",
+                    "constraintId": "constraint_fk_31",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                },
+                {
+                  "id": "field_fk_32",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_32",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_payments",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 1280,
+              "y": 720
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "payments",
+              "fields": [
+                {
+                  "id": "field_payments_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_payments_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_payments_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_33",
+                  "name": "invoice_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_invoices",
+                    "fieldId": "field_invoices_id",
+                    "constraintId": "constraint_fk_33",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_api_keys",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 80,
+              "y": 80
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "api_keys",
+              "fields": [
+                {
+                  "id": "field_api_keys_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_api_keys_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_api_keys_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_34",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_34",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_sessions",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 2080,
+              "y": 400
+            },
+            "size": {
+              "width": 250,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "sessions",
+              "fields": [
+                {
+                  "id": "field_sessions_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_sessions_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_sessions_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_35",
+                  "name": "user_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": false,
+                  "reference": {
+                    "entityId": "table_users",
+                    "fieldId": "field_users_id",
+                    "constraintId": "constraint_fk_35",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          },
+          {
+            "id": "table_release_channels",
+            "library": "erd",
+            "type": "entity",
+            "position": {
+              "x": 880,
+              "y": 1040
+            },
+            "size": {
+              "width": 253,
+              "height": 151
+            },
+            "rotation": 0,
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#111111",
+              "strokeWidth": 1.25,
+              "radius": 8,
+              "opacity": 1,
+              "textColor": "#111111",
+              "fontSize": 13,
+              "fontWeight": 500,
+              "textAlign": "center",
+              "verticalAlign": "middle",
+              "textWrap": false,
+              "autoHeight": false
+            },
+            "data": {
+              "label": "release_channels",
+              "fields": [
+                {
+                  "id": "field_release_channels_id",
+                  "name": "id",
+                  "type": "uuid",
+                  "primaryKey": true,
+                  "foreignKey": false,
+                  "unique": true,
+                  "nullable": false
+                },
+                {
+                  "id": "field_release_channels_name",
+                  "name": "name",
+                  "type": "varchar",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_release_channels_created_at",
+                  "name": "created_at",
+                  "type": "timestamp",
+                  "primaryKey": false,
+                  "foreignKey": false,
+                  "unique": false,
+                  "nullable": false
+                },
+                {
+                  "id": "field_fk_36",
+                  "name": "repository_id",
+                  "type": "uuid",
+                  "primaryKey": false,
+                  "foreignKey": true,
+                  "unique": false,
+                  "nullable": true,
+                  "reference": {
+                    "entityId": "table_repositories",
+                    "fieldId": "field_repositories_id",
+                    "constraintId": "constraint_fk_36",
+                    "onDelete": "NO ACTION",
+                    "onUpdate": "NO ACTION"
+                  }
+                }
+              ],
+              "entityVariant": "key-field-type",
+              "columnHeaders": true,
+              "striped": false,
+              "headerFill": "#ffffff"
+            },
+            "zIndex": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_fk_01",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_user_roles",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_1",
+              "sourceFieldId": "field_fk_1",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_1"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_02",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_user_roles",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_roles",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_2",
+              "sourceFieldId": "field_fk_2",
+              "targetFieldId": "field_roles_id",
+              "sourceFieldIds": [
+                "field_fk_2"
+              ],
+              "targetFieldIds": [
+                "field_roles_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_03",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_role_permissions",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_roles",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_3",
+              "sourceFieldId": "field_fk_3",
+              "targetFieldId": "field_roles_id",
+              "sourceFieldIds": [
+                "field_fk_3"
+              ],
+              "targetFieldIds": [
+                "field_roles_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_04",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_role_permissions",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_permissions",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_4",
+              "sourceFieldId": "field_fk_4",
+              "targetFieldId": "field_permissions_id",
+              "sourceFieldIds": [
+                "field_fk_4"
+              ],
+              "targetFieldIds": [
+                "field_permissions_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_05",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_project_members",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_5",
+              "sourceFieldId": "field_fk_5",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_5"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_06",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_project_members",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_6",
+              "sourceFieldId": "field_fk_6",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_6"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_07",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_tasks",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.6890547263681592
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_7",
+              "sourceFieldId": "field_fk_7",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_7"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_08",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_tasks",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.8134328358208955
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_8",
+              "sourceFieldId": "field_fk_8",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_8"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_09",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_tasks",
+              "port": "right",
+              "anchorId": "field-5-right",
+              "offset": 0.9378109452736318
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_9",
+              "sourceFieldId": "field_fk_9",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_9"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_10",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_task_labels",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_tasks",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.31592039800995025
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_10",
+              "sourceFieldId": "field_fk_10",
+              "targetFieldId": "field_tasks_id",
+              "sourceFieldIds": [
+                "field_fk_10"
+              ],
+              "targetFieldIds": [
+                "field_tasks_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_11",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_task_labels",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_labels",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_11",
+              "sourceFieldId": "field_fk_11",
+              "targetFieldId": "field_labels_id",
+              "sourceFieldIds": [
+                "field_fk_11"
+              ],
+              "targetFieldIds": [
+                "field_labels_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_12",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_task_comments",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_tasks",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.31592039800995025
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_12",
+              "sourceFieldId": "field_fk_12",
+              "targetFieldId": "field_tasks_id",
+              "sourceFieldIds": [
+                "field_fk_12"
+              ],
+              "targetFieldIds": [
+                "field_tasks_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_13",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_task_comments",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_13",
+              "sourceFieldId": "field_fk_13",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_13"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_14",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_milestones",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_14",
+              "sourceFieldId": "field_fk_14",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_14"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_15",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_attachments",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_tasks",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.31592039800995025
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_15",
+              "sourceFieldId": "field_fk_15",
+              "targetFieldId": "field_tasks_id",
+              "sourceFieldIds": [
+                "field_fk_15"
+              ],
+              "targetFieldIds": [
+                "field_tasks_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_16",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_repositories",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_16",
+              "sourceFieldId": "field_fk_16",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_16"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_17",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_commits",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_repositories",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_17",
+              "sourceFieldId": "field_fk_17",
+              "targetFieldId": "field_repositories_id",
+              "sourceFieldIds": [
+                "field_fk_17"
+              ],
+              "targetFieldIds": [
+                "field_repositories_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_18",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_deployments",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.6890547263681592
+            },
+            "target": {
+              "nodeId": "table_repositories",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_18",
+              "sourceFieldId": "field_fk_18",
+              "targetFieldId": "field_repositories_id",
+              "sourceFieldIds": [
+                "field_fk_18"
+              ],
+              "targetFieldIds": [
+                "field_repositories_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_19",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_deployments",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.8134328358208955
+            },
+            "target": {
+              "nodeId": "table_environments",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_19",
+              "sourceFieldId": "field_fk_19",
+              "targetFieldId": "field_environments_id",
+              "sourceFieldIds": [
+                "field_fk_19"
+              ],
+              "targetFieldIds": [
+                "field_environments_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_20",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_deployments",
+              "port": "right",
+              "anchorId": "field-5-right",
+              "offset": 0.9378109452736318
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_20",
+              "sourceFieldId": "field_fk_20",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_20"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_21",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_workflows",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_repositories",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_21",
+              "sourceFieldId": "field_fk_21",
+              "targetFieldId": "field_repositories_id",
+              "sourceFieldIds": [
+                "field_fk_21"
+              ],
+              "targetFieldIds": [
+                "field_repositories_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_22",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_workflow_runs",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_workflows",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_22",
+              "sourceFieldId": "field_fk_22",
+              "targetFieldId": "field_workflows_id",
+              "sourceFieldIds": [
+                "field_fk_22"
+              ],
+              "targetFieldIds": [
+                "field_workflows_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_23",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_workflow_runs",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_23",
+              "sourceFieldId": "field_fk_23",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_23"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_24",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_artifacts",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_workflow_runs",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.36079545454545453
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_24",
+              "sourceFieldId": "field_fk_24",
+              "targetFieldId": "field_workflow_runs_id",
+              "sourceFieldIds": [
+                "field_fk_24"
+              ],
+              "targetFieldIds": [
+                "field_workflow_runs_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_25",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_notifications",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_25",
+              "sourceFieldId": "field_fk_25",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_25"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_26",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_audit_logs",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_26",
+              "sourceFieldId": "field_fk_26",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_26"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_27",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_settings",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_27",
+              "sourceFieldId": "field_fk_27",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_27"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_28",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_integrations",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_28",
+              "sourceFieldId": "field_fk_28",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_28"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_29",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_webhooks",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_integrations",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_29",
+              "sourceFieldId": "field_fk_29",
+              "targetFieldId": "field_integrations_id",
+              "sourceFieldIds": [
+                "field_fk_29"
+              ],
+              "targetFieldIds": [
+                "field_integrations_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_30",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_invoices",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_projects",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_30",
+              "sourceFieldId": "field_fk_30",
+              "targetFieldId": "field_projects_id",
+              "sourceFieldIds": [
+                "field_fk_30"
+              ],
+              "targetFieldIds": [
+                "field_projects_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_31",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_subscriptions",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.7869318181818182
+            },
+            "target": {
+              "nodeId": "table_plans",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_31",
+              "sourceFieldId": "field_fk_31",
+              "targetFieldId": "field_plans_id",
+              "sourceFieldIds": [
+                "field_fk_31"
+              ],
+              "targetFieldIds": [
+                "field_plans_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_32",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_subscriptions",
+              "port": "right",
+              "anchorId": "field-4-right",
+              "offset": 0.9289772727272727
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_32",
+              "sourceFieldId": "field_fk_32",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_32"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_33",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_payments",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_invoices",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_33",
+              "sourceFieldId": "field_fk_33",
+              "targetFieldId": "field_invoices_id",
+              "sourceFieldIds": [
+                "field_fk_33"
+              ],
+              "targetFieldIds": [
+                "field_invoices_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_34",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_api_keys",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_34",
+              "sourceFieldId": "field_fk_34",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_34"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_35",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_sessions",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_users",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.503968253968254
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_35",
+              "sourceFieldId": "field_fk_35",
+              "targetFieldId": "field_users_id",
+              "sourceFieldIds": [
+                "field_fk_35"
+              ],
+              "targetFieldIds": [
+                "field_users_id"
+              ],
+              "cardinality": {
+                "source": "N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          },
+          {
+            "id": "edge_fk_36",
+            "type": "relationship",
+            "source": {
+              "nodeId": "table_release_channels",
+              "port": "right",
+              "anchorId": "field-3-right",
+              "offset": 0.9172185430463576
+            },
+            "target": {
+              "nodeId": "table_repositories",
+              "port": "left",
+              "anchorId": "field-0-left",
+              "offset": 0.4205298013245033
+            },
+            "waypoints": [],
+            "style": {
+              "stroke": "#111111",
+              "strokeWidth": 1.4,
+              "dash": "solid",
+              "startMarker": "circle-crowfoot",
+              "endMarker": "bar",
+              "labelColor": "#aeb5c9",
+              "opacity": 1,
+              "jumpStyle": "arc"
+            },
+            "data": {
+              "relationship": "foreign-key",
+              "constraintId": "constraint_fk_36",
+              "sourceFieldId": "field_fk_36",
+              "targetFieldId": "field_repositories_id",
+              "sourceFieldIds": [
+                "field_fk_36"
+              ],
+              "targetFieldIds": [
+                "field_repositories_id"
+              ],
+              "cardinality": {
+                "source": "0..N",
+                "target": "1"
+              }
+            },
+            "routing": {
+              "mode": "simple"
+            }
+          }
+        ],
+        "settings": {
+          "width": 3400,
+          "height": 1500,
+          "background": "#ffffff",
+          "canvasTheme": "light",
+          "gridSize": 16,
+          "gridVisible": true,
+          "snapToGrid": true,
+          "snapSettings": {
+            "grid": true,
+            "objects": true,
+            "guides": true,
+            "ports": true
+          }
+        },
+        "guides": []
+      }
+    ],
+    "palette": [
+      "#171b28",
+      "#2c2752",
+      "#1f2e43",
+      "#15362f",
+      "#302b24",
+      "#f2f3f7"
+    ],
+    "stylePresets": [],
+    "styleDefaults": {},
+    "createdAt": 1730000000000,
+    "updatedAt": 1730000000000
+  }
+}

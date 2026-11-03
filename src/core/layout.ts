@@ -217,6 +217,7 @@ export function optimizeErdLayout(
   if (movable.length === 0) return { positions: {}, movedIds: [], score: scoreErdLayout(pageNodes, autoEdges, new Map()) };
 
   const allPositions = new Map(pageNodes.map((node) => [node.id, { ...node.position }]));
+  const sourceBounds = hasLayoutCollisions(pageNodes, new Map(), 24) ? undefined : layoutBounds(pageNodes);
   const movableIds = new Set(movable.map((node) => node.id));
   const occupied = pageNodes.filter((node) => !movableIds.has(node.id)).map((node) => ({ ...node, position: { ...node.position } }));
   const degree = new Map<string, number>();
@@ -230,15 +231,19 @@ export function optimizeErdLayout(
   const largest = Math.max(120, ...connectedNodes.map((node) => direction === 'vertical' ? node.size.width : node.size.height));
   const step = largest + 40;
 
+  let unableToPlace = false;
   orderedMovable.forEach((node) => {
+    if (unableToPlace) return;
     const base = seeded[node.id] ?? node.position;
-    const candidates = placementCandidates(base, direction, step);
+    const candidates = [...placementCandidates(base, direction, step), node.position];
     const neighbors = relationshipEdges.flatMap((edge) => edge.source.nodeId === node.id ? [edge.target.nodeId!] : edge.target.nodeId === node.id ? [edge.source.nodeId!] : []);
-    let best = candidates[0] ?? { ...base };
+    let best: Point | undefined;
     let bestCost = Number.POSITIVE_INFINITY;
     for (const candidate of candidates) {
+      if (sourceBounds && !nodeFitsBounds(node, candidate, sourceBounds)) continue;
       const positioned = { ...node, position: candidate };
       const overlaps = occupied.reduce((total, other) => total + rectangleOverlap(positioned, other, 24), 0);
+      if (sourceBounds && overlaps > 0) continue;
       const neighborDistance = neighbors.reduce((total, id) => {
         const other = allPositions.get(id) ?? entityById.get(id)?.position;
         if (!other) return total;
@@ -251,9 +256,20 @@ export function optimizeErdLayout(
       if (cost < bestCost) { best = candidate; bestCost = cost; }
       if (overlaps === 0 && seedDrift === 0) break;
     }
+    if (!best) {
+      unableToPlace = true;
+      return;
+    }
     allPositions.set(node.id, best);
     occupied.push({ ...node, position: best });
   });
+  // If the seeded packing cannot fit into an already collision-free source
+  // envelope, keep the original collision-free placement and still allow
+  // bounded crossing-reducing swaps below.
+  if (unableToPlace) {
+    allPositions.clear();
+    pageNodes.forEach((node) => allPositions.set(node.id, { ...node.position }));
+  }
 
   const layers = new Map<string, DiagramNode[]>();
   movable.forEach((node) => {
@@ -286,7 +302,7 @@ export function optimizeErdLayout(
           candidatePositions.set(right.id, direction === 'vertical'
             ? { ...rightPosition, x: leftPosition.x }
             : { ...rightPosition, y: leftPosition.y });
-          if (hasLayoutCollisions(pageNodes, candidatePositions, 24)) continue;
+          if (hasLayoutCollisions(pageNodes, candidatePositions, 24) || (sourceBounds && !positionsWithinBounds(pageNodes, candidatePositions, sourceBounds))) continue;
           const candidateScore = scoreErdLayout(pageNodes, autoEdges, candidatePositions);
           if (candidateScore + 1e-6 < score) {
             allPositions.clear();
@@ -385,6 +401,25 @@ function hasLayoutCollisions(nodes: DiagramNode[], positions: Map<string, Point>
     }
   }
   return false;
+}
+
+function layoutBounds(nodes: DiagramNode[]): { left: number; top: number; right: number; bottom: number } {
+  return nodes.reduce((bounds, node) => ({
+    left: Math.min(bounds.left, node.position.x),
+    top: Math.min(bounds.top, node.position.y),
+    right: Math.max(bounds.right, node.position.x + node.size.width),
+    bottom: Math.max(bounds.bottom, node.position.y + node.size.height),
+  }), { left: Number.POSITIVE_INFINITY, top: Number.POSITIVE_INFINITY, right: Number.NEGATIVE_INFINITY, bottom: Number.NEGATIVE_INFINITY });
+}
+
+function nodeFitsBounds(node: DiagramNode, position: Point, bounds: ReturnType<typeof layoutBounds>): boolean {
+  return position.x >= bounds.left - 0.01 && position.y >= bounds.top - 0.01
+    && position.x + node.size.width <= bounds.right + 0.01
+    && position.y + node.size.height <= bounds.bottom + 0.01;
+}
+
+function positionsWithinBounds(nodes: DiagramNode[], positions: Map<string, Point>, bounds: ReturnType<typeof layoutBounds>): boolean {
+  return nodes.every((node) => nodeFitsBounds(node, positions.get(node.id) ?? node.position, bounds));
 }
 
 function properLineCrossing(a: Point, b: Point, c: Point, d: Point): boolean {
