@@ -5,6 +5,7 @@ import type { LocalTemplate } from './templates';
 import { editorEvents } from '../core/events';
 
 const nativePreferenceCache = new Map<string, string>();
+const NATIVE_MCP_PREFERENCE = 'aperglyph.mcp.bridge';
 let nativeStorageShimInstalled = false;
 
 export function isDesktopApp(): boolean {
@@ -13,9 +14,13 @@ export function isDesktopApp(): boolean {
 
 export async function initializeNativeStorage(): Promise<void> {
   if (!isDesktopApp()) return;
-  const entries = await invoke<Array<[string, string]>>('list_preferences');
+  const [entries, mcpPreference] = await Promise.all([
+    invoke<Array<[string, string]>>('list_preferences'),
+    invoke<string | null>('get_preference', { key: NATIVE_MCP_PREFERENCE }),
+  ]);
   nativePreferenceCache.clear();
   entries.forEach(([key, value]) => nativePreferenceCache.set(key, value));
+  if (mcpPreference !== null) nativePreferenceCache.set(NATIVE_MCP_PREFERENCE, mcpPreference);
   installNativeStorageShim();
 }
 

@@ -8,7 +8,7 @@ import { useEditorStore } from './store/editorStore';
 import { EditorScreen } from './components/EditorScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { startMcpBrowserBridge } from './mcp/browserBridge';
-import { flushNativeStorage, initializeNativeStorage, isDesktopApp } from './persistence/nativeStorage';
+import { initializeNativeStorage, isDesktopApp } from './persistence/nativeStorage';
 import { openNativeWdiag, readNativeStartupWdiag, saveNativeWdiag, saveNativeWorkspaceBackup } from './persistence/nativeFiles';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
@@ -38,8 +38,6 @@ export default function App() {
   const nativeStorageReadyRef = useRef(false);
   const nativeStorageFailedRef = useRef(false);
   const nativeStorageUnavailableRef = useRef(false);
-
-  useEffect(() => isDesktopApp() ? undefined : startMcpBrowserBridge(), []);
 
   useEffect(() => {
     if (!import.meta.env.DEV || typeof PerformanceObserver === 'undefined') return;
@@ -100,7 +98,9 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    let stopMcpBridge: (() => void) | undefined;
     void initializeNativeStorage().then(async () => {
+      if (active) stopMcpBridge = startMcpBrowserBridge();
       nativeStorageReadyRef.current = true;
       const startupFile = await readNativeStartupWdiag();
       if (startupFile) {
@@ -124,6 +124,7 @@ export default function App() {
       }
     }).catch((error: unknown) => {
       if (!active) return;
+      if (isDesktopApp()) stopMcpBridge = startMcpBrowserBridge();
       const detail = error instanceof Error ? error.message : String(error);
       if (isDesktopApp() && !nativeStorageReadyRef.current) {
         nativeStorageFailedRef.current = true;
@@ -136,7 +137,7 @@ export default function App() {
     }).finally(() => {
       if (active) setResuming(false);
     });
-    return () => { active = false; };
+    return () => { active = false; stopMcpBridge?.(); };
   }, [setDocument]);
 
   useEffect(() => {
@@ -238,6 +239,7 @@ export default function App() {
       event.preventDefault();
       if (closeInProgressRef.current) return;
       closeInProgressRef.current = true;
+      const closeStage = 'saving the latest diagram changes';
       try {
         const current = useEditorStore.getState();
         if (!nativeStorageReadyRef.current && !current.isDirty) {
@@ -246,11 +248,11 @@ export default function App() {
           return;
         }
         await withTimeout(autosaveRef.current?.flush(current.isDirty ? current.document : undefined) ?? Promise.resolve(), 15_000);
-        await withTimeout(flushNativeStorage(), 5_000);
         allowCloseRef.current = true;
         await getCurrentWindow().close();
       } catch (error) {
-        setStorageError(error instanceof Error ? error.message : 'Unable to save the native workspace before closing.');
+        const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
+        setStorageError(`Unable to complete ${closeStage}: ${detail}`);
         setCloseRecoveryPrompt(true);
       } finally {
         closeInProgressRef.current = false;
@@ -325,7 +327,6 @@ export default function App() {
     try {
       const current = useEditorStore.getState();
       await withTimeout(autosaveRef.current?.flush(current.isDirty ? current.document : undefined) ?? Promise.resolve(), 15_000);
-      await withTimeout(flushNativeStorage(), 5_000);
       setCloseRecoveryPrompt(false);
       allowCloseRef.current = true;
       await getCurrentWindow().close();

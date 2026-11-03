@@ -11,11 +11,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 aperglyph-desktop-storage = { path = "../crates/desktop-storage" }
+base64 = "0.23"
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
+xcap = "0.9.8"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

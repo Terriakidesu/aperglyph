@@ -20,6 +20,7 @@ const server = new McpServer({ name: 'aperglyph-mcp', version: '0.1.0' }, { maxT
 function isAllowedOrigin(origin) {
   if (!origin) return true;
   if (extraOrigins.has(origin)) return true;
+  if (['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'].includes(origin)) return true;
   try {
     const url = new URL(origin);
     return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && ['http:', 'https:'].includes(url.protocol);
@@ -155,6 +156,20 @@ function registerTool(name, description, method, inputSchema = {}) {
   });
 }
 
+function registerImageTool(name, description, method, inputSchema = {}) {
+  server.registerTool(name, { description, inputSchema }, async (args) => {
+    try {
+      const result = await callEditor(method, args ?? {});
+      if (!result || typeof result !== 'object' || typeof result.data !== 'string' || typeof result.mimeType !== 'string' || !result.mimeType.startsWith('image/')) {
+        throw new Error('The editor did not return a valid image.');
+      }
+      return { content: [{ type: 'image', data: result.data, mimeType: result.mimeType }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true };
+    }
+  });
+}
+
 const target = { editorId: z.string().optional().describe('Connected editor ID. Required when multiple browser editors are paired.') };
 const docPage = {
   ...target,
@@ -166,7 +181,7 @@ const requestId = z.string().min(1).max(200).describe('Unique idempotency key. R
 
 server.registerTool('get_capabilities', { description: 'List diagram families, operation limits, units, and supported MCP capabilities.' }, async () => jsonResult({
   diagramTypes: ['general', 'flowchart', 'erd', 'dfd', 'use-case'],
-  features: ['documents', 'pages', 'shape-catalog', 'absolute-geometry', 'styles', 'groups', 'containers', 'connections', 'anchors', 'waypoints', 'routing', 'layout-preview', 'validation', 'history', 'svg-preview', 'native-export', 'sql-export', 'mermaid-export', 'plantuml-export', 'png-export', 'pdf-export'],
+  features: ['documents', 'pages', 'shape-catalog', 'absolute-geometry', 'styles', 'groups', 'containers', 'connections', 'anchors', 'waypoints', 'routing', 'layout-preview', 'validation', 'history', 'svg-preview', 'native-export', 'sql-export', 'mermaid-export', 'plantuml-export', 'png-export', 'pdf-export', 'app-ui-screenshot', 'canvas-screenshot'],
   limits: { operationsPerBatch: 2000, messageBytes: MAX_PAYLOAD },
   coordinateSystem: 'Diagram world coordinates in CSS pixels; node.position is the top-left corner.',
 }));
@@ -190,6 +205,8 @@ registerTool('get_history', 'Read undo/redo availability and current revision.',
 registerTool('undo', 'Undo the latest editor command. Because it can restore or remove objects, it requires both edit and delete permission, expectedRevision, and a unique requestId.', 'history.undo', { ...target, expectedRevision: revision, requestId });
 registerTool('redo', 'Redo the latest editor command. Because it can reapply destructive changes, it requires both edit and delete permission, expectedRevision, and a unique requestId.', 'history.redo', { ...target, expectedRevision: revision, requestId });
 registerTool('render_preview', 'Render the page to SVG text for visual inspection. The editor remains unchanged.', 'diagram.preview', docPage);
+registerImageTool('screenshot_app_ui', 'Capture the full AperGlyph desktop application window, including its editor UI. Requires MCP export permission and an open desktop app.', 'screenshot.app-ui', target);
+registerImageTool('screenshot_canvas', 'Render the active diagram page as a PNG image, without the surrounding application UI. Requires MCP export permission.', 'screenshot.canvas', { ...docPage, scale: z.number().int().min(1).max(3).optional() });
 registerTool('export_diagram', 'Export the active document/page as native AperGlyph project, JSON, SQL, Mermaid, PlantUML, SVG, PNG, or PDF. Binary exports are base64 encoded.', 'diagram.export', { ...docPage, format: z.enum(['project', 'json', 'sql', 'mermaid', 'plantuml', 'svg', 'png', 'pdf']) });
 registerTool('save_document', 'Explicitly save the current document to the browser workspace and report save status.', 'document.save', { ...docPage, expectedRevision: revision });
 

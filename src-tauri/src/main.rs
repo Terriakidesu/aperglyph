@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -650,6 +650,32 @@ async fn flush_storage(state: State<'_, AppState>) -> Result<(), String> {
     blocking(move || database.checkpoint().map_err(|error| error.to_string())).await
 }
 
+#[tauri::command]
+async fn capture_app_window_screenshot() -> Result<String, String> {
+    let process_id = std::process::id();
+    blocking(move || {
+        use base64::Engine;
+
+        let windows = xcap::Window::all().map_err(|error| error.to_string())?;
+        let mut candidates = windows.into_iter().filter(|window| {
+            window.pid().ok() == Some(process_id) && !window.is_minimized().unwrap_or(true)
+        });
+        let window = candidates
+            .find(|window| window.title().is_ok_and(|title| title == "AperGlyph"))
+            .or_else(|| candidates.next())
+            .ok_or_else(|| {
+                "The AperGlyph application window is not available for capture.".to_owned()
+            })?;
+        let frame = window.capture_image().map_err(|error| error.to_string())?;
+        let mut output = Cursor::new(Vec::new());
+        xcap::image::DynamicImage::ImageRgba8(frame)
+            .write_to(&mut output, xcap::image::ImageFormat::Png)
+            .map_err(|error| format!("Unable to encode the AperGlyph screenshot: {error}"))?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(output.into_inner()))
+    })
+    .await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -748,6 +774,7 @@ fn main() {
             get_storage_usage,
             get_data_directory,
             flush_storage,
+            capture_app_window_screenshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AperGlyph desktop");

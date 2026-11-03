@@ -1,3 +1,4 @@
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { connectionAnchorPoints } from '../core/anchors';
 import { nodeCenter } from '../core/geometry';
 import { AuthoringBatchCommand, applyAuthoringBatch, prepareAuthoringBatch } from '../core/authoring';
@@ -452,6 +453,25 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
       if (byteLength(svg) > MAX_MESSAGE_BYTES - 1024) throw new Error('The rendered SVG preview is too large to send through the local bridge. Reduce the page contents or export selected objects.');
       return { documentId: active.id, pageId: page.id, width: page.settings.width, height: page.settings.height, mimeType: 'image/svg+xml', svg };
     }
+    case 'screenshot.app-ui': {
+      requireDocument();
+      requireExport();
+      if (!isTauri()) throw new Error('A full application-window screenshot is available only in the AperGlyph desktop app.');
+      return { mimeType: 'image/png', data: await invoke<string>('capture_app_window_screenshot') };
+    }
+    case 'screenshot.canvas': {
+      requireDocument();
+      requireExport();
+      const scale = params.scale === undefined ? 2 : Number(params.scale);
+      if (!Number.isInteger(scale) || scale < 1 || scale > 3) throw new Error('scale must be an integer between 1 and 3.');
+      const width = Math.round(page.settings.width * scale);
+      const height = Math.round(page.settings.height * scale);
+      assertRasterSize(width, height);
+      const svg = documentToSvg(page.nodes, page.edges, page.settings.background, page.settings.width, page.settings.height);
+      const png = await renderSvgToPng(svg, width, height);
+      if (png.size > MAX_MESSAGE_BYTES / 2) throw new Error('The canvas screenshot is too large for the local bridge. Reduce the page dimensions or screenshot scale.');
+      return { mimeType: 'image/png', data: await blobToBase64(png), width, height, pageId: page.id };
+    }
     case 'diagram.export':
       requireDocument();
       requireExport();
@@ -585,7 +605,7 @@ function intersects(position: Point, size: { width: number; height: number }, re
 function getCapabilities() {
   return {
     diagramTypes: ['general', 'flowchart', 'erd', 'dfd', 'use-case'],
-    features: ['documents', 'pages', 'shape-catalog', 'absolute-geometry', 'styles', 'groups', 'containers', 'connections', 'anchors', 'waypoints', 'routing', 'layout-preview', 'validation', 'history', 'svg-preview', 'native-export', 'sql-export', 'mermaid-export', 'plantuml-export', 'png-export', 'pdf-export'],
+    features: ['documents', 'pages', 'shape-catalog', 'absolute-geometry', 'styles', 'groups', 'containers', 'connections', 'anchors', 'waypoints', 'routing', 'layout-preview', 'validation', 'history', 'svg-preview', 'native-export', 'sql-export', 'mermaid-export', 'plantuml-export', 'png-export', 'pdf-export', 'app-ui-screenshot', 'canvas-screenshot'],
     limits: { operationsPerBatch: 2000, messageBytes: MAX_MESSAGE_BYTES },
     coordinateSystem: 'Diagram world coordinates in CSS pixels; node.position is the top-left corner.',
   };
