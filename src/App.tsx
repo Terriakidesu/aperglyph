@@ -251,7 +251,7 @@ export default function App() {
         allowCloseRef.current = true;
         await getCurrentWindow().close();
       } catch (error) {
-        const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
+        const detail = describeError(error, 'Unknown save failure.');
         setStorageError(`Unable to complete ${closeStage}: ${detail}`);
         setCloseRecoveryPrompt(true);
       } finally {
@@ -331,7 +331,7 @@ export default function App() {
       allowCloseRef.current = true;
       await getCurrentWindow().close();
     } catch (error) {
-      setStorageError(error instanceof Error ? error.message : 'Unable to save the native workspace before closing.');
+      setStorageError(describeError(error, 'Unable to save the native workspace before closing.'));
     }
   };
 
@@ -343,7 +343,7 @@ export default function App() {
       allowCloseRef.current = true;
       await getCurrentWindow().close();
     } catch (error) {
-      setStorageError(error instanceof Error ? error.message : 'Unable to export the current diagram.');
+      setStorageError(describeError(error, 'Unable to export the current diagram.'));
     }
   };
 
@@ -368,4 +368,20 @@ async function withTimeout<T>(operation: Promise<T>, milliseconds: number): Prom
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+function describeError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const message = 'message' in error && typeof error.message === 'string' ? error.message : undefined;
+    if (message) return message;
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Keep the close recovery UI usable for non-serializable rejection values.
+    }
+  }
+  return fallback;
 }
