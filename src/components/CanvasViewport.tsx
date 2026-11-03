@@ -140,6 +140,11 @@ interface TouchGesture {
   camera: CameraTransform | null;
 }
 
+interface NativeTrackpadGesture {
+  initialCamera: CameraTransform;
+  initialWorldAtCenter: Point;
+}
+
 interface CameraTransform {
   x: number;
   y: number;
@@ -529,6 +534,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
   });
   const previousHintsPreference = useRef(view.connectionHints);
   const wheelGestureRef = useRef<WheelGesture>({ frame: null, idleTimer: null, camera: null, panX: 0, panY: 0, zoomFactor: 1, zoomPoint: null });
+  const nativeTrackpadGestureRef = useRef<NativeTrackpadGesture | null>(null);
   const touchPointersRef = useRef(new Map<number, Point>());
   const touchGestureRef = useRef<TouchGesture | null>(null);
   const previousCanvasSizeRef = useRef<CanvasSize>({ width: 900, height: 700 });
@@ -744,6 +750,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     const touch = touchGestureRef.current;
     if (touch && touch.frame !== null) cancelAnimationFrame(touch.frame);
     if (pointerFrameRef.current !== null) cancelAnimationFrame(pointerFrameRef.current);
+    nativeTrackpadGestureRef.current = null;
   }, []);
 
   useLayoutEffect(() => {
@@ -1811,6 +1818,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     gesture.panY = 0;
     gesture.zoomFactor = 1;
     gesture.zoomPoint = null;
+    nativeTrackpadGestureRef.current = null;
     viewportGroupRef.current?.setAttribute('transform', cameraTransform(cameraFromViewport(size, useEditorStore.getState().viewport)));
     editorEvents.emit('viewport:preview', null);
   }, [size.height, size.width]);
@@ -1925,6 +1933,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     // Ctrl/Meta-wheel is how browsers report trackpad pinch. Keep the gesture
     // inside the canvas instead of letting the browser zoom the whole page.
     event.preventDefault();
+    if (nativeTrackpadGestureRef.current) return;
     const gesture = wheelGestureRef.current;
     if (!gesture.camera) gesture.camera = cameraFromViewport(size, useEditorStore.getState().viewport);
     if (event.ctrlKey || event.metaKey) {
@@ -1942,6 +1951,92 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     if (gesture.frame !== null) return;
     gesture.frame = requestAnimationFrame(applyWheelFrame);
   };
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const pointFromGesture = (event: Event): Point => {
+      const gesture = event as Event & { clientX?: number; clientY?: number };
+      const clientX = gesture.clientX;
+      const clientY = gesture.clientY;
+      if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+        const point = screenPoint({ clientX: clientX!, clientY: clientY! });
+        if (point.x >= 0 && point.x <= size.width && point.y >= 0 && point.y <= size.height) return point;
+      }
+      return { x: size.width / 2, y: size.height / 2 };
+    };
+    const startTrackpadGesture = (event: Event) => {
+      event.preventDefault();
+      const pending = wheelGestureRef.current;
+      if (pending.idleTimer !== null) window.clearTimeout(pending.idleTimer);
+      pending.idleTimer = null;
+      nativeTrackpadGestureRef.current = null;
+      if (pending.camera) commitWheelGesture();
+      cancelActiveInteraction();
+
+      const initialCamera = cameraFromViewport(size, useEditorStore.getState().viewport);
+      const center = pointFromGesture(event);
+      nativeTrackpadGestureRef.current = {
+        initialCamera,
+        initialWorldAtCenter: {
+          x: (center.x - initialCamera.x) / initialCamera.k,
+          y: (center.y - initialCamera.y) / initialCamera.k,
+        },
+      };
+      pending.camera = initialCamera;
+      pending.panX = 0;
+      pending.panY = 0;
+      pending.zoomFactor = 1;
+      pending.zoomPoint = null;
+    };
+    const changeTrackpadGesture = (event: Event) => {
+      const nativeGesture = nativeTrackpadGestureRef.current;
+      if (!nativeGesture) return;
+      event.preventDefault();
+      const scale = Number((event as Event & { scale?: number }).scale);
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      const center = pointFromGesture(event);
+      const zoom = clampZoom(nativeGesture.initialCamera.k * scale);
+      const camera: CameraTransform = {
+        x: center.x - nativeGesture.initialWorldAtCenter.x * zoom,
+        y: center.y - nativeGesture.initialWorldAtCenter.y * zoom,
+        k: zoom,
+      };
+      const pending = wheelGestureRef.current;
+      pending.camera = camera;
+      pending.panX = 0;
+      pending.panY = 0;
+      pending.zoomFactor = 1;
+      pending.zoomPoint = null;
+      if (pending.frame === null) pending.frame = requestAnimationFrame(applyWheelFrame);
+      if (pending.idleTimer !== null) window.clearTimeout(pending.idleTimer);
+      pending.idleTimer = window.setTimeout(() => {
+        nativeTrackpadGestureRef.current = null;
+        commitWheelGesture();
+      }, 140);
+    };
+    const endTrackpadGesture = (event: Event) => {
+      if (!nativeTrackpadGestureRef.current) return;
+      event.preventDefault();
+      nativeTrackpadGestureRef.current = null;
+      const pending = wheelGestureRef.current;
+      if (pending.idleTimer !== null) window.clearTimeout(pending.idleTimer);
+      pending.idleTimer = null;
+      commitWheelGesture();
+    };
+
+    // WebKit exposes trackpad pinch as GestureEvents, while Chromium exposes
+    // it as Ctrl+wheel. Handle both native browser event models.
+    stage.addEventListener('gesturestart', startTrackpadGesture, { capture: true, passive: false });
+    stage.addEventListener('gesturechange', changeTrackpadGesture, { capture: true, passive: false });
+    stage.addEventListener('gestureend', endTrackpadGesture, { capture: true, passive: false });
+    return () => {
+      stage.removeEventListener('gesturestart', startTrackpadGesture, true);
+      stage.removeEventListener('gesturechange', changeTrackpadGesture, true);
+      stage.removeEventListener('gestureend', endTrackpadGesture, true);
+    };
+  }, [applyWheelFrame, cancelActiveInteraction, commitWheelGesture, screenPoint, size.height, size.width]);
 
   useEffect(() => editorEvents.on('viewport:changed', () => {
     if (wheelGestureRef.current.camera) cancelWheelGesture();

@@ -403,6 +403,32 @@ test.describe('diagram editing workflow', () => {
     })).toBe(true);
   });
 
+  test('zooms from native trackpad pinch gesture events', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const point = await canvas.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { clientX: rect.left + rect.width * 0.7, clientY: rect.top + rect.height * 0.4 };
+    });
+    const beforeZoom = await page.getByLabel('Zoom percentage').textContent();
+    const dispatchGesture = (type: 'gesturestart' | 'gesturechange' | 'gestureend', scale: number) => canvas.evaluate((element, value) => {
+      const event = new Event(value.type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        scale: { value: value.scale },
+        clientX: { value: value.clientX },
+        clientY: { value: value.clientY },
+      });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, { type, scale, ...point });
+
+    expect(await dispatchGesture('gesturestart', 1)).toBe(true);
+    expect(await dispatchGesture('gesturechange', 1.6)).toBe(true);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
+    expect(await dispatchGesture('gestureend', 1.6)).toBe(true);
+  });
+
   test('keeps a small pinch delta anchored at the pointer', async ({ page }) => {
     await page.getByRole('button', { name: 'New diagram' }).click();
     const canvas = page.locator('svg.diagram-canvas');
