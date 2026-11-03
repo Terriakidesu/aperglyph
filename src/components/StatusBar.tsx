@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, CloudOff, HelpCircle, Minus, Plus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRef } from 'react';
 import { collectDiagnostics, isDiagnosticsEnabled } from '../core/diagnostics';
 import { editorEvents } from '../core/events';
@@ -52,7 +52,9 @@ export function StatusBar() {
   const viewport = viewportPreview ?? committedViewport;
   const zoom = Math.round(viewport.zoom * 100);
   const snapSettings: SnapSettings = page ? getSnapSettings(page.settings) : { grid: true, objects: true, guides: true, ports: true };
-  const diagnosticCount = validationEnabled ? collectDiagnostics(document, 'page', activePageId).filter((diagnostic) => diagnostic.severity !== 'info').length : 0;
+  const diagnosticCount = useMemo(() => validationEnabled
+    ? collectDiagnostics(document, 'page', activePageId).filter((diagnostic) => diagnostic.severity !== 'info').length
+    : 0, [activePageId, document, validationEnabled]);
   const selectedNodes = page?.nodes.filter((node) => selectedIds.includes(node.id)) ?? [];
   const selectedCount = selectedIds.length;
   const selectionSize = selectedNodes.length > 0 ? {

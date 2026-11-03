@@ -377,7 +377,7 @@ test.describe('diagram editing workflow', () => {
     const root = canvas.locator('g').first();
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
-    const clientX = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+    const clientX = (box?.x ?? 0) + (box?.width ?? 0) * 0.72;
     const clientY = (box?.y ?? 0) + (box?.height ?? 0) / 2;
     const beforePan = await root.getAttribute('transform');
     const beforeZoom = await page.getByLabel('Zoom percentage').textContent();
@@ -385,6 +385,7 @@ test.describe('diagram editing workflow', () => {
     await page.evaluate(() => new Promise(requestAnimationFrame));
     await expect(root).not.toHaveAttribute('transform', beforePan ?? '');
     await expect(page.getByLabel('Zoom percentage')).toHaveText(beforeZoom ?? '100%');
+    const rulerTicksBeforeZoom = await page.locator('.canvas-ruler-top [data-ruler-value]').evaluateAll((ticks) => ticks.map((tick) => ({ value: tick.getAttribute('data-ruler-value'), left: Number.parseFloat((tick as HTMLElement).style.left) })));
 
     const pinchPrevented = await canvas.evaluate((element, point) => {
       const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: point.clientX, clientY: point.clientY });
@@ -392,8 +393,14 @@ test.describe('diagram editing workflow', () => {
       return event.defaultPrevented;
     }, { clientX, clientY });
     expect(pinchPrevented).toBe(true);
-    await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX, clientY });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
+    const rulerTicksAfterZoom = await page.locator('.canvas-ruler-top [data-ruler-value]').evaluateAll((ticks) => ticks.map((tick) => ({ value: tick.getAttribute('data-ruler-value'), left: Number.parseFloat((tick as HTMLElement).style.left) })));
+    const afterPositions = new Map(rulerTicksAfterZoom.map((tick) => [tick.value, tick.left]));
+    expect(rulerTicksBeforeZoom.some((tick) => {
+      const next = afterPositions.get(tick.value);
+      return next !== undefined && Math.abs(next - tick.left) > 0.5;
+    })).toBe(true);
   });
 
   test('keeps a small pinch delta anchored at the pointer', async ({ page }) => {
@@ -437,6 +444,10 @@ test.describe('diagram editing workflow', () => {
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(distance) });
         await page.evaluate(() => new Promise(requestAnimationFrame));
       }
+      const during = await page.evaluate(() => ({ zoom: Number(document.querySelector('[aria-label="Zoom percentage"]')?.textContent?.replace('%', '')), scrollX: globalThis.scrollX, scrollY: globalThis.scrollY }));
+      expect(during.zoom).toBeGreaterThan(before.zoom);
+      expect(during.scrollX).toBe(before.scrollX);
+      expect(during.scrollY).toBe(before.scrollY);
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await page.waitForTimeout(120);
     } finally {
@@ -448,6 +459,42 @@ test.describe('diagram editing workflow', () => {
     expect(after.zoom).toBeGreaterThan(before.zoom);
     expect(after.scrollX).toBe(before.scrollX);
     expect(after.scrollY).toBe(before.scrollY);
+  });
+
+  test('keeps the visible connector segment when both endpoint shapes are offscreen', async ({ page }) => {
+    await page.getByRole('button', { name: 'New diagram' }).click();
+    const canvas = page.locator('svg.diagram-canvas');
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const shape = page.locator('.shape-item[title="Drag Rectangle onto the canvas"]');
+    for (const x of [0.06, 0.94]) {
+      await shape.dragTo(canvas, { targetPosition: { x: (box?.width ?? 800) * x, y: (box?.height ?? 600) / 2 } });
+    }
+    const nodes = page.locator('[data-node-id]');
+    await expect(nodes).toHaveCount(2);
+    await page.getByTitle('Connector (C)').click();
+    for (let index = 0; index < 2; index += 1) {
+      const nodeBox = await nodes.nth(index).boundingBox();
+      expect(nodeBox).not.toBeNull();
+      await page.mouse.click((nodeBox?.x ?? 0) + (nodeBox?.width ?? 0) / 2, (nodeBox?.y ?? 0) + (nodeBox?.height ?? 0) / 2);
+    }
+    await expect(page.locator('[data-edge-id]')).toHaveCount(1);
+    await canvas.dispatchEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, deltaMode: 0, ctrlKey: true, clientX: (box?.x ?? 0) + (box?.width ?? 0) / 2, clientY: (box?.y ?? 0) + (box?.height ?? 0) / 2 });
+    await expect(page.getByLabel('Zoom percentage')).toHaveText('300%');
+    await expect.poll(() => page.locator('[data-node-id]').evaluateAll((elements) => {
+      const canvasRect = document.querySelector('svg.diagram-canvas')!.getBoundingClientRect();
+      return elements.some((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.right > canvasRect.left && rect.left < canvasRect.right && rect.bottom > canvasRect.top && rect.top < canvasRect.bottom;
+      });
+    })).toBe(false);
+    const visibleSegmentCrossesCanvas = await page.locator('[data-edge-id] .edge-visible').evaluate((path) => {
+      const canvasRect = document.querySelector('svg.diagram-canvas')!.getBoundingClientRect();
+      const pathRect = path.getBoundingClientRect();
+      const horizontalOverlap = Math.min(canvasRect.right, pathRect.right) - Math.max(canvasRect.left, pathRect.left);
+      return horizontalOverlap > 0 && pathRect.top >= canvasRect.top && pathRect.top <= canvasRect.bottom;
+    });
+    expect(visibleSegmentCrossesCanvas).toBe(true);
   });
 
   test('does not let a pending gesture overwrite a viewport command', async ({ page }) => {

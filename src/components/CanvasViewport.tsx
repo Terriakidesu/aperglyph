@@ -206,6 +206,33 @@ function buildRulerMarks(size: CanvasSize, viewport: Viewport): { horizontal: Ru
   return { horizontal: build(size.width, -viewport.x, viewport.zoom), vertical: build(size.height, -viewport.y, viewport.zoom) };
 }
 
+function CanvasRulers({ size, viewport, onGuidePointerDown }: { size: CanvasSize; viewport: Viewport; onGuidePointerDown: (event: ReactPointerEvent<HTMLElement>, orientation: GuideOrientation) => void }) {
+  const [previewViewport, setPreviewViewport] = useState<Viewport | null>(null);
+  const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
+  useEffect(() => {
+    const stopPreview = editorEvents.on('viewport:preview', setPreviewViewport);
+    const stopCommit = editorEvents.on('viewport:changed', () => setPreviewViewport(null));
+    const stopPointer = editorEvents.on('pointer:changed', setPointerWorld);
+    return () => { stopPreview(); stopCommit(); stopPointer(); };
+  }, []);
+  const liveViewport = previewViewport ?? viewport;
+  const rulerMarks = useMemo(() => buildRulerMarks(size, liveViewport), [liveViewport, size]);
+  const pointerScreen = pointerWorld ? {
+    x: size.width / 2 + (pointerWorld.x + liveViewport.x) * liveViewport.zoom,
+    y: size.height / 2 + (pointerWorld.y + liveViewport.y) * liveViewport.zoom,
+  } : null;
+  return <>
+    <div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => onGuidePointerDown(event, 'vertical')}>
+      {rulerMarks.horizontal.map((mark) => <span key={mark.value} data-ruler-value={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}
+      {pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}
+    </div>
+    <div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => onGuidePointerDown(event, 'horizontal')}>
+      {rulerMarks.vertical.map((mark) => <span key={mark.value} data-ruler-value={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}
+      {pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}
+    </div>
+  </>;
+}
+
 function asConnectionPort(value: string | null): ConnectionPort | undefined {
   if (value === 'top' || value === 'right' || value === 'bottom' || value === 'left' || value === 'center' || value === 'north' || value === 'east' || value === 'south' || value === 'west') return value;
   return undefined;
@@ -491,7 +518,8 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     try { return globalThis.localStorage?.getItem('aperglyph.canvas-minimap-collapsed') === 'true'; } catch { return false; }
   });
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
-  const [pointerWorld, setPointerWorld] = useState<Point | null>(null);
+  const pointerFrameRef = useRef<number | null>(null);
+  const pendingPointerRef = useRef<Point | null>(null);
   const [showCanvasHint, setShowCanvasHint] = useState(() => {
     try {
       return globalThis.localStorage?.getItem('aperglyph.canvas-hint-dismissed') !== 'true';
@@ -715,6 +743,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     if (gesture.idleTimer !== null) window.clearTimeout(gesture.idleTimer);
     const touch = touchGestureRef.current;
     if (touch && touch.frame !== null) cancelAnimationFrame(touch.frame);
+    if (pointerFrameRef.current !== null) cancelAnimationFrame(pointerFrameRef.current);
   }, []);
 
   useLayoutEffect(() => {
@@ -1531,6 +1560,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    schedulePointerPosition(worldPoint(event));
     if (event.pointerType === 'touch') {
       touchPointersRef.current.set(event.pointerId, screenPoint(event));
       if (touchGestureRef.current) {
@@ -1539,9 +1569,6 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
         return;
       }
     }
-    const pointer = worldPoint(event);
-    setPointerWorld(pointer);
-    editorEvents.emit('pointer:changed', pointer);
     if (updateGuideDrag(event)) return;
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
@@ -1733,10 +1760,16 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     setDistanceIndicators([]);
   };
 
-  const clearPointerPosition = () => {
-    setPointerWorld(null);
-    editorEvents.emit('pointer:changed', null);
-  };
+  const schedulePointerPosition = useCallback((point: Point | null) => {
+    pendingPointerRef.current = point;
+    if (pointerFrameRef.current !== null) return;
+    pointerFrameRef.current = requestAnimationFrame(() => {
+      pointerFrameRef.current = null;
+      editorEvents.emit('pointer:changed', pendingPointerRef.current);
+    });
+  }, []);
+
+  const clearPointerPosition = () => schedulePointerPosition(null);
 
   const applyWheelFrame = useCallback(() => {
     const pending = wheelGestureRef.current;
@@ -1889,6 +1922,9 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     const rawDeltaY = Number.isFinite(event.deltaY) ? event.deltaY : 0;
     const deltaY = rawDeltaY * scale;
     if (deltaX === 0 && rawDeltaY === 0) return;
+    // Ctrl/Meta-wheel is how browsers report trackpad pinch. Keep the gesture
+    // inside the canvas instead of letting the browser zoom the whole page.
+    event.preventDefault();
     const gesture = wheelGestureRef.current;
     if (!gesture.camera) gesture.camera = cameraFromViewport(size, useEditorStore.getState().viewport);
     if (event.ctrlKey || event.metaKey) {
@@ -1966,18 +2002,20 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y),
   } : null;
 
-  const isVisibleInIsolation = (node: DiagramNode) => !isolatedGroupId || node.groupId === isolatedGroupId;
-  const renderedNodes = page?.nodes.filter((node) => !node.hidden && isVisibleInIsolation(node) && (!visibleNodeIds || visibleNodeIds.has(node.id))).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)) ?? [];
+  const renderedNodes = useMemo(() => (page?.nodes ?? [])
+    .filter((node) => !node.hidden && (!isolatedGroupId || node.groupId === isolatedGroupId) && (!visibleNodeIds || visibleNodeIds.has(node.id)))
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)), [isolatedGroupId, page?.nodes, visibleNodeIds]);
   const nodeMap = useMemo(() => new Map((page?.nodes ?? []).map((node) => {
     const clamped = clampEntityNodeSize(node);
     const moved = dragPreview[node.id] ? { ...clamped, position: dragPreview[node.id] } : clamped;
     const preview = resizePreview?.nodeId === node.id ? { ...moved, position: resizePreview.position, size: resizePreview.size } : moved;
     return [node.id, clampEntityNodeSize(preview)] as const;
   })), [dragPreview, page?.nodes, resizePreview]);
-  const groupBounds = (() => {
+  const allNodes = useMemo(() => [...nodeMap.values()], [nodeMap]);
+  const groupBounds = useMemo(() => {
     const groups = new Map<string, DiagramNode[]>();
     nodeMap.forEach((node) => {
-      if (node.hidden || !node.groupId || !isVisibleInIsolation(node)) return;
+      if (node.hidden || !node.groupId || (isolatedGroupId && node.groupId !== isolatedGroupId)) return;
       const members = groups.get(node.groupId) ?? [];
       members.push(node);
       groups.set(node.groupId, members);
@@ -1990,15 +2028,14 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       const maxY = Math.max(...bounds.map((value) => value.y + value.height)) + 14;
       return { id, members, bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY }, selected: members.every((node) => selectedIds.includes(node.id)) };
     });
-  })();
-  const renderedEdges = page?.edges.filter((edge) => {
-    if (isolatedGroupId) {
-      const sourceVisible = !edge.source.nodeId || page.nodes.some((node) => node.id === edge.source.nodeId && isVisibleInIsolation(node));
-      const targetVisible = !edge.target.nodeId || page.nodes.some((node) => node.id === edge.target.nodeId && isVisibleInIsolation(node));
-      if (!sourceVisible || !targetVisible) return false;
-    }
-    return !visibleNodeIds || !edge.source.nodeId || !edge.target.nodeId || visibleNodeIds.has(edge.source.nodeId) || visibleNodeIds.has(edge.target.nodeId);
-  }) ?? [];
+  }, [isolatedGroupId, nodeMap, selectedIds]);
+  const renderedEdges = useMemo(() => (page?.edges ?? []).filter((edge) => {
+    if (!isolatedGroupId) return true;
+    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+    return (!edge.source.nodeId || source?.groupId === isolatedGroupId)
+      && (!edge.target.nodeId || target?.groupId === isolatedGroupId);
+  }), [isolatedGroupId, nodeMap, page?.edges]);
   const connectionTarget = connectorDragPreview?.target
     ? { nodeId: connectorDragPreview.target.anchor.nodeId, point: connectorDragPreview.target.point }
     : endpointPreview?.anchor.nodeId
@@ -2017,7 +2054,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
         : routedEdge;
       routes.push({
         id: edge.id,
-        points: edgeRoute(previewEdge, source, target, [...nodeMap.values()], {
+        points: edgeRoute(previewEdge, source, target, allNodes, {
           previousRoute: routeCacheRef.current.get(edge.id),
           otherRoutes: routes.map((route) => route.points),
           lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, page?.edges ?? renderedEdges) : undefined,
@@ -2026,7 +2063,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       });
     });
     return routes;
-  }, [nodeMap, page?.edges, renderedEdges, segmentPreview, selectedIds]);
+  }, [allNodes, nodeMap, page?.edges, renderedEdges, segmentPreview, selectedIds]);
   useEffect(() => {
     const currentIds = new Set(routeEntries.map((entry) => entry.id));
     routeEntries.forEach((entry) => routeCacheRef.current.set(entry.id, entry.points));
@@ -2067,11 +2104,11 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     const source = edge?.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
     const target = edge?.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
     if (!edge) return null;
-    const route = edgeRoute(edge, source, target, [...nodeMap.values()]);
+    const route = edgeRoute(edge, source, target, allNodes);
     if (route.length < 2) return null;
      const point = labelPointForEdge(edge, route);
      return { left: size.width / 2 + (point.x + viewport.x) * viewport.zoom - 80, top: size.height / 2 + (point.y + viewport.y) * viewport.zoom - 15, width: 160, textAlign: 'center' as const };
-  }, [nodeMap, page, size.height, size.width, textEdit, viewport]);
+  }, [allNodes, nodeMap, page, size.height, size.width, textEdit, viewport]);
   const shapePreview = shapeDragPreview
     ? (() => {
       const shapeSize = shapeDragPreview.payload.defaultSize ?? { width: 180, height: 88 };
@@ -2089,7 +2126,6 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       data: shapeDragPreview.payload.defaultData ?? { label: shapePreview.label },
     })
     : null;
-  const rulerMarks = buildRulerMarks(size, viewport);
   const minimapWidth = 180;
   const minimapHeight = 112;
   const visibleWorld = { x: -viewport.x - size.width / 2 / viewport.zoom, y: -viewport.y - size.height / 2 / viewport.zoom, width: size.width / viewport.zoom, height: size.height / viewport.zoom };
@@ -2100,7 +2136,6 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
   const minimapRect = (bounds: WorldBounds) => ({ ...minimapPoint({ x: bounds.x, y: bounds.y }), width: bounds.width * minimapScale, height: bounds.height * minimapScale });
   const minimapViewport = minimapRect(visibleWorld);
   const guideWorld = { left: visibleWorld.x - visibleWorld.width, right: visibleWorld.x + visibleWorld.width * 2, top: visibleWorld.y - visibleWorld.height, bottom: visibleWorld.y + visibleWorld.height * 2 };
-  const pointerScreen = pointerWorld ? { x: size.width / 2 + (pointerWorld.x + viewport.x) * viewport.zoom, y: size.height / 2 + (pointerWorld.y + viewport.y) * viewport.zoom } : null;
   const quickCreateMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(quickCreateSearch.trim().toLowerCase())).slice(0, 8);
   const shapeInsertMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeInsertSearch.trim().toLowerCase())).slice(0, 8);
   const shapeChangeMatches = pluginManager.list().flatMap((plugin) => plugin.shapes.map((shape) => ({ pluginId: plugin.id, shape }))).filter(({ shape }) => [shape.label, shape.semanticRole, shape.notation, shape.category, ...(shape.aliases ?? []), ...(shape.tags ?? [])].filter(Boolean).join(' ').toLowerCase().includes(shapeChangeSearch.trim().toLowerCase())).slice(0, 8);
@@ -2121,7 +2156,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       {view.connectionHints && showCanvasHint && <div className="canvas-hint"><span className="hint-key">H</span> Pan tool <span className="hint-separator">·</span> <span className="hint-key">Two fingers</span> to pan <span className="hint-separator">·</span> <span className="hint-key">Pinch / Ctrl+scroll</span> to zoom</div>}
       {isolatedGroupId && <nav className="canvas-breadcrumbs" aria-label="Group navigation"><button onClick={onExitGroup}> {page?.name ?? 'Page'} </button><ChevronRight size={13} /><span>{isolatedGroupLabel}</span><button className="canvas-breadcrumb-close" title="Exit group isolation" aria-label="Exit group isolation" onClick={onExitGroup}><X size={12} /></button></nav>}
       {pageIsEmpty && onCreateTemplate && !onboardingDismissed && <div className="canvas-onboarding"><div className="canvas-onboarding-card"><span className="panel-kicker">AperGlyph</span><h2>Start a diagram</h2><p>Choose a local template or drag a shape from the library.</p><div className="canvas-template-grid"><button onClick={() => startFromTemplate('flowchart')}><strong>Flowchart</strong><small>Processes and decisions</small></button><button onClick={() => startFromTemplate('erd')}><strong>ER diagram</strong><small>Entities and relationships</small></button><button onClick={() => startFromTemplate('dfd')}><strong>Data flow</strong><small>Systems and data stores</small></button><button onClick={() => startFromTemplate('use-case')}><strong>UML</strong><small>Actors and use cases</small></button></div><button className="canvas-onboarding-blank" onClick={() => startFromTemplate('blank')}>Start with a blank canvas</button></div></div>}
-      {view.rulers && <><div className="canvas-ruler canvas-ruler-top" aria-label="Horizontal ruler" onPointerDown={(event) => beginGuideDrag(event, 'vertical')}>{rulerMarks.horizontal.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ left: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-horizontal" style={{ left: pointerScreen.x }}><i>{Math.round(pointerWorld?.x ?? 0)}</i></span>}</div><div className="canvas-ruler canvas-ruler-left" aria-label="Vertical ruler" onPointerDown={(event) => beginGuideDrag(event, 'horizontal')}>{rulerMarks.vertical.map((mark) => <span key={mark.value} className={mark.major ? 'ruler-mark major' : 'ruler-mark'} style={{ top: mark.screen }}><i />{mark.major && mark.value}</span>)}{pointerScreen && <span className="ruler-pointer ruler-pointer-vertical" style={{ top: pointerScreen.y }}><i>{Math.round(pointerWorld?.y ?? 0)}</i></span>}</div></>}
+       {view.rulers && <CanvasRulers size={size} viewport={viewport} onGuidePointerDown={beginGuideDrag} />}
     <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDownCapture={handlePointerDownCapture} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUpCapture={handleTouchPointerEndCapture} onPointerCancelCapture={handleTouchPointerEndCapture} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onTouchEndCapture={handleTouchEndCapture} onTouchCancelCapture={handleTouchEndCapture} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
          <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke={canvasGridColor} strokeWidth="0.7" opacity={page?.settings.canvasTheme === 'light' ? '0.7' : '0.62'} /></pattern>
@@ -2149,17 +2184,17 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
             : previewEdge.waypoints;
           const preview = waypointPreview?.edgeId === edge.id ? { ...previewEdge, waypoints: previewWaypoints } : previewEdge;
           const isPreview = endpointPreview?.edgeId === edge.id || waypointPreview?.edgeId === edge.id;
-             return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} diagramType={document.diagramType} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} onSegmentPointerDown={beginSegmentInteraction} />;
+              return <EdgeView key={edge.id} edge={preview} source={preview.source.nodeId ? nodeMap.get(preview.source.nodeId) : undefined} target={preview.target.nodeId ? nodeMap.get(preview.target.nodeId) : undefined} obstacles={allNodes} route={isPreview ? undefined : edgeRoutes.get(edge.id)} jumps={isPreview ? [] : edgeJumps.get(edge.id) ?? []} background={canvasBackground} diagramType={document.diagramType} selected={selectedIds.includes(edge.id)} labelPointOverride={labelPreview?.edgeId === edge.id ? labelPreview.point : undefined} onPointerDown={beginEdgeInteraction} onDoubleClick={beginEdgeDoubleClick} onLabelPointerDown={beginLabelInteraction} onHover={setHoveredEdgeId} onWaypointPointerDown={beginWaypointInteraction} onSegmentPointerDown={beginSegmentInteraction} />;
         })}</g>
           <g className="node-layer">{renderedNodes.map((node) => { const previewNode = nodeMap.get(node.id) ?? node; return <NodeView key={node.id} node={previewNode} position={previewNode.position} selected={selectedIds.includes(node.id)} connectorStart={connectorStart?.nodeId === node.id} connectorTarget={connectionTarget?.nodeId === node.id} showPorts={view.showPorts || activeTool === 'connector' || selectedIds.includes(node.id)} diagramType={document.diagramType} onPointerDown={beginNodeInteraction} onResizePointerDown={beginResizeInteraction} onDoubleClick={(event, selectedNode) => { if (selectedNode.groupId && selectedNode.groupId !== isolatedGroupId) { setTextEdit(null); onEnterGroup?.(selectedNode.groupId); } else beginTextEdit('node', selectedNode.id); }} />; })}</g>
          {connectionTarget && <g className="connection-target-preview" pointerEvents="none"><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="10" /><circle cx={connectionTarget.point.x} cy={connectionTarget.point.y} r="4" /></g>}
          <g className="edge-marker-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
-              return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} route={endpointPreview?.edgeId === edge.id ? undefined : edgeRoutes.get(edge.id)} markerFill={canvasBackground} />;
+               return <EdgeMarkersView key={`markers-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={allNodes} route={endpointPreview?.edgeId === edge.id ? undefined : edgeRoutes.get(edge.id)} markerFill={canvasBackground} />;
          })}</g>
          <g className="edge-endpoint-layer">{renderedEdges.map((edge) => {
            const previewEdge = endpointPreview?.edgeId === edge.id ? { ...edge, [endpointPreview.endpoint]: endpointPreview.anchor } as DiagramEdge : edge;
-             return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={[...nodeMap.values()]} selected={selectedIds.includes(edge.id)} hovered={hoveredEdgeId === edge.id} onPointerDown={beginEndpointInteraction} />;
+              return <EdgeEndpointHandles key={`handles-${edge.id}`} edge={previewEdge} source={previewEdge.source.nodeId ? nodeMap.get(previewEdge.source.nodeId) : undefined} target={previewEdge.target.nodeId ? nodeMap.get(previewEdge.target.nodeId) : undefined} obstacles={allNodes} route={endpointPreview?.edgeId === edge.id ? undefined : edgeRoutes.get(edge.id)} selected={selectedIds.includes(edge.id)} hovered={hoveredEdgeId === edge.id} onPointerDown={beginEndpointInteraction} />;
          })}</g>
          <g className="alignment-guide-layer">{alignmentGuides.map((guide, index) => guide.orientation === 'vertical'
            ? <line key={`vertical-${index}`} className="alignment-guide" x1={guide.position} y1={guide.start} x2={guide.position} y2={guide.end} />
@@ -2264,9 +2299,9 @@ function EdgeMarkersView({ edge, source, target, obstacles, route: providedRoute
   return <>{renderEndpointMarker(start, startDirection, edge.style.startMarker, markerStroke, markerFill, 'start', edge.style.opacity ?? 1)}{renderEndpointMarker(end, endDirection, edge.style.endMarker, markerStroke, markerFill, 'end', edge.style.opacity ?? 1)}</>;
 }
 
-function EdgeEndpointHandles({ edge, source, target, obstacles, selected, hovered, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; selected: boolean; hovered: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
+function EdgeEndpointHandles({ edge, source, target, obstacles, route: providedRoute, selected, hovered, onPointerDown }: { edge: DiagramEdge; source?: DiagramNode; target?: DiagramNode; obstacles: DiagramNode[]; route?: Point[]; selected: boolean; hovered: boolean; onPointerDown: (event: ReactPointerEvent<SVGCircleElement>, edge: DiagramEdge, endpoint: 'source' | 'target', point: Point) => void }) {
   if (!selected && !hovered) return null;
-  const route = edgeRoute(edge, source, target, obstacles);
+  const route = providedRoute ?? edgeRoute(edge, source, target, obstacles);
   if (route.length < 2) return null;
   const start = route[0];
   const end = route.at(-1) ?? start;
