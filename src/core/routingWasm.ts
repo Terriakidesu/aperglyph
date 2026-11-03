@@ -13,6 +13,7 @@ type WasmOrthogonalRoute = (
   laneCount: number,
   laneSpacing: number,
   softConstraints: Float64Array,
+  markerObstacles: Float64Array,
 ) => Float64Array;
 
 interface WasmRoutingModule {
@@ -26,6 +27,7 @@ interface RoutingOptions {
   lane?: { index: number; count: number; spacing?: number };
   constraints?: RouteConstraint[];
   simpleRouting?: boolean;
+  markerObstacles?: ReadonlyArray<{ edgeId: string; bounds: { left: number; top: number; right: number; bottom: number } }>;
 }
 
 let wasmRoute: WasmOrthogonalRoute | null = null;
@@ -73,6 +75,14 @@ export function routeOrthogonalWithWasm(
     packedConstraints[index * 2] = constraint.axis === 'x' ? 0 : 1;
     packedConstraints[index * 2 + 1] = constraint.value;
   });
+  const packedMarkerObstacles = new Float64Array((options.markerObstacles ?? []).length * 4);
+  (options.markerObstacles ?? []).forEach((marker, index) => {
+    const offset = index * 4;
+    packedMarkerObstacles[offset] = marker.bounds.left;
+    packedMarkerObstacles[offset + 1] = marker.bounds.top;
+    packedMarkerObstacles[offset + 2] = marker.bounds.right;
+    packedMarkerObstacles[offset + 3] = marker.bounds.bottom;
+  });
   const lane = options.lane;
   let packed: Float64Array;
   try {
@@ -89,6 +99,7 @@ export function routeOrthogonalWithWasm(
       lane?.count ?? 0,
       lane?.spacing ?? 16,
       packedConstraints,
+      packedMarkerObstacles,
     );
   } catch {
     return null;

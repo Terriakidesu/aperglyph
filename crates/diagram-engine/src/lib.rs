@@ -238,6 +238,7 @@ pub fn route_orthogonal(
     lane_count: u32,
     lane_spacing: f64,
     soft_constraints: &[f64],
+    marker_obstacles: &[f64],
 ) -> Vec<f64> {
     routing::route_orthogonal(
         start_x,
@@ -252,6 +253,7 @@ pub fn route_orthogonal(
         lane_count,
         lane_spacing,
         soft_constraints,
+        marker_obstacles,
     )
 }
 

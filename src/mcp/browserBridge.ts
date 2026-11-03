@@ -6,7 +6,7 @@ import type { AuthoringOperation } from '../core/authoring';
 import { collectDiagnostics } from '../core/diagnostics';
 import { createDocument, serializeProject, validateProjectDocument } from '../core/document';
 import { exportErdSql } from '../core/erd';
-import { edgeRoute } from '../core/routing';
+import { diagramRoutes } from '../core/routing';
 import { exportDiagramText } from '../core/interoperability';
 import { editorEvents } from '../core/events';
 import type { DiagramDocument, DiagramEdge, DiagramNode, Point, Viewport } from '../core/types';
@@ -547,11 +547,9 @@ function getGeometry(document: DiagramDocument, page: DiagramDocument['pages'][n
       anchors: connectionAnchorPoints(node, shape?.anchors).map(({ anchor, point }) => ({ ...anchor, point })),
     };
   });
-  const nodeMap = new Map(page.nodes.map((node) => [node.id, node]));
+  const routes = includeRoutes ? new Map(diagramRoutes(page.nodes, page.edges).map((route) => [route.id, route.points])) : new Map();
   const edges = page.edges.map((edge) => {
-    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
-    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
-    return { ...edge, ...(includeRoutes ? { computedRoute: edgeRoute(edge, source, target, page.nodes) } : {}) };
+    return { ...edge, ...(includeRoutes ? { computedRoute: routes.get(edge.id) ?? [] } : {}) };
   });
   return { page: { ...page, nodes, edges }, pageId: page.id, revision: getRevision(document.id) };
 }

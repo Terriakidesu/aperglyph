@@ -4,7 +4,7 @@ import type { CodeLanguage } from '../core/diagramIR';
 import { exportDiagramText, parseDiagramText } from '../core/interoperability';
 import { ERD_COLUMN_HEADER_HEIGHT, ERD_HEADER_HEIGHT, entityColumns, entityFieldValue, entityLayoutMetrics, exportErdSql, normalizeEntityFields } from '../core/erd';
 import { nodeCenter, nodeFlipTransform } from '../core/geometry';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath } from '../core/routing';
+import { calculateRouteJumps, curvedPath, diagramRoutes, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, parallelEdgeOffset, parallelRoutingLane, pointsToPath, sortRoutesForJumps } from '../core/routing';
 import { notationRenderer, shapeSilhouette } from '../core/silhouettes';
 import { nodeTextLayout } from '../core/text';
 import type { DiagramDocument, DiagramEdge, DiagramNode, EdgeMarker, Point } from '../core/types';
@@ -240,25 +240,13 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
   const exportBackground = outlineOnly ? '#ffffff' : background;
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const edgeMap = new Map(edges.map((edge) => [edge.id, edge]));
-  const routeEntries: Array<{ id: string; points: Point[]; crossingPriority?: number }> = [];
-  edges.forEach((edge) => {
-    const offset = parallelEdgeOffset(edge, edges);
-    const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
-    routeEntries.push({
-      id: edge.id,
-      points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
-        otherRoutes: routeEntries.map((entry) => entry.points),
-        lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
-      }),
-      crossingPriority: edge.routing?.crossingPriority ?? 0,
-    });
-  });
+  const routeEntries = diagramRoutes(nodes, edges);
   const routeJumps = calculateRouteJumps(routeEntries.filter((entry) => {
     const edge = edgeMap.get(entry.id);
     return edge ? edgeRouting(edge) === 'orthogonal' : false;
   }));
   const routeById = new Map(routeEntries.map((entry) => [entry.id, entry.points]));
-  const edgeMarkup = edges.map((edge) => {
+  const edgeMarkup = sortRoutesForJumps(edges.map((edge) => ({ ...edge, crossingPriority: edge.routing?.crossingPriority }))).map((edge) => {
     const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
     const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
     const offset = parallelEdgeOffset(edge, edges);
@@ -308,6 +296,7 @@ function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, s
   const glyph = marker === 'arrow'
     ? `<path d="M 0 0 L 10 -6 L 10 6 Z" fill="${escapeXml(stroke)}"/>`
     : marker === 'bar' ? bar()
+      : marker === 'bar-bar' ? `${bar(8)}${bar(16)}`
       : marker === 'circle' ? circle()
         : marker === 'crowfoot' ? crowfoot()
           : marker === 'circle-bar' ? `${circle(18)}${bar()}`

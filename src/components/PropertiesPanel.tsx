@@ -28,6 +28,7 @@ const markerOptions: Array<{ value: EdgeMarker; label: string }> = [
   { value: 'arrow', label: 'Arrow' },
   { value: 'bar', label: 'Bar · 1' },
   { value: 'circle', label: 'Circle · 0..1' },
+  { value: 'bar-bar', label: 'Double bar · 1..1' },
   { value: 'crowfoot', label: "Crow's foot · N" },
   { value: 'circle-bar', label: 'Circle + bar · 0..1' },
   { value: 'bar-crowfoot', label: "Bar + crow's foot · 1..N" },

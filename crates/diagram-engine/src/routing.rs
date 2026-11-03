@@ -4,6 +4,14 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 const EPSILON: f64 = 0.001;
 const MIN_SEGMENT_LENGTH: f64 = 12.0;
 const ROUTING_LANE_SPACING: f64 = 16.0;
+const NOTATION_CLEARANCE: f64 = 12.0;
+const NOTATION_CHANNEL_DISTANCE: f64 = ROUTING_LANE_SPACING * 3.0;
+const NOTATION_NEAR_PENALTY: f64 = 600.0;
+const NOTATION_OVERLAP_PENALTY: f64 = 1400.0;
+const MAX_NOTATION_CHANNELS: usize = 48;
+const TURN_BUCKETS: usize = 5;
+const DIRECTION_BUCKETS: usize = 5;
+const STATES_PER_POINT: usize = TURN_BUCKETS * DIRECTION_BUCKETS;
 
 #[derive(Clone, Copy, Debug)]
 struct Point {
@@ -71,6 +79,7 @@ pub fn route_orthogonal(
     lane_count: u32,
     lane_spacing: f64,
     soft_constraints: &[f64],
+    marker_obstacles: &[f64],
 ) -> Vec<f64> {
     let start = Point {
         x: start_x,
@@ -102,6 +111,24 @@ pub fn route_orthogonal(
                 .then_some(value)
         })
         .collect::<Vec<_>>();
+    let marker_rectangles = marker_obstacles
+        .chunks_exact(4)
+        .filter_map(|rect| {
+            let value = Rect {
+                left: rect[0],
+                top: rect[1],
+                right: rect[2],
+                bottom: rect[3],
+            };
+            (value.left.is_finite()
+                && value.top.is_finite()
+                && value.right.is_finite()
+                && value.bottom.is_finite()
+                && value.right >= value.left
+                && value.bottom >= value.top)
+                .then_some(value)
+        })
+        .collect::<Vec<_>>();
     let route_segments = unpack_segments(other_routes);
     let previous_segments = unpack_segments(previous_route);
     let constraints = soft_constraints
@@ -116,6 +143,7 @@ pub fn route_orthogonal(
         start,
         end,
         &rectangles,
+        &marker_rectangles,
         &route_segments,
         lane_index,
         lane_count,
@@ -128,8 +156,8 @@ pub fn route_orthogonal(
         return Vec::new();
     };
     let graph = build_visibility_graph(&points, &rectangles);
-    let state_count = points.len().saturating_mul(5);
-    let initial_state = start_index * 5 + 4;
+    let state_count = points.len().saturating_mul(STATES_PER_POINT);
+    let initial_state = start_index * STATES_PER_POINT + 4 * TURN_BUCKETS;
     let mut distances = vec![f64::INFINITY; state_count];
     let mut parents = vec![usize::MAX; state_count];
     distances[initial_state] = 0.0;
@@ -141,12 +169,13 @@ pub fn route_orthogonal(
         order,
     });
     order += 1;
-    let max_expansions = 2000usize.max(points.len().saturating_mul(4));
+    let max_expansions = 4000usize.max(points.len().saturating_mul(20));
     let mut expansions = 0usize;
 
     while let Some(current) = open.pop() {
-        let current_point_index = current.state / 5;
-        let current_direction = current.state % 5;
+        let current_point_index = current.state / STATES_PER_POINT;
+        let current_direction = (current.state / TURN_BUCKETS) % DIRECTION_BUCKETS;
+        let current_turns = current.state % TURN_BUCKETS;
         let current_point = points[current_point_index];
         let score = distances[current.state];
         if current.priority > score + manhattan(current_point, end) + EPSILON {
@@ -168,17 +197,25 @@ pub fn route_orthogonal(
                 step_cost += 36.0;
             }
             if current_direction < 4 && current_direction != neighbor.direction {
-                step_cost += 42.0;
+                step_cost += turn_penalty_for_ordinal(current_turns + 1);
                 if opposite(current_direction) == neighbor.direction {
                     step_cost += 28.0;
                 }
             }
-            step_cost +=
-                route_segment_penalty(current_point, next_point, &route_segments, simple_routing);
+            step_cost += route_segment_penalty(
+                current_point,
+                next_point,
+                &route_segments,
+                &marker_rectangles,
+                simple_routing,
+            );
             step_cost += soft_constraint_penalty(current_point, next_point, &constraints);
             step_cost += route_change_penalty(current_point, next_point, &previous_segments);
 
-            let next_state = neighbor.point * 5 + neighbor.direction;
+            let turned = current_direction < 4 && current_direction != neighbor.direction;
+            let next_turns = (current_turns + if turned { 1 } else { 0 }).min(TURN_BUCKETS - 1);
+            let next_state =
+                neighbor.point * STATES_PER_POINT + neighbor.direction * TURN_BUCKETS + next_turns;
             let next_score = score + step_cost;
             if next_score >= distances[next_state] {
                 continue;
@@ -200,6 +237,7 @@ fn build_points(
     start: Point,
     end: Point,
     obstacles: &[Rect],
+    marker_obstacles: &[Rect],
     routes: &[(Point, Point)],
     lane_index: i32,
     lane_count: u32,
@@ -248,6 +286,60 @@ fn build_points(
         );
     }
     add_parallel_channels(routes, start, end, obstacles, &mut points, &mut keys);
+    for rect in nearby_notation_rectangles(start, end, marker_obstacles) {
+        for point in [
+            Point {
+                x: rect.left,
+                y: rect.top,
+            },
+            Point {
+                x: rect.right,
+                y: rect.top,
+            },
+            Point {
+                x: rect.right,
+                y: rect.bottom,
+            },
+            Point {
+                x: rect.left,
+                y: rect.bottom,
+            },
+            Point {
+                x: rect.left,
+                y: start.y,
+            },
+            Point {
+                x: rect.right,
+                y: start.y,
+            },
+            Point {
+                x: rect.left,
+                y: end.y,
+            },
+            Point {
+                x: rect.right,
+                y: end.y,
+            },
+            Point {
+                x: start.x,
+                y: rect.top,
+            },
+            Point {
+                x: start.x,
+                y: rect.bottom,
+            },
+            Point {
+                x: end.x,
+                y: rect.top,
+            },
+            Point {
+                x: end.x,
+                y: rect.bottom,
+            },
+        ] {
+            add_point(point, obstacles, &mut points, &mut keys);
+        }
+    }
 
     let passes = if routes.is_empty() { 2 } else { 1 };
     for _ in 0..passes {
@@ -384,6 +476,16 @@ fn add_parallel_channels(
                     add_point(point, obstacles, points, keys);
                 }
             }
+            for x in [
+                route_start.x - ROUTING_LANE_SPACING,
+                route_start.x + ROUTING_LANE_SPACING,
+                route_end.x - ROUTING_LANE_SPACING,
+                route_end.x + ROUTING_LANE_SPACING,
+            ] {
+                for y in [start.y, end.y] {
+                    add_point(Point { x, y }, obstacles, points, keys);
+                }
+            }
         } else if same_x(*route_start, *route_end) && !same_y(*route_start, *route_end) {
             for offset in [-ROUTING_LANE_SPACING, ROUTING_LANE_SPACING] {
                 for point in [
@@ -415,7 +517,94 @@ fn add_parallel_channels(
                     add_point(point, obstacles, points, keys);
                 }
             }
+            for y in [
+                route_start.y - ROUTING_LANE_SPACING,
+                route_start.y + ROUTING_LANE_SPACING,
+                route_end.y - ROUTING_LANE_SPACING,
+                route_end.y + ROUTING_LANE_SPACING,
+            ] {
+                for x in [start.x, end.x] {
+                    add_point(Point { x, y }, obstacles, points, keys);
+                }
+            }
         }
+    }
+}
+
+fn nearby_notation_rectangles(start: Point, end: Point, markers: &[Rect]) -> Vec<Rect> {
+    let first_bend = Point {
+        x: start.x,
+        y: end.y,
+    };
+    let second_bend = Point {
+        x: end.x,
+        y: start.y,
+    };
+    let direct_segments = [
+        (start, first_bend),
+        (first_bend, end),
+        (start, second_bend),
+        (second_bend, end),
+    ];
+    let mut nearby = markers
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, marker)| {
+            let bounds = inflate_rect(marker, NOTATION_CLEARANCE);
+            let distance = direct_segments
+                .iter()
+                .map(|(from, to)| segment_rect_distance(*from, *to, bounds))
+                .fold(f64::INFINITY, f64::min);
+            (distance, index, bounds)
+        })
+        .filter(|(distance, _, _)| *distance <= NOTATION_CHANNEL_DISTANCE)
+        .collect::<Vec<_>>();
+    nearby.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    nearby
+        .into_iter()
+        .take(MAX_NOTATION_CHANNELS)
+        .map(|(_, _, bounds)| bounds)
+        .collect()
+}
+
+fn segment_rect_distance(start: Point, end: Point, rect: Rect) -> f64 {
+    if same_y(start, end) {
+        let left = start.x.min(end.x);
+        let right = start.x.max(end.x);
+        let x_gap = (rect.left - right).max(left - rect.right).max(0.0);
+        let y_gap = if start.y < rect.top {
+            rect.top - start.y
+        } else if start.y > rect.bottom {
+            start.y - rect.bottom
+        } else {
+            0.0
+        };
+        return x_gap.hypot(y_gap);
+    }
+    let top = start.y.min(end.y);
+    let bottom = start.y.max(end.y);
+    let y_gap = (rect.top - bottom).max(top - rect.bottom).max(0.0);
+    let x_gap = if start.x < rect.left {
+        rect.left - start.x
+    } else if start.x > rect.right {
+        start.x - rect.right
+    } else {
+        0.0
+    };
+    x_gap.hypot(y_gap)
+}
+
+fn inflate_rect(rect: Rect, padding: f64) -> Rect {
+    Rect {
+        left: rect.left - padding,
+        top: rect.top - padding,
+        right: rect.right + padding,
+        bottom: rect.bottom + padding,
     }
 }
 
@@ -531,11 +720,25 @@ fn connect_side(
     }
 }
 
-fn route_segment_penalty(from: Point, to: Point, routes: &[(Point, Point)], simple: bool) -> f64 {
+fn route_segment_penalty(
+    from: Point,
+    to: Point,
+    routes: &[(Point, Point)],
+    marker_obstacles: &[Rect],
+    simple: bool,
+) -> f64 {
     let overlap_base = if simple { 160.0 } else { 1000.0 };
     let overlap_scale = if simple { 0.7 } else { 2.0 };
-    let crossing_cost = if simple { 16.0 } else { 220.0 };
-    let mut penalty = 0.0;
+    let crossing_cost = 220.0;
+    let mut penalty = marker_obstacles.iter().fold(0.0, |cost, marker| {
+        if !clear_segment(from, to, std::slice::from_ref(marker)) {
+            cost + NOTATION_OVERLAP_PENALTY
+        } else if !clear_segment(from, to, &[inflate_rect(*marker, NOTATION_CLEARANCE)]) {
+            cost + NOTATION_NEAR_PENALTY
+        } else {
+            cost
+        }
+    });
     for (existing_start, existing_end) in routes {
         let overlap = overlapping_length(from, to, *existing_start, *existing_end);
         if overlap > EPSILON {
@@ -546,11 +749,25 @@ fn route_segment_penalty(from: Point, to: Point, routes: &[(Point, Point)], simp
             parallel_segment_separation(from, to, *existing_start, *existing_end)
         {
             if separation < ROUTING_LANE_SPACING + 4.0 {
-                penalty += 28.0 + (ROUTING_LANE_SPACING + 4.0 - separation) * 4.0;
+                penalty += 8.0 + (ROUTING_LANE_SPACING + 4.0 - separation) * 1.5;
             }
         }
     }
     penalty
+}
+
+fn route_turn_penalty(turns: usize) -> f64 {
+    match turns {
+        0 => 0.0,
+        1 => 24.0,
+        2 => 200.0,
+        3 => 500.0,
+        _ => 1200.0 + (turns.saturating_sub(4) as f64) * 800.0,
+    }
+}
+
+fn turn_penalty_for_ordinal(ordinal: usize) -> f64 {
+    route_turn_penalty(ordinal) - route_turn_penalty(ordinal.saturating_sub(1))
 }
 
 fn soft_constraint_penalty(from: Point, to: Point, constraints: &[(i32, f64)]) -> f64 {
@@ -706,7 +923,7 @@ fn reconstruct(goal_state: usize, parents: &[usize], points: &[Point]) -> Vec<f6
     let mut route = Vec::new();
     let mut state = goal_state;
     loop {
-        let point = points[state / 5];
+        let point = points[state / STATES_PER_POINT];
         route.push(point);
         let parent = parents[state];
         if parent == usize::MAX {
@@ -814,6 +1031,7 @@ mod tests {
             0,
             16.0,
             &[],
+            &[],
         );
         let points = route(&result);
         assert_eq!(
@@ -851,6 +1069,7 @@ mod tests {
             0,
             16.0,
             &[],
+            &[],
         );
         let points = route(&result);
         assert!(points.len() > 4, "{points:?}");
@@ -877,12 +1096,99 @@ mod tests {
             0,
             16.0,
             &[],
+            &[],
         );
         let points = route(&result);
         assert!(points.windows(2).all(|segment| {
             !same_y(segment[0], segment[1]) || !almost_equal(segment[0].y, 50.0)
         }));
         assert!(points.len() >= 3);
+    }
+
+    #[test]
+    fn keeps_a_direct_route_instead_of_bending_around_nearby_parallel_wires() {
+        let routes = [
+            (Point { x: 0.0, y: 54.0 }, Point { x: 300.0, y: 54.0 }),
+            (Point { x: 0.0, y: 58.0 }, Point { x: 300.0, y: 58.0 }),
+            (Point { x: 0.0, y: 62.0 }, Point { x: 300.0, y: 62.0 }),
+        ];
+        let points = route_with_existing_routes(
+            Point { x: 0.0, y: 50.0 },
+            Point { x: 300.0, y: 50.0 },
+            &routes,
+            false,
+        );
+        assert_eq!(turn_count(&points), 0, "{points:?}");
+    }
+
+    #[test]
+    fn accepts_one_crossing_instead_of_adding_a_two_bend_dogleg() {
+        let routes = [(Point { x: 150.0, y: 30.0 }, Point { x: 150.0, y: 70.0 })];
+        let points = route_with_existing_routes(
+            Point { x: 0.0, y: 50.0 },
+            Point { x: 300.0, y: 50.0 },
+            &routes,
+            false,
+        );
+        assert_eq!(turn_count(&points), 0, "{points:?}");
+    }
+
+    #[test]
+    fn finds_a_two_bend_channel_around_a_cluster_of_crossings() {
+        let routes = [
+            (Point { x: 100.0, y: 30.0 }, Point { x: 100.0, y: 70.0 }),
+            (Point { x: 200.0, y: 30.0 }, Point { x: 200.0, y: 70.0 }),
+        ];
+        let points = route_with_existing_routes(
+            Point { x: 0.0, y: 50.0 },
+            Point { x: 300.0, y: 50.0 },
+            &routes,
+            false,
+        );
+        assert_eq!(turn_count(&points), 2, "{points:?}");
+        assert!(
+            points.iter().any(|point| point.y < 30.0 || point.y > 70.0),
+            "{points:?}"
+        );
+        assert!(!crosses_routes(&points, &routes), "{points:?}");
+    }
+
+    #[test]
+    fn avoids_the_clearance_around_other_connector_notation() {
+        let markers = [40.0, -8.0, 60.0, 8.0];
+        let packed = route_orthogonal(
+            0.0,
+            16.0,
+            100.0,
+            16.0,
+            &[],
+            &[],
+            &[],
+            true,
+            -1,
+            0,
+            16.0,
+            &[],
+            &markers,
+        );
+        let points = route(&packed);
+        let clearance = obstacles_rects(&markers)
+            .into_iter()
+            .map(|rect| inflate_rect(rect, NOTATION_CLEARANCE))
+            .collect::<Vec<_>>();
+        assert_eq!(turn_count(&points), 2, "{points:?}");
+        assert!(
+            points
+                .windows(2)
+                .all(|segment| clear_segment(segment[0], segment[1], &clearance)),
+            "{points:?}"
+        );
+    }
+
+    #[test]
+    fn cumulative_turn_penalties_match_the_progressive_tiers() {
+        let penalties = (0..=5).map(route_turn_penalty).collect::<Vec<_>>();
+        assert_eq!(penalties, [0.0, 24.0, 200.0, 500.0, 1200.0, 2000.0]);
     }
 
     #[test]
@@ -893,23 +1199,72 @@ mod tests {
             start,
             end,
             &[(Point { x: 20.0, y: 0.0 }, Point { x: 80.0, y: 0.0 })],
+            &[],
             true,
         );
         let tight = route_segment_penalty(
             start,
             end,
             &[(Point { x: 0.0, y: 2.0 }, Point { x: 100.0, y: 2.0 })],
+            &[],
             true,
         );
         let crossing = route_segment_penalty(
             start,
             end,
             &[(Point { x: 50.0, y: -40.0 }, Point { x: 50.0, y: 40.0 })],
+            &[],
             true,
         );
 
         assert!(shared > tight);
-        assert!(tight > crossing);
+        assert!(crossing > tight);
+    }
+
+    fn route_with_existing_routes(
+        start: Point,
+        end: Point,
+        routes: &[(Point, Point)],
+        simple: bool,
+    ) -> Vec<Point> {
+        let packed_routes = routes
+            .iter()
+            .flat_map(|(from, to)| [from.x, from.y, to.x, to.y])
+            .collect::<Vec<_>>();
+        let packed = route_orthogonal(
+            start.x,
+            start.y,
+            end.x,
+            end.y,
+            &[],
+            &packed_routes,
+            &[],
+            simple,
+            -1,
+            0,
+            16.0,
+            &[],
+            &[],
+        );
+        route(&packed)
+    }
+
+    fn turn_count(points: &[Point]) -> usize {
+        points
+            .windows(3)
+            .filter(|window| {
+                !((same_x(window[0], window[1]) && same_x(window[1], window[2]))
+                    || (same_y(window[0], window[1]) && same_y(window[1], window[2])))
+            })
+            .count()
+    }
+
+    fn crosses_routes(points: &[Point], routes: &[(Point, Point)]) -> bool {
+        points.windows(2).any(|segment| {
+            routes
+                .iter()
+                .any(|(start, end)| segments_cross(segment[0], segment[1], *start, *end))
+        })
     }
 
     fn obstacles_rects(values: &[f64]) -> Vec<Rect> {

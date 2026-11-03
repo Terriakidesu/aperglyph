@@ -69,7 +69,7 @@ export interface EdgeStyle {
   cornerRadius?: number;
 }
 
-export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
+export type EdgeMarker = 'none' | 'arrow' | 'bar' | 'bar-bar' | 'circle' | 'crowfoot' | 'circle-bar' | 'bar-crowfoot' | 'circle-crowfoot';
 
 export type PortDirection = 'north' | 'east' | 'south' | 'west';
 export type OrthogonalRoutingMode = 'auto' | 'simple' | 'manual';

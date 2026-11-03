@@ -1031,7 +1031,7 @@ function markerDefaults(type: DiagramIRType, relationship?: string): { start: st
 }
 
 function edgeMarker(value: string | undefined, fallback: string): DiagramEdge['style']['startMarker'] {
-  const supported = new Set<DiagramEdge['style']['startMarker']>(['none', 'arrow', 'bar', 'circle', 'crowfoot', 'circle-bar', 'bar-crowfoot', 'circle-crowfoot']);
+  const supported = new Set<DiagramEdge['style']['startMarker']>(['none', 'arrow', 'bar', 'bar-bar', 'circle', 'crowfoot', 'circle-bar', 'bar-crowfoot', 'circle-crowfoot']);
   return supported.has(value as DiagramEdge['style']['startMarker']) ? value as DiagramEdge['style']['startMarker'] : supported.has(fallback as DiagramEdge['style']['startMarker']) ? fallback as DiagramEdge['style']['startMarker'] : 'none';
 }
 

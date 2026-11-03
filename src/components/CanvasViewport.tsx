@@ -9,7 +9,7 @@ import type { ResolvedConnectionAnchor } from '../core/anchors';
 import { ERD_HEADER_HEIGHT, entityMinimumSize } from '../core/erd';
 import { editorEvents } from '../core/events';
 import { getSnapSettings } from '../core/snapping';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath, sortRoutesForJumps } from '../core/routing';
+import { calculateRouteJumps, curvedPath, diagramRoutes, edgeRoute, edgeRouting, endpointMarkerOffset, jumpMaskPaths, orthogonalRoutingMode, parallelEdgeOffset, parallelRoutingLane, pointsToPath, sortRoutesForJumps } from '../core/routing';
 import type { RouteJump } from '../core/routing';
 import { getActivePage, useEditorStore } from '../store/editorStore';
 import type { DiagramEdge, DiagramGuide, DiagramNode, EdgeMarker, Endpoint, GuideOrientation, Point, RouteConstraint, Size, Viewport } from '../core/types';
@@ -2158,35 +2158,18 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       ? { nodeId: endpointPreview.anchor.nodeId, point: endpointPreview.point }
       : null;
   const routeEntries = useMemo(() => {
-    const routes: Array<{ id: string; points: Point[]; crossingPriority?: number }> = [];
-    [...renderedEdges].sort((left, right) => (right.routing?.crossingPriority ?? 0) - (left.routing?.crossingPriority ?? 0)
-      || left.id.localeCompare(right.id)).forEach((edge) => {
-      const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
-      const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
-      const parallelOffset = parallelEdgeOffset(edge, page?.edges ?? renderedEdges);
-      const routedEdge = parallelOffset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset } };
-      const previewEdge = segmentPreview?.edgeId === edge.id
-        ? edgeWithSegmentConstraint(routedEdge, segmentPreview.axis, segmentPreview.value)
-        : routedEdge;
-      routes.push({
-        id: edge.id,
-        points: edgeRoute(previewEdge, source, target, allNodes, {
-          previousRoute: routeCacheRef.current.get(edge.id),
-          otherRoutes: routes.map((route) => route.points),
-          lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, page?.edges ?? renderedEdges) : undefined,
-        }),
-        crossingPriority: selectedIds.includes(edge.id) ? 1000000 : edge.routing?.crossingPriority ?? 0,
-      });
-    });
-    return routes;
-  }, [allNodes, nodeMap, page?.edges, renderedEdges, segmentPreview, selectedIds]);
+    const previewEdges = renderedEdges.map((edge) => segmentPreview?.edgeId === edge.id
+      ? edgeWithSegmentConstraint(edge, segmentPreview.axis, segmentPreview.value) : edge);
+    return diagramRoutes(allNodes, previewEdges, routeCacheRef.current);
+  }, [allNodes, renderedEdges, segmentPreview]);
   useEffect(() => {
     const currentIds = new Set(routeEntries.map((entry) => entry.id));
     routeEntries.forEach((entry) => routeCacheRef.current.set(entry.id, entry.points));
     routeCacheRef.current.forEach((_route, id) => { if (!currentIds.has(id)) routeCacheRef.current.delete(id); });
   }, [routeEntries]);
   const edgeRoutes = useMemo(() => new Map(routeEntries.map((entry) => [entry.id, entry.points])), [routeEntries]);
-  const edgeJumps = useMemo(() => calculateRouteJumps(routeEntries.filter((entry) => renderedEdges.some((edge) => edge.id === entry.id && edgeRouting(edge) === 'orthogonal'))), [renderedEdges, routeEntries]);
+  const edgeJumps = useMemo(() => calculateRouteJumps(routeEntries.filter((entry) => renderedEdges.some((edge) => edge.id === entry.id && edgeRouting(edge) === 'orthogonal'))
+    .map((entry) => ({ ...entry, crossingPriority: selectedIds.includes(entry.id) ? 1_000_000 : entry.crossingPriority }))), [renderedEdges, routeEntries, selectedIds]);
   const edgePaintOrder = useMemo(() => sortRoutesForJumps(renderedEdges.map((edge) => ({
     edge,
     id: edge.id,
@@ -2520,6 +2503,7 @@ function renderEndpointMarker(point: Point, direction: Point, marker: EdgeMarker
   const glyph = marker === 'arrow'
     ? <path d="M 0 0 L 10 -6 L 10 6 Z" fill={stroke} />
     : marker === 'bar' ? bar()
+      : marker === 'bar-bar' ? <>{bar(8)}{bar(16)}</>
       : marker === 'circle' ? circle()
         : marker === 'crowfoot' ? crowfoot()
           : marker === 'circle-bar' ? <>{circle(18)}{bar()}</>

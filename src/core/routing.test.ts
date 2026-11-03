@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEdge, createNode } from './document';
-import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, isValidOrthogonalRoute, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection, sortRoutesForJumps } from './routing';
+import { calculateRouteJumps, curvedPath, edgeRoute, edgeRouting, isValidOrthogonalRoute, jumpMaskPaths, MIN_SEGMENT_LENGTH, NODE_CLEARANCE, normalizeRoute, parallelRoutingLane, pointsToPath, PORT_STUB_LENGTH, portDirection, routeTurnPenalty, sortRoutesForJumps } from './routing';
 
 describe('connector routing', () => {
   it('routes a straight connector between boundaries', () => {
@@ -81,6 +81,42 @@ describe('connector routing', () => {
     const route = edgeRoute(edge, source, target);
     expect(route.every((point, index) => index === 0 || point.x === route[index - 1].x || point.y === route[index - 1].y)).toBe(true);
     expect(pointsToPath(route)).toContain('L');
+  });
+
+  it('scores terminal bends so facing row ports use two bends rather than four', () => {
+    const source = createNode('rectangle', { x: 0, y: 0 }, { size: { width: 100, height: 100 } });
+    const target = createNode('rectangle', { x: 400, y: 200 }, { size: { width: 100, height: 100 } });
+    const edge = createEdge({ nodeId: source.id, port: 'right' }, { nodeId: target.id, port: 'left' }, { type: 'orthogonal', routing: { mode: 'simple' } });
+    const route = edgeRoute(edge, source, target, [source, target]);
+    expect(route).toHaveLength(4);
+    expect(route[0].y).toBe(route[1].y);
+    expect(route[1].x).toBe(route[2].x);
+    expect(route[2].y).toBe(route[3].y);
+  });
+
+  it('increases turn penalties by tier, with no cost for a straight path', () => {
+    expect([0, 1, 2, 3, 4, 5].map(routeTurnPenalty)).toEqual([0, 24, 200, 500, 1200, 2000]);
+  });
+
+  it('detours around nearby notation but ignores the same connector’s own notation', () => {
+    const edge = createEdge(
+      { point: { x: 0, y: 16 } },
+      { point: { x: 100, y: 16 } },
+      { type: 'orthogonal', routing: { mode: 'simple' } },
+    );
+    const irrelevantObstacle = createNode('rectangle', { x: 1000, y: 1000 }, { size: { width: 10, height: 10 } });
+    const notation = { left: 40, top: -8, right: 60, bottom: 8 };
+    const awayFromOtherNotation = edgeRoute(edge, undefined, undefined, [irrelevantObstacle], {
+      markerObstacles: [{ edgeId: 'other-connector', bounds: notation }],
+    });
+    expect(awayFromOtherNotation).toHaveLength(4);
+    expect(awayFromOtherNotation[1].y).toBe(20);
+    expect(awayFromOtherNotation[1].y).toBe(awayFromOtherNotation[2].y);
+
+    const ownNotation = edgeRoute(edge, undefined, undefined, [irrelevantObstacle], {
+      markerObstacles: [{ edgeId: edge.id, bounds: notation }],
+    });
+    expect(ownNotation).toEqual([{ x: 0, y: 16 }, { x: 100, y: 16 }]);
   });
 
   it('treats an explicit port as authoritative for the first and last segment', () => {
@@ -182,6 +218,35 @@ describe('connector routing', () => {
     const route = edgeRoute(edge, source, target, [source, target], { otherRoutes: [occupied] });
     expect(route).toContainEqual({ x: 124, y: 150 });
     expect(route).not.toContainEqual({ x: 252, y: 50 });
+  });
+
+  it.each(['auto', 'simple'] as const)('does not add turns just to stay farther from nearby wires in %s mode', (mode) => {
+    const edge = createEdge({ point: { x: 0, y: 50 } }, { point: { x: 300, y: 50 } }, { type: 'orthogonal', routing: { mode } });
+    const irrelevantObstacle = createNode('rectangle', { x: 1000, y: 1000 }, { size: { width: 10, height: 10 } });
+    const nearbyRoutes = [54, 58, 62].map((y) => [{ x: 0, y }, { x: 300, y }]);
+    expect(edgeRoute(edge, undefined, undefined, [irrelevantObstacle], { otherRoutes: nearbyRoutes })).toEqual([
+      { x: 0, y: 50 }, { x: 300, y: 50 },
+    ]);
+  });
+
+  it.each(['auto', 'simple'] as const)('prefers one clean crossing over an unnecessary dogleg in %s mode', (mode) => {
+    const edge = createEdge({ point: { x: 0, y: 50 } }, { point: { x: 300, y: 50 } }, { type: 'orthogonal', routing: { mode } });
+    const irrelevantObstacle = createNode('rectangle', { x: 1000, y: 1000 }, { size: { width: 10, height: 10 } });
+    const oneCrossing = [[{ x: 150, y: 30 }, { x: 150, y: 70 }]];
+    expect(edgeRoute(edge, undefined, undefined, [irrelevantObstacle], { otherRoutes: oneCrossing })).toEqual([
+      { x: 0, y: 50 }, { x: 300, y: 50 },
+    ]);
+  });
+
+  it.each(['auto', 'simple'] as const)('uses a two-bend channel around a cluster instead of weaving through it in %s mode', (mode) => {
+    const edge = createEdge({ point: { x: 0, y: 50 } }, { point: { x: 300, y: 50 } }, { type: 'orthogonal', routing: { mode } });
+    const irrelevantObstacle = createNode('rectangle', { x: 1000, y: 1000 }, { size: { width: 10, height: 10 } });
+    const crossings = [100, 200].map((x) => [{ x, y: 30 }, { x, y: 70 }]);
+    const route = edgeRoute(edge, undefined, undefined, [irrelevantObstacle], { otherRoutes: crossings });
+    expect(route).toHaveLength(4);
+    expect(route[1].y).toBe(route[2].y);
+    expect(route[1].y < 30 || route[1].y > 70).toBe(true);
+    expect(crossesRoutes(route, crossings)).toBe(false);
   });
 
   it('chooses the shorter clear corridor when direct doglegs are blocked', () => {
@@ -290,7 +355,7 @@ describe('connector routing', () => {
     expect(jumps.get('vertical')).toHaveLength(0);
   });
 
-  it('keeps bridge clear of route endpoints and nearby bends', () => {
+  it('allows a bridge near the OTHER wire bend when the jumping wire has room', () => {
     const routes = [
       { id: 'bent', points: [{ x: 0, y: 50 }, { x: 25, y: 50 }, { x: 100, y: 50 }] },
       { id: 'near-bend', points: [{ x: 19, y: 0 }, { x: 19, y: 100 }] },
@@ -298,8 +363,8 @@ describe('connector routing', () => {
     ];
     const jumps = calculateRouteJumps(routes);
     expect(jumps.get('bent')).toHaveLength(0);
-    expect(jumps.get('near-bend')).toHaveLength(0);
-    expect(jumps.get('near-endpoint')).toHaveLength(0);
+    expect(jumps.get('near-bend')).toEqual([{ segmentIndex: 0, point: { x: 19, y: 50 }, orientation: 'vertical' }]);
+    expect(jumps.get('near-endpoint')).toEqual([{ segmentIndex: 0, point: { x: 70, y: 50 }, orientation: 'vertical' }]);
   });
 
   it('does not bridge a clear crossing crowded by a nearby connector junction', () => {
@@ -311,6 +376,15 @@ describe('connector routing', () => {
     const jumps = calculateRouteJumps(routes);
     expect(jumps.get('horizontal')).toHaveLength(0);
     expect(jumps.get('vertical')).toHaveLength(0);
+  });
+
+  it('does not hide a bridge because an unrelated route has a nearby bend', () => {
+    const jumps = calculateRouteJumps([
+      { id: 'a-horizontal', points: [{ x: 0, y: 50 }, { x: 100, y: 50 }] },
+      { id: 'z-vertical', points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] },
+      { id: 'nearby', points: [{ x: 65, y: 30 }, { x: 65, y: 55 }, { x: 95, y: 55 }] },
+    ]);
+    expect(jumps.get('z-vertical')).toContainEqual({ segmentIndex: 0, point: { x: 50, y: 50 }, orientation: 'vertical' });
   });
 
   it('paints the selected or later-id route last for consistent bridges', () => {
@@ -326,4 +400,20 @@ describe('connector routing', () => {
 function segmentCrossesRect(start: { x: number; y: number }, end: { x: number; y: number }, node: ReturnType<typeof createNode>): boolean {
   if (start.y === end.y) return start.y > node.position.y && start.y < node.position.y + node.size.height && Math.max(start.x, end.x) > node.position.x && Math.min(start.x, end.x) < node.position.x + node.size.width;
   return start.x > node.position.x && start.x < node.position.x + node.size.width && Math.max(start.y, end.y) > node.position.y && Math.min(start.y, end.y) < node.position.y + node.size.height;
+}
+
+function crossesRoutes(route: { x: number; y: number }[], others: { x: number; y: number }[][]): boolean {
+  return route.slice(1).some((end, index) => others.some((other) => other.slice(1).some((otherEnd, otherIndex) => {
+    const start = route[index];
+    const otherStart = other[otherIndex];
+    if (start.y === end.y && otherStart.x === otherEnd.x) {
+      return otherStart.x > Math.min(start.x, end.x) && otherStart.x < Math.max(start.x, end.x)
+        && start.y > Math.min(otherStart.y, otherEnd.y) && start.y < Math.max(otherStart.y, otherEnd.y);
+    }
+    if (start.x === end.x && otherStart.y === otherEnd.y) {
+      return start.x > Math.min(otherStart.x, otherEnd.x) && start.x < Math.max(otherStart.x, otherEnd.x)
+        && otherStart.y > Math.min(start.y, end.y) && otherStart.y < Math.max(start.y, end.y);
+    }
+    return false;
+  })));
 }

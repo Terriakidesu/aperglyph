@@ -68,6 +68,14 @@ describe('native file helpers', () => {
     expect(svg).toContain('M 11 0 L 0 -7 M 11 0 L 0 0 M 11 0 L 0 7');
   });
 
+  it('renders exactly one as two bars, not a crowfoot or an optional circle', () => {
+    const edge = createEdge({ point: { x: 40, y: 80 } }, { point: { x: 300, y: 80 } }, { style: { startMarker: 'bar-bar', endMarker: 'none' } });
+    const svg = documentToSvg([], [edge], '#ffffff', 400, 200);
+    expect(svg).toContain('M 8 -7 L 8 7');
+    expect(svg).toContain('M 16 -7 L 16 7');
+    expect(svg).not.toContain('<circle');
+  });
+
   it('orients end arrowheads into the target node', () => {
     const source = createNode('rectangle', { x: 0, y: 0 });
     const target = createNode('rectangle', { x: 300, y: 0 });

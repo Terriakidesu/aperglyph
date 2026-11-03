@@ -12,7 +12,10 @@ export const CARDINALITY_MARKER_GAP = 8;
 const EPSILON = 0.001;
 const JUMP_HALF_LENGTH = 8;
 const JUMP_HEIGHT = 7;
-const JUMP_BEND_CLEARANCE = 12;
+const NOTATION_CLEARANCE = 12;
+const NOTATION_NEAR_PENALTY = 600;
+const NOTATION_OVERLAP_PENALTY = 1400;
+const MAX_NOTATION_CHANNELS = 48;
 
 export interface RoutingEndpoint {
   point: Point;
@@ -27,6 +30,10 @@ export interface RouteOptions {
   lane?: RoutingLane;
   constraints?: RouteConstraint[];
   simpleRouting?: boolean;
+  /** Include fixed marker stubs when comparing bends, not just the middle path. */
+  terminalStart?: Point;
+  terminalEnd?: Point;
+  markerObstacles?: ReadonlyArray<{ edgeId: string; bounds: Rect }>;
 }
 
 /** Validate accelerated paths before they reach the renderer; malformed WASM
@@ -64,7 +71,7 @@ export type EdgeRouting = 'straight' | 'orthogonal' | 'curved';
 
 /** Inset bar-bearing cardinality glyphs so the connector remains visible on both sides. */
 export function endpointMarkerOffset(marker: EdgeMarker): number {
-  return marker === 'bar' || marker === 'circle-bar' || marker === 'bar-crowfoot' ? CARDINALITY_MARKER_GAP : 0;
+  return marker === 'bar' || marker === 'circle-bar' ? CARDINALITY_MARKER_GAP : 0;
 }
 
 /** Resolve a plugin connector's semantic type to its geometric route mode. */
@@ -122,7 +129,7 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   const start = resolveEndpointPoint(sourceEndpoint, source, targetEndpoint.point ?? (target ? nodeCenter(target) : undefined));
   const end = resolveEndpointPoint(targetEndpoint, target, sourceEndpoint.point ?? (source ? nodeCenter(source) : undefined));
   if (!start || !end) return [];
-  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, sourceEndpoint.port, obstacles);
+  if (source && target && source.id === target.id) return selfLoopRoute(source, start, end, sourceEndpoint.port, obstacles, targetEndpoint.port);
   const routing = edgeRouting(edge);
   if (routing !== 'orthogonal') return routing === 'straight' && Number.isFinite(edge.data?.parallelOffset) && Number(edge.data?.parallelOffset) !== 0
     ? parallelRoute(start, end, Number(edge.data?.parallelOffset))
@@ -132,6 +139,7 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   const nodeClearance = options.nodeClearance ?? NODE_CLEARANCE;
   const requestedStub = options.portStubLength ?? PORT_STUB_LENGTH;
   const rectangles = obstacles.map((node) => inflate(node, nodeClearance));
+  const markerObstacles = (options.markerObstacles ?? []).filter((marker) => marker.edgeId !== edge.id);
   const startDirection = source ? routingDirection(sourceEndpoint, source, start, end) : cardinalDirection(start, end);
   const endDirection = target ? routingDirection(targetEndpoint, target, end, start) : cardinalDirection(end, start);
   const startStub = Math.max(requestedStub, markerTerminalLength(edge.style.startMarker));
@@ -144,7 +152,7 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   let current = startExit;
   const mode = orthogonalRoutingMode(edge);
   const constraints = edge.routing?.constraints ?? options.constraints ?? [];
-  const routeOptions = { ...options, constraints, simpleRouting: mode === 'simple' };
+  const routeOptions = { ...options, constraints, markerObstacles, simpleRouting: mode === 'simple', terminalStart: start, terminalEnd: end };
   if (mode === 'simple' && edge.waypoints.length === 0) {
     appendRoute(route, simpleOrthogonalRoute(current, endEntry, rectangles, routeOptions));
     current = endEntry;
@@ -161,10 +169,111 @@ export function edgeRoute(edge: DiagramEdge, source?: DiagramNode, target?: Diag
   return normalizeRoute(route);
 }
 
+/** Reserve glyph space before routing any wire, including wires routed before
+ * that glyph's relationship. A rectangle-only obstacle model misses these. */
+export function endpointMarkerObstacles(nodes: DiagramNode[], edges: DiagramEdge[]): Array<{ edgeId: string; bounds: Rect }> {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const reservations: Array<{ edgeId: string; bounds: Rect }> = [];
+  for (const edge of edges) {
+    const source = edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined;
+    const target = edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined;
+    let sourceEndpoint = semanticFieldEndpoint(edge, edge.source, source, 'source');
+    let targetEndpoint = semanticFieldEndpoint(edge, edge.target, target, 'target');
+    if (edge.data?.relationship === 'foreign-key' && source?.type === 'entity' && target?.type === 'entity' && source.id !== target.id && edge.waypoints.length === 0) {
+      const sourceIsLeft = nodeCenter(source).x < nodeCenter(target).x;
+      sourceEndpoint = faceEntityEndpoint(sourceEndpoint, sourceIsLeft ? 'right' : 'left');
+      targetEndpoint = faceEntityEndpoint(targetEndpoint, sourceIsLeft ? 'left' : 'right');
+    }
+    for (const [endpoint, node, other, marker] of [
+      [sourceEndpoint, source, target, edge.style.startMarker],
+      [targetEndpoint, target, source, edge.style.endMarker],
+    ] as const) {
+      if (!node || marker === 'none') continue;
+      const point = resolveEndpointPoint(endpoint, node, other ? nodeCenter(other) : undefined);
+      if (!point) continue;
+      const direction = routingDirection(endpoint, node, point, other ? nodeCenter(other) : point);
+      const extent = markerTerminalLength(marker);
+      const tip = shift(point, direction, extent);
+      reservations.push({ edgeId: edge.id, bounds: {
+        left: Math.min(point.x, tip.x) - (direction.y ? 10 : 0),
+        right: Math.max(point.x, tip.x) + (direction.y ? 10 : 0),
+        top: Math.min(point.y, tip.y) - (direction.x ? 10 : 0),
+        bottom: Math.max(point.y, tip.y) + (direction.x ? 10 : 0),
+      } });
+    }
+  }
+  return reservations;
+}
+
+/** One deterministic routing pipeline for the canvas, exports, and MCP. */
+export function diagramRoutes(nodes: DiagramNode[], edges: DiagramEdge[], previousRoutes?: ReadonlyMap<string, Point[]>): Array<{ id: string; points: Point[]; crossingPriority?: number }> {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const markerObstacles = endpointMarkerObstacles(nodes, edges);
+  const routes: Array<{ id: string; points: Point[]; crossingPriority?: number }> = [];
+  [...edges].sort((a, b) => (b.routing?.crossingPriority ?? 0) - (a.routing?.crossingPriority ?? 0) || a.id.localeCompare(b.id)).forEach((edge) => {
+    const offset = parallelEdgeOffset(edge, edges);
+    const routedEdge = offset === 0 ? edge : { ...edge, data: { ...edge.data, parallelOffset: offset } };
+    routes.push({ id: edge.id, crossingPriority: edge.routing?.crossingPriority,
+      points: edgeRoute(routedEdge, edge.source.nodeId ? nodeMap.get(edge.source.nodeId) : undefined, edge.target.nodeId ? nodeMap.get(edge.target.nodeId) : undefined, nodes, {
+        otherRoutes: routes.map((route) => route.points),
+        previousRoute: previousRoutes?.get(edge.id),
+        lane: edgeRouting(edge) === 'orthogonal' ? parallelRoutingLane(edge, edges) : undefined,
+        markerObstacles,
+      }),
+    });
+  });
+  // Space movable tracks after path finding. Shifting a complete segment keeps
+  // the topology/bend count instead of weaving around each endpoint glyph.
+  const bounds = nodes.map((node) => inflate(node, NODE_CLEARANCE));
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const route of routes) {
+      const edge = edges.find((edge) => edge.id === route.id)!;
+      if (edge.waypoints.length || edge.routing?.mode === 'manual' || edge.routing?.constraints?.length || edge.routing?.lane !== undefined || edge.source.nodeId === edge.target.nodeId) continue;
+      const points = route.points;
+      if (points.length < 4 || edgeRouting(edge) !== 'orthogonal') continue;
+      const markers = markerObstacles.filter((marker) => marker.edgeId !== route.id);
+      const options: RouteOptions = { simpleRouting: true, markerObstacles: markers, otherRoutes: routes.filter((other) => other.id !== route.id).map((other) => other.points) };
+      let best = points;
+      let bestCost = routeCost(best, options);
+      for (let index = 1; index < points.length - 2; index += 1) {
+        for (const offset of [-32, -24, -16, -8, 8, 16, 24, 32]) {
+          const candidate = points.map((point) => ({ ...point }));
+          const axis = almostEqual(points[index].x, points[index + 1].x) ? 'x' : 'y';
+          candidate[index][axis] += offset;
+          candidate[index + 1][axis] += offset;
+          if (normalizeRoute(candidate).length !== points.length) continue;
+          const firstDirection = directionCode(candidate[0], candidate[1]);
+          const lastDirection = directionCode(candidate.at(-2)!, candidate.at(-1)!);
+          if (firstDirection !== directionCode(points[0], points[1]) || lastDirection !== directionCode(points.at(-2)!, points.at(-1)!)) continue;
+          if (distanceBetween(candidate[0], candidate[1]) < Math.max(PORT_STUB_LENGTH, markerTerminalLength(edge.style.startMarker))
+            || distanceBetween(candidate.at(-2)!, candidate.at(-1)!) < Math.max(PORT_STUB_LENGTH, markerTerminalLength(edge.style.endMarker))) continue;
+          if (!candidate.slice(0, -1).every((point, i) => clearSegment(point, candidate[i + 1], bounds.filter((rect, nodeIndex) =>
+            !(i === 0 && nodes[nodeIndex].id === edge.source.nodeId) && !(i === candidate.length - 2 && nodes[nodeIndex].id === edge.target.nodeId))))) continue;
+          const cost = routeCost(candidate, options);
+          if (cost < bestCost - EPSILON) { best = candidate; bestCost = cost; }
+        }
+      }
+      route.points = best;
+    }
+  }
+  return routes;
+}
+
 export function orthogonalRoutingMode(edge: DiagramEdge): OrthogonalRoutingMode {
   if (edge.routing?.mode) return edge.routing.mode;
   if (edge.data?.routingMode === 'simple' || edge.data?.routingMode === 'manual') return edge.data.routingMode;
   return edge.waypoints.length > 0 ? 'manual' : 'auto';
+}
+
+/** Cumulative path cost: early turns are progressively weighted, and every
+ * turn from the fourth onward adds the highest penalty tier. */
+export function routeTurnPenalty(turns: number): number {
+  const count = Math.max(0, Math.floor(turns));
+  if (count === 0) return 0;
+  if (count === 1) return 24;
+  if (count === 2) return 200;
+  if (count === 3) return 500;
+  return 1200 + (count - 4) * 800;
 }
 
 function constraintDestinations(from: Point, to: Point, constraints: RouteConstraint[]): Point[] {
@@ -187,7 +296,22 @@ function parallelRoute(start: Point, end: Point, offset: number): Point[] {
   return [start, { x: start.x + shift.x, y: start.y + shift.y }, { x: end.x + shift.x, y: end.y + shift.y }, end];
 }
 
-function selfLoopRoute(node: DiagramNode, start: Point, end: Point, port?: string, obstacles: DiagramNode[] = []): Point[] {
+function selfLoopRoute(node: DiagramNode, start: Point, end: Point, port?: string, obstacles: DiagramNode[] = [], targetPort?: string): Point[] {
+  // Field-to-field references are ordinary orthogonal paths outside their
+  // owner, not decorative loops. Keep both terminal directions and include
+  // the owner in the obstacle set so a loop cannot cut through the table.
+  if (!samePoint(start, end)) {
+    const startDirection = routingDirection({ port }, node, start, end);
+    const endDirection = routingDirection({ port: targetPort }, node, end, start);
+    const startExit = shift(start, startDirection, PORT_STUB_LENGTH + ROUTING_LANE_SPACING);
+    const endEntry = shift(end, endDirection, PORT_STUB_LENGTH + ROUTING_LANE_SPACING);
+    const rectangles = [node, ...obstacles.filter((obstacle) => obstacle.id !== node.id)].map((obstacle) => inflate(obstacle, NODE_CLEARANCE));
+    const middle = routeBetween(startExit, endEntry, rectangles, { simpleRouting: true });
+    const compact = normalizeRoute([start, ...middle, end]);
+    if (isValidOrthogonalRoute(middle, startExit, endEntry, rectangles)
+      && selfLoopIsClear(compact, node, obstacles)
+      && compact.slice(0, -1).every((point, index) => clearSegment(point, compact[index + 1], [inflate(node, 0)]))) return compact;
+  }
   const explicitSide = port === 'left' || port === 'top' || port === 'bottom' || port === 'right' ? port : undefined;
   const candidates: Array<'left' | 'top' | 'bottom' | 'right'> = ['right', 'left', 'bottom', 'top'];
   const ordered = candidates.sort((left, right) => sideClearance(node, right, obstacles) - sideClearance(node, left, obstacles));
@@ -339,11 +463,19 @@ export function calculateRouteJumps(routes: ReadonlyArray<{ id: string; points: 
           const crossing = orthogonalCrossing(left.points[leftSegment], left.points[leftSegment + 1], right.points[rightSegment], right.points[rightSegment + 1]);
           if (!crossing) continue;
           const crowdedJunction = routes.some((candidate, candidateIndex) => candidateIndex !== leftIndex && candidateIndex !== rightIndex
-            && candidate.points.some((point) => distanceBetween(point, crossing.point) < JUMP_HALF_LENGTH + JUMP_BEND_CLEARANCE));
+            && [candidate.points[0], candidate.points.at(-1)].some((point) => point && samePoint(point, crossing.point)));
           if (crowdedJunction) continue;
           const leftWins = sortRoutesForJumps([left, right])[1] === left;
-          const jumper = leftWins ? left : right;
-          const jumperSegment = leftWins ? leftSegment : rightSegment;
+          const preferred = leftWins ? left : right;
+          const preferredSegment = leftWins ? leftSegment : rightSegment;
+          // Only the wire carrying the bridge needs a straight span. Requiring
+          // clearance on BOTH wires hid valid crossings near the other wire's
+          // bend (the crowded ERD corridors are full of those).
+          const preferredStart = preferred.points[preferredSegment];
+          const preferredEnd = preferred.points[preferredSegment + 1];
+          if (Math.min(distanceBetween(preferredStart, crossing.point), distanceBetween(preferredEnd, crossing.point)) < JUMP_HALF_LENGTH + 2) continue;
+          const jumper = preferred;
+          const jumperSegment = preferredSegment;
           const jumperCrossing = leftWins
             ? orthogonalCrossing(right.points[rightSegment], right.points[rightSegment + 1], left.points[leftSegment], left.points[leftSegment + 1])
             : crossing;
@@ -383,8 +515,7 @@ function orthogonalCrossing(leftStart: Point, leftEnd: Point, rightStart: Point,
   const verticalStart = leftHorizontal ? rightStart : leftStart;
   const verticalEnd = leftHorizontal ? rightEnd : leftEnd;
   const point = { x: verticalStart.x, y: horizontalStart.y };
-  const clearance = JUMP_HALF_LENGTH + JUMP_BEND_CLEARANCE;
-  if (!strictlyBetween(point.x, horizontalStart.x, horizontalEnd.x, clearance) || !strictlyBetween(point.y, verticalStart.y, verticalEnd.y, clearance)) return null;
+  if (!strictlyBetween(point.x, horizontalStart.x, horizontalEnd.x, EPSILON) || !strictlyBetween(point.y, verticalStart.y, verticalEnd.y, EPSILON)) return null;
   return { point, orientation: leftHorizontal ? 'vertical' : 'horizontal' };
 }
 
@@ -436,7 +567,7 @@ function normalizeDirection(direction: Point): Point {
 
 interface Rect { left: number; right: number; top: number; bottom: number }
 interface GraphPoint extends Point { index: number }
-interface SearchState { point: number; direction: number; key: string }
+interface SearchState { point: number; direction: number; turns: number; key: string }
 interface SearchQueueEntry { state: SearchState; priority: number; order: number }
 
 function legacyOrthogonalRoute(start: Point, end: Point, waypoints: Point[]): Point[] {
@@ -455,25 +586,25 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
   if (samePoint(from, to)) return [from];
   const laneRoute = options.lane ? explicitLaneRoute(from, to, obstacles, options.lane) : null;
   if (laneRoute) return laneRoute;
-  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0) && !(options.constraints?.some((constraint) => constraint.strength === 'soft'))) return [from, to];
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && !options.lane && !(options.otherRoutes && options.otherRoutes.length > 0) && !(options.markerObstacles?.length) && !(options.constraints?.some((constraint) => constraint.strength === 'soft'))) return [from, to];
 
   const accelerated = routeOrthogonalWithWasm(from, to, obstacles, options);
   if (accelerated && isValidOrthogonalRoute(accelerated, from, to, obstacles)) return normalizeRoute(accelerated);
   const shortcuts = options.lane || options.constraints?.some((constraint) => constraint.strength === 'hard')
     ? []
     : directOrthogonalRoutes(from, to, obstacles, options.otherRoutes);
-  const points = visibilityGraphPoints(from, to, obstacles, options.lane, options.otherRoutes);
+  const points = visibilityGraphPoints(from, to, obstacles, options.lane, options.otherRoutes, options.markerObstacles);
   const graph = buildVisibilityGraph(points, obstacles);
   const start = points.findIndex((point) => samePoint(point, from));
   const goal = points.findIndex((point) => samePoint(point, to));
   if (start < 0 || goal < 0) return fallbackOrthogonalRoute(from, to, obstacles);
-  const initial: SearchState = { point: start, direction: -1, key: stateKey(start, -1) };
+  const initial: SearchState = { point: start, direction: -1, turns: 0, key: stateKey(start, -1, 0) };
   const open: SearchQueueEntry[] = [{ state: initial, priority: Math.abs(from.x - to.x) + Math.abs(from.y - to.y), order: 0 }];
   const states = new Map<string, SearchState>([[initial.key, initial]]);
   const scores = new Map<string, number>([[initial.key, 0]]);
   const parents = new Map<string, string>();
   let queueOrder = 1;
-  const maxStates = Math.max(2000, points.length * 4);
+  const maxStates = Math.max(2000, points.length * 20);
 
   while (open.length > 0 && states.size <= maxStates) {
     const currentEntry = popSearchQueue(open);
@@ -488,17 +619,19 @@ function routeBetween(from: Point, to: Point, obstacles: Rect[], options: RouteO
       const fromPoint = points[current.point];
       const toPoint = points[neighbor.point];
       const length = Math.abs(toPoint.x - fromPoint.x) + Math.abs(toPoint.y - fromPoint.y);
+      const turned = current.direction >= 0 && current.direction !== neighbor.direction;
+      const turns = Math.min(4, current.turns + (turned ? 1 : 0));
       const cost = (scores.get(current.key) ?? 0)
         + length
         + (length > EPSILON && length < MIN_SEGMENT_LENGTH ? 36 : 0)
-        + (current.direction >= 0 && current.direction !== neighbor.direction ? 42 : 0)
+        + (turned ? routeTurnPenalty(current.turns + 1) - routeTurnPenalty(current.turns) : 0)
         + (current.direction >= 0 && current.direction === oppositeDirection(neighbor.direction) ? 28 : 0)
         + routeSegmentPenalty(fromPoint, toPoint, options)
         + softConstraintPenalty(fromPoint, toPoint, options.constraints)
         + routeChangePenalty(fromPoint, toPoint, options.previousRoute);
-      const key = stateKey(neighbor.point, neighbor.direction);
+      const key = stateKey(neighbor.point, neighbor.direction, turns);
       if (cost >= (scores.get(key) ?? Number.POSITIVE_INFINITY)) continue;
-      const next = { ...neighbor, key };
+      const next = { ...neighbor, turns, key };
       states.set(key, next);
       scores.set(key, cost);
       parents.set(key, current.key);
@@ -608,8 +741,13 @@ function preferredRoute(primary: Point[], shortcuts: Point[][], options: RouteOp
 }
 
 function routeCost(route: Point[], options: RouteOptions): number {
+  route = normalizeRoute([
+    ...(options.terminalStart ? [options.terminalStart] : []),
+    ...route,
+    ...(options.terminalEnd ? [options.terminalEnd] : []),
+  ]);
   let cost = 0;
-  const turnPenalty = options.simpleRouting ? 96 : 42;
+  let turns = 0;
   route.slice(0, -1).forEach((point, index) => {
     const next = route[index + 1];
     cost += Math.abs(next.x - point.x) + Math.abs(next.y - point.y);
@@ -619,10 +757,10 @@ function routeCost(route: Point[], options: RouteOptions): number {
       const previous = route[index - 1];
       const previousDirection = directionCode(previous, point);
       const nextDirection = directionCode(point, next);
-      if (previousDirection !== nextDirection) cost += turnPenalty;
+      if (previousDirection !== nextDirection) turns += 1;
     }
   });
-  return cost + routeChangePenalty(route[0], route[1] ?? route[0], options.previousRoute);
+  return cost + routeTurnPenalty(turns) + routeChangePenalty(route[0], route[1] ?? route[0], options.previousRoute);
 }
 
 function directionCode(from: Point, to: Point): number {
@@ -633,31 +771,46 @@ function directionCode(from: Point, to: Point): number {
 }
 
 function simpleOrthogonalRoute(from: Point, to: Point, obstacles: Rect[], options: RouteOptions = {}): Point[] {
-  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && (options.otherRoutes?.length ?? 0) === 0) return [from, to];
+  if (sameAxis(from, to) && clearSegment(from, to, obstacles) && (options.otherRoutes?.length ?? 0) === 0 && !(options.markerObstacles?.length)) return [from, to];
   const horizontalFirst = Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
   const bends = horizontalFirst
     ? [{ x: to.x, y: from.y }, { x: from.x, y: to.y }]
     : [{ x: from.x, y: to.y }, { x: to.x, y: from.y }];
   const candidates: Point[][] = bends.map((bend) => [from, bend, to]);
+  // A middle channel can merge with both fixed terminal stubs, yielding two
+  // bends overall where an equally short L-shaped middle yields four.
+  candidates.push(
+    [from, { x: (from.x + to.x) / 2, y: from.y }, { x: (from.x + to.x) / 2, y: to.y }, to],
+    [from, { x: from.x, y: (from.y + to.y) / 2 }, { x: to.x, y: (from.y + to.y) / 2 }, to],
+  );
+  nearbyNotationRects(from, to, options.markerObstacles ?? []).forEach((rect) => {
+    candidates.push(
+      [from, { x: from.x, y: rect.top }, { x: to.x, y: rect.top }, to],
+      [from, { x: from.x, y: rect.bottom }, { x: to.x, y: rect.bottom }, to],
+      [from, { x: rect.left, y: from.y }, { x: rect.left, y: to.y }, to],
+      [from, { x: rect.right, y: from.y }, { x: rect.right, y: to.y }, to],
+    );
+  });
   const otherRoutes = options.otherRoutes ?? [];
   if (otherRoutes.length > 0) {
-    const channelXs = uniqueSorted([
+    const channelXs = nearbyChannels([
       (from.x + to.x) / 2,
       from.x - ROUTING_LANE_SPACING, from.x + ROUTING_LANE_SPACING,
       to.x - ROUTING_LANE_SPACING, to.x + ROUTING_LANE_SPACING,
-    ]);
-    const channelYs = uniqueSorted([
+      ...otherRoutes.flatMap((route) => route.flatMap((point) => [point.x - ROUTING_LANE_SPACING, point.x + ROUTING_LANE_SPACING])),
+    ], (from.x + to.x) / 2);
+    const channelYs = nearbyChannels([
       (from.y + to.y) / 2,
       from.y - ROUTING_LANE_SPACING, from.y + ROUTING_LANE_SPACING,
       to.y - ROUTING_LANE_SPACING, to.y + ROUTING_LANE_SPACING,
-    ]);
+      ...otherRoutes.flatMap((route) => route.flatMap((point) => [point.y - ROUTING_LANE_SPACING, point.y + ROUTING_LANE_SPACING])),
+    ], (from.y + to.y) / 2);
     channelXs.forEach((x) => candidates.push([from, { x, y: from.y }, { x, y: to.y }, to]));
     channelYs.forEach((y) => candidates.push([from, { x: from.x, y }, { x: to.x, y }, to]));
   }
   const clear = (candidate: Point[]) => candidate.slice(0, -1).every((point, index) => clearSegment(point, candidate[index + 1], obstacles));
   const routes = candidates.map(normalizeRoute).filter(clear);
   if (routes.length === 0) return routeBetween(from, to, obstacles, { ...options, otherRoutes: [], simpleRouting: true });
-  if (otherRoutes.length === 0) return routes[0];
   return routes.reduce((best, candidate) => routeCost(candidate, options) < routeCost(best, options) ? candidate : best);
 }
 
@@ -677,7 +830,14 @@ function explicitLaneRoute(from: Point, to: Point, obstacles: Rect[], lane: Rout
 
 interface GraphNeighbor { point: number; direction: number }
 
-function visibilityGraphPoints(from: Point, to: Point, obstacles: Rect[], lane?: RoutingLane, otherRoutes: ReadonlyArray<Point[]> = []): GraphPoint[] {
+function visibilityGraphPoints(
+  from: Point,
+  to: Point,
+  obstacles: Rect[],
+  lane?: RoutingLane,
+  otherRoutes: ReadonlyArray<Point[]> = [],
+  markerObstacles: ReadonlyArray<{ edgeId: string; bounds: Rect }> = [],
+): GraphPoint[] {
   const points: GraphPoint[] = [];
   const pointKeys = new Set<string>();
   const add = (point: Point) => {
@@ -696,6 +856,22 @@ function visibilityGraphPoints(from: Point, to: Point, obstacles: Rect[], lane?:
     add({ x: rect.left, y: rect.bottom });
   });
   addParallelChannels(otherRoutes, add);
+  nearbyNotationRects(from, to, markerObstacles).forEach((rect) => {
+    [
+      { x: rect.left, y: rect.top },
+      { x: rect.right, y: rect.top },
+      { x: rect.right, y: rect.bottom },
+      { x: rect.left, y: rect.bottom },
+      { x: rect.left, y: from.y },
+      { x: rect.right, y: from.y },
+      { x: rect.left, y: to.y },
+      { x: rect.right, y: to.y },
+      { x: from.x, y: rect.top },
+      { x: from.x, y: rect.bottom },
+      { x: to.x, y: rect.top },
+      { x: to.x, y: rect.bottom },
+    ].forEach(add);
+  });
 
   // Add only projections onto obstacle boundaries, rather than every X × Y
   // intersection. This keeps useful corridor gates while avoiding irrelevant
@@ -737,6 +913,8 @@ function visibilityGraphPoints(from: Point, to: Point, obstacles: Rect[], lane?:
             addPoint({ x: start.x + offset, y: from.y });
             addPoint({ x: end.x + offset, y: to.y });
           });
+          [start.x - ROUTING_LANE_SPACING, start.x + ROUTING_LANE_SPACING, end.x - ROUTING_LANE_SPACING, end.x + ROUTING_LANE_SPACING]
+            .forEach((x) => [from.y, to.y].forEach((y) => addPoint({ x, y })));
         } else if (almostEqual(start.x, end.x) && !almostEqual(start.y, end.y)) {
           [-ROUTING_LANE_SPACING, ROUTING_LANE_SPACING].forEach((offset) => {
             addPoint({ x: from.x, y: start.y });
@@ -746,6 +924,8 @@ function visibilityGraphPoints(from: Point, to: Point, obstacles: Rect[], lane?:
             addPoint({ x: from.x, y: start.y + offset });
             addPoint({ x: to.x, y: end.y + offset });
           });
+          [start.y - ROUTING_LANE_SPACING, start.y + ROUTING_LANE_SPACING, end.y - ROUTING_LANE_SPACING, end.y + ROUTING_LANE_SPACING]
+            .forEach((y) => [from.x, to.x].forEach((x) => addPoint({ x, y })));
         }
       }
     });
@@ -803,8 +983,13 @@ function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): num
   const routes = options.otherRoutes ?? [];
   const overlapBase = options.simpleRouting ? 160 : 1000;
   const overlapScale = options.simpleRouting ? 0.7 : 2;
-  const crossingCost = options.simpleRouting ? 16 : 220;
-  let penalty = 0;
+  const crossingCost = 220;
+  let penalty = (options.markerObstacles ?? []).reduce((cost, marker) => {
+    if (!clearSegment(from, to, [marker.bounds])) return cost + NOTATION_OVERLAP_PENALTY;
+    return clearSegment(from, to, [inflateRect(marker.bounds, NOTATION_CLEARANCE)])
+      ? cost
+      : cost + NOTATION_NEAR_PENALTY;
+  }, 0);
   routes.forEach((route) => {
     for (let index = 0; index < route.length - 1; index += 1) {
       const existingStart = route[index];
@@ -814,7 +999,7 @@ function routeSegmentPenalty(from: Point, to: Point, options: RouteOptions): num
       else if (segmentsCross(from, to, existingStart, existingEnd)) penalty += crossingCost;
       else {
         const separation = parallelSegmentSeparation(from, to, existingStart, existingEnd);
-        if (separation !== null && separation < ROUTING_LANE_SPACING + 4) penalty += 28 + (ROUTING_LANE_SPACING + 4 - separation) * 4;
+        if (separation !== null && separation < ROUTING_LANE_SPACING + 4) penalty += 8 + (ROUTING_LANE_SPACING + 4 - separation) * 1.5;
       }
     }
   });
@@ -945,6 +1130,46 @@ function fallbackOrthogonalRoute(from: Point, to: Point, obstacles: Rect[]): Poi
   return [from, { x: to.x, y: from.y }, to];
 }
 
+function nearbyNotationRects(
+  from: Point,
+  to: Point,
+  markers: ReadonlyArray<{ edgeId: string; bounds: Rect }>,
+): Rect[] {
+  const directRoutes = [
+    [from, { x: from.x, y: to.y }, to],
+    [from, { x: to.x, y: from.y }, to],
+  ];
+  return markers.map((marker, index) => {
+    const bounds = inflateRect(marker.bounds, NOTATION_CLEARANCE);
+    const distance = Math.min(...directRoutes.flatMap((route) => route.slice(1).map((end, segmentIndex) =>
+      segmentDistanceToRect(route[segmentIndex], end, bounds))));
+    return { bounds, distance, index };
+  })
+    .filter((marker) => marker.distance <= ROUTING_LANE_SPACING * 3)
+    .sort((left, right) => left.distance - right.distance || left.index - right.index)
+    .slice(0, MAX_NOTATION_CHANNELS)
+    .map((marker) => marker.bounds);
+}
+
+function segmentDistanceToRect(start: Point, end: Point, rect: Rect): number {
+  if (almostEqual(start.y, end.y)) {
+    const left = Math.min(start.x, end.x);
+    const right = Math.max(start.x, end.x);
+    const xGap = Math.max(rect.left - right, left - rect.right, 0);
+    const yGap = start.y < rect.top ? rect.top - start.y : start.y > rect.bottom ? start.y - rect.bottom : 0;
+    return Math.hypot(xGap, yGap);
+  }
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  const yGap = Math.max(rect.top - bottom, top - rect.bottom, 0);
+  const xGap = start.x < rect.left ? rect.left - start.x : start.x > rect.right ? start.x - rect.right : 0;
+  return Math.hypot(xGap, yGap);
+}
+
+function inflateRect(rect: Rect, padding: number): Rect {
+  return { left: rect.left - padding, top: rect.top - padding, right: rect.right + padding, bottom: rect.bottom + padding };
+}
+
 function inflate(node: DiagramNode, padding: number): Rect {
   return {
     left: node.position.x - padding,
@@ -974,8 +1199,9 @@ function markerTerminalLength(marker: EdgeMarker): number {
   switch (marker) {
     case 'arrow': return 14;
     case 'bar': return 10;
+    case 'bar-bar': return 24;
     case 'crowfoot': return 18;
-    case 'circle-bar': return 22;
+    case 'circle-bar': return 34;
     case 'bar-crowfoot': return 24;
     case 'circle-crowfoot': return 26;
     case 'circle': return 12;
@@ -1066,12 +1292,19 @@ function uniqueSorted(values: number[]): number[] {
   return values.sort((left, right) => left - right).filter((value, index, all) => index === 0 || !almostEqual(value, all[index - 1]));
 }
 
+function nearbyChannels(values: number[], center: number, limit = 8): number[] {
+  return uniqueSorted(values)
+    .sort((left, right) => Math.abs(left - center) - Math.abs(right - center) || left - right)
+    .slice(0, limit)
+    .sort((left, right) => left - right);
+}
+
 function coordinateKey(value: number): string {
   return String(Math.round(value * 1000));
 }
 
-function stateKey(point: number, direction: number): string {
-  return `${point}:${direction}`;
+function stateKey(point: number, direction: number, turns: number): string {
+  return `${point}:${direction}:${turns}`;
 }
 
 function sameAxis(left: Point, right: Point): boolean {
