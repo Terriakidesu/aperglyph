@@ -18,7 +18,7 @@ import type {
 } from './types';
 import { defaultSnapSettings } from './snapping';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 3;
 const MAX_PAGES = 1000;
 const MAX_NODES_PER_PAGE = 50000;
 const MAX_EDGES_PER_PAGE = 100000;
@@ -34,15 +34,82 @@ const textAlignments = new Set<TextAlign>(['left', 'center', 'right']);
 const verticalAlignments = new Set<VerticalAlign>(['top', 'middle', 'bottom']);
 const fontWeights = new Set<FontWeight>([400, 500, 600, 700]);
 
-export const defaultDocumentPalette = ['#171b28', '#2c2752', '#1f2e43', '#15362f', '#302b24', '#f2f3f7'];
+const legacyCanvasColorMap: Record<string, string> = {
+  '#10131c': '#ffffff',
+  '#171b28': '#ffffff',
+  '#202a3b': '#ffffff',
+  '#302a4c': '#ffffff',
+  '#15362f': '#ffffff',
+  '#1f2e43': '#ffffff',
+  '#1b3035': '#ffffff',
+  '#182a32': '#ffffff',
+  '#151927': '#ffffff',
+  '#2a2550': '#ffffff',
+  '#2c2752': '#ffffff',
+  '#40385f': '#f2f2f2',
+  '#5a4a2f': '#f2f2f2',
+  '#24354e': '#ffffff',
+  '#59627a': '#111111',
+  '#7b8ba8': '#111111',
+  '#43d6a6': '#111111',
+  '#9c86ff': '#111111',
+  '#76b8ff': '#111111',
+  '#78b6ed': '#111111',
+  '#42c8d4': '#111111',
+  '#e0a95b': '#111111',
+  '#55bed2': '#111111',
+  '#b0a2ff': '#111111',
+  '#e7ba70': '#111111',
+  '#f4f5fa': '#111111',
+  '#fff4d7': '#111111',
+  '#747d98': '#333333',
+  '#7d86a2': '#333333',
+  '#5d6f91': '#333333',
+  '#8a92ab': '#222222',
+  '#aeb5c9': '#333333',
+  '#f2f3f7': '#f2f2f2',
+  '#f6f7fb': '#f6f6f6',
+};
+
+const legacyPaletteColorMap: Record<string, string> = {
+  '#171b28': '#ffffff',
+  '#2c2752': '#eeeeee',
+  '#1f2e43': '#cccccc',
+  '#15362f': '#999999',
+  '#302b24': '#666666',
+  '#f2f3f7': '#111111',
+};
+
+function migrateLegacyCanvasColor(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  return legacyCanvasColorMap[value.toLowerCase()] ?? value;
+}
+
+function migrateLegacyNodeStyle(style: Record<string, unknown>): Record<string, unknown> {
+  const migrated = { ...style };
+  for (const key of ['fill', 'stroke', 'textColor']) {
+    if (key in migrated) migrated[key] = migrateLegacyCanvasColor(migrated[key]);
+  }
+  return migrated;
+}
+
+function migrateLegacyNodeData(data: Record<string, unknown>): Record<string, unknown> {
+  const migrated = { ...data };
+  for (const key of ['headerFill', 'rowFill', 'stripeFill', 'labelBackground']) {
+    if (key in migrated) migrated[key] = migrateLegacyCanvasColor(migrated[key]);
+  }
+  return migrated;
+}
+
+export const defaultDocumentPalette = ['#ffffff', '#eeeeee', '#cccccc', '#999999', '#666666', '#111111'];
 
 export const defaultNodeStyle: NodeStyle = {
-  fill: '#171b28',
-  stroke: '#59627a',
+  fill: '#ffffff',
+  stroke: '#111111',
   strokeWidth: 1.5,
   radius: 10,
   opacity: 1,
-  textColor: '#f4f5fa',
+  textColor: '#111111',
   fontSize: 12,
   fontWeight: 500,
   textAlign: 'center',
@@ -51,13 +118,26 @@ export const defaultNodeStyle: NodeStyle = {
   autoHeight: true,
 };
 
+export const defaultErdEntityStyle: Partial<NodeStyle> = {
+  fill: '#ffffff',
+  stroke: '#111111',
+  strokeWidth: 1.5,
+  radius: 4,
+  textColor: '#111111',
+  fontSize: 13,
+  fontWeight: 500,
+  textWrap: false,
+  autoHeight: false,
+};
+export const defaultErdHeaderFill = '#ffffff';
+
 export const defaultEdgeStyle: EdgeStyle = {
-  stroke: '#8a92ab',
+  stroke: '#222222',
   strokeWidth: 1.6,
   dash: 'solid',
   startMarker: 'none',
   endMarker: 'arrow',
-  labelColor: '#aeb5c9',
+  labelColor: '#333333',
   opacity: 1,
   jumpStyle: 'arc',
 };
@@ -78,8 +158,8 @@ export function createPage(name = 'Page 1'): DiagramPage {
     settings: {
       width: 1600,
       height: 1000,
-      background: '#10131c',
-      canvasTheme: 'dark',
+      background: '#ffffff',
+      canvasTheme: 'light',
       gridSize: 16,
       gridVisible: true,
       snapToGrid: true,
@@ -96,9 +176,6 @@ export function createDocument(
   const now = Date.now();
   const page = createPage();
   if (diagramType === 'dfd') page.data = { dfdLevel: 0, dataDictionary: [] };
-  if (diagramType === 'erd') {
-    page.settings = { ...page.settings, background: '#ffffff', canvasTheme: 'light', gridVisible: true };
-  }
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     id: createId('doc'),
@@ -495,10 +572,35 @@ function isInteger(value: unknown): value is number {
 
 export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocument {
   const base = createDocument(input.name ?? 'Recovered diagram', input.diagramType ?? 'general');
+  const migrateLegacyStyles = (input.schemaVersion ?? 1) < CURRENT_SCHEMA_VERSION;
   const pages = Array.isArray(input.pages) && input.pages.length > 0
     ? input.pages.map((page, index) => {
-      const nodes = Array.isArray(page.nodes) ? page.nodes.map(migrateNode) : [];
       const diagramType = input.diagramType ?? base.diagramType;
+      const nodes = Array.isArray(page.nodes) ? page.nodes.map((node) => migrateNode(node, diagramType, migrateLegacyStyles)) : [];
+      const settings = {
+        ...createPage().settings,
+        ...(page.settings ?? {}),
+        snapToGrid: page.settings?.snapSettings?.grid ?? page.settings?.snapToGrid ?? true,
+        snapSettings: {
+          ...defaultSnapSettings,
+          ...(page.settings?.snapToGrid === undefined ? {} : {
+            grid: page.settings.snapToGrid,
+            objects: page.settings.snapToGrid,
+            guides: page.settings.snapToGrid,
+            ports: page.settings.snapToGrid,
+          }),
+          ...(page.settings?.snapSettings ?? {}),
+        },
+      };
+      if (migrateLegacyStyles && typeof settings.background === 'string') {
+        const background = settings.background.toLowerCase();
+        if (background === '#10131c') {
+          settings.background = '#ffffff';
+          settings.canvasTheme = 'light';
+        } else {
+          settings.background = migrateLegacyCanvasColor(settings.background) as string;
+        }
+      }
       const data = isRecord(page.data)
         ? structuredClone(page.data)
         : diagramType === 'dfd'
@@ -507,27 +609,22 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
       return {
         ...createPage(page.name ?? `Page ${index + 1}`),
         ...page,
-        settings: {
-          ...createPage().settings,
-          ...(page.settings ?? {}),
-          snapToGrid: page.settings?.snapSettings?.grid ?? page.settings?.snapToGrid ?? true,
-          snapSettings: {
-            ...defaultSnapSettings,
-            ...(page.settings?.snapToGrid === undefined ? {} : {
-              grid: page.settings.snapToGrid,
-              objects: page.settings.snapToGrid,
-              guides: page.settings.snapToGrid,
-              ports: page.settings.snapToGrid,
-            }),
-            ...(page.settings?.snapSettings ?? {}),
-          },
-        },
+        settings,
         ...(data ? { data } : {}),
         nodes,
-        edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, diagramType)) : [],
+        edges: Array.isArray(page.edges) ? page.edges.map((edge) => migrateEdge(edge, nodes, diagramType, migrateLegacyStyles)) : [],
       };
     })
     : base.pages;
+
+  const palette = normalizePalette(input.palette);
+  const stylePresets = normalizeStylePresets(input.stylePresets);
+  const styleDefaults = normalizeStyleDefaults(input.styleDefaults);
+  if (migrateLegacyStyles) {
+    palette.splice(0, palette.length, ...palette.map((color) => legacyPaletteColorMap[color.toLowerCase()] ?? migrateLegacyCanvasColor(color) as string));
+    stylePresets.forEach((preset) => { preset.style = migrateLegacyNodeStyle(preset.style as Record<string, unknown>) as Partial<NodeStyle>; });
+    Object.entries(styleDefaults).forEach(([key, style]) => { styleDefaults[key] = migrateLegacyNodeStyle(style as Record<string, unknown>) as Partial<NodeStyle>; });
+  }
 
   return {
     ...base,
@@ -537,24 +634,31 @@ export function migrateDocument(input: Partial<DiagramDocument>): DiagramDocumen
     name: input.name ?? base.name,
     diagramType: input.diagramType ?? base.diagramType,
     pages,
-    palette: normalizePalette(input.palette),
-    stylePresets: normalizeStylePresets(input.stylePresets),
-    styleDefaults: normalizeStyleDefaults(input.styleDefaults),
+    palette,
+    stylePresets,
+    styleDefaults,
     createdAt: input.createdAt ?? base.createdAt,
     updatedAt: input.updatedAt ?? Date.now(),
   };
 }
 
-function migrateNode(node: DiagramNode): DiagramNode {
+function migrateNode(node: DiagramNode, diagramType: DiagramType, migrateLegacyStyles: boolean): DiagramNode {
   const legacyEntity = node.type === 'entity' && node.style?.textWrap === undefined && node.style?.autoHeight === undefined;
+  const isErdEntity = diagramType === 'erd' && node.type === 'entity';
+  let style = {
+    ...defaultNodeStyle,
+    ...(isErdEntity ? defaultErdEntityStyle : {}),
+    ...(legacyEntity ? { textWrap: false, autoHeight: false } : {}),
+    ...(node.style ?? {}),
+  };
+  if (migrateLegacyStyles) style = migrateLegacyNodeStyle(style) as typeof style;
+  const data = migrateLegacyStyles
+    ? migrateLegacyNodeData(structuredClone(node.data ?? {}))
+    : structuredClone(node.data ?? {});
   const migrated: DiagramNode = {
     ...node,
-    style: {
-      ...defaultNodeStyle,
-      ...(legacyEntity ? { textWrap: false, autoHeight: false } : {}),
-      ...(node.style ?? {}),
-    },
-    data: node.data ?? {},
+    style,
+    data,
   };
   const requiredHeight = wrappedNodeHeight(migrated);
   if (migrated.type !== 'entity') {
@@ -603,11 +707,18 @@ function anchorOrthogonalEdge(edge: DiagramEdge, nodes: DiagramNode[]): DiagramE
   };
 }
 
-function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: DiagramType): DiagramEdge {
+function migrateEdge(edge: DiagramEdge, nodes: DiagramNode[], diagramType: DiagramType, migrateLegacyStyles: boolean): DiagramEdge {
+  const migratedStyle = { ...defaultEdgeStyle, ...(edge.style ?? {}) };
+  const migratedData = { ...(edge.data ?? {}) };
+  if (migrateLegacyStyles) {
+    migratedStyle.stroke = migrateLegacyCanvasColor(migratedStyle.stroke) as string;
+    migratedStyle.labelColor = migrateLegacyCanvasColor(migratedStyle.labelColor) as string;
+    if ('labelBackground' in migratedData) migratedData.labelBackground = migrateLegacyCanvasColor(migratedData.labelBackground);
+  }
   const anchored = anchorOrthogonalEdge({
     ...edge,
-    style: { ...defaultEdgeStyle, ...(edge.style ?? {}) },
-    data: { ...(edge.data ?? {}) },
+    style: migratedStyle,
+    data: migratedData,
     source: normalizeAttachedEndpoint(edge.source, nodes),
     target: normalizeAttachedEndpoint(edge.target, nodes),
   }, nodes);

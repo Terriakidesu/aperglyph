@@ -174,7 +174,7 @@ export function compileDiagramIR(ir: DiagramIR, options: CompileOptions = {}): D
       {
         type: edgeTypeForIR(ir.type, sourceEdge.relationship, routing),
         routing: routing === 'orthogonal' ? { mode: 'auto' } : undefined,
-        style: { ...defaultEdgeStyle, ...(ir.type === 'erd' ? { stroke: '#111111', strokeWidth: 1.4 } : {}), startMarker, endMarker, dash: sourceEdge.dash ?? dashForRelationship(sourceEdge.relationship) },
+        style: { ...defaultEdgeStyle, startMarker, endMarker, dash: sourceEdge.dash ?? dashForRelationship(sourceEdge.relationship) },
         data: {
           ...(sourceEdge.data ?? {}),
           ...(sourceEdge.label && !foreignKey ? { label: sourceEdge.label } : {}),

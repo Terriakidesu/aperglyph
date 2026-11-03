@@ -293,7 +293,7 @@ export function documentToSvg(nodes: DiagramNode[], edges: DiagramEdge[], backgr
   const nodeMarkup = nodes.map((node) => renderNode(node, outlineOnly)).join('');
   const viewBox = options.viewBox ?? { x: 0, y: 0, width, height };
   const backgroundMarkup = options.transparent ? '' : `<rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" height="${viewBox.height}" fill="${escapeXml(exportBackground)}"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${outlineOnly ? '#000000' : '#8a92ab'}"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="${outlineOnly ? '#000000' : '#8a92ab'}"/></marker></defs>${backgroundMarkup}${edgeMarkup}${nodeMarkup}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${outlineOnly ? '#000000' : '#222222'}"/></marker><marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="${outlineOnly ? '#000000' : '#222222'}"/></marker></defs>${backgroundMarkup}${edgeMarkup}${nodeMarkup}</svg>`;
 }
 
 function svgEndpointMarker(point: Point, direction: Point, marker: EdgeMarker, stroke: string, fill: string, endpoint: 'start' | 'end', opacity = 1): string {
@@ -433,7 +433,7 @@ function renderNode(node: DiagramNode, outlineOnly = false): string {
       ? '#ffffff'
       : typeof node.data.stripeFill === 'string'
         ? node.data.stripeFill
-        : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+        : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e3e3' : '#f2f2f2';
     const headerFill = outlineOnly ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
     const headerHeight = ERD_HEADER_HEIGHT;
     const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);

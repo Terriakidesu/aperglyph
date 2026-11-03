@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react';
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { ChevronRight, Lock, Ruler, Trash2, Unlock, X } from 'lucide-react';
 import { createEdge, createId, createNode as buildNode } from '../core/document';
 import { SHAPE_DRAG_MIME, parseShapeDrop } from '../core/shapeTransfer';
@@ -547,6 +547,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
   const indexedNodesRef = useRef(new Map<string, SpatialNode>());
   const spatialReadyRef = useRef(false);
   const spatialQueryRef = useRef(0);
+  const queryVisibleNodesRef = useRef<() => Promise<void>>(async () => {});
   const routeCacheRef = useRef(new Map<string, Point[]>());
 
   useEffect(() => {
@@ -1048,6 +1049,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       if (queryId === spatialQueryRef.current) setVisibleNodeIds(new Set(page.nodes.filter((node) => !node.hidden).map((node) => node.id)));
     }
   }, [page, size.height, size.width, spatialClient, viewport]);
+  queryVisibleNodesRef.current = queryVisibleNodes;
 
   useEffect(() => {
     if (!page) return;
@@ -1072,7 +1074,10 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
         }
         indexedNodesRef.current = nextMap;
         spatialReadyRef.current = true;
-        if (!cancelled) await queryVisibleNodes();
+        // The page index can take a few frames to initialize while the initial
+        // content fit updates the viewport. Use the latest query callback so
+        // this first result cannot hide nodes using the pre-fit camera.
+        if (!cancelled) await queryVisibleNodesRef.current();
       } catch {
         spatialReadyRef.current = true;
         indexedNodesRef.current = nextMap;
@@ -1101,7 +1106,7 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       : -1;
     const branchLabel = branchCount === 0 ? 'Yes' : branchCount === 1 ? 'No' : undefined;
     const edgeOptions = document.diagramType === 'erd'
-      ? { type: 'orthogonal' as const, style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
+      ? { type: 'orthogonal' as const, style: { startMarker: 'bar' as const, endMarker: 'crowfoot' as const } }
       : document.diagramType === 'dfd'
         ? { type: 'orthogonal' as const }
         : branchLabel
@@ -1922,22 +1927,28 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     for (const pointerId of touchPointersRef.current.keys()) svgRef.current?.setPointerCapture(pointerId);
   }, [cancelActiveInteraction, commitWheelGesture, size.height, size.width]);
 
-  const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
+  const handleWheel = useCallback((event: WheelEvent) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(size.width, size.height) : 1;
     const deltaX = Number.isFinite(event.deltaX) ? event.deltaX * scale : 0;
     const rawDeltaY = Number.isFinite(event.deltaY) ? event.deltaY : 0;
     const deltaY = rawDeltaY * scale;
-    if (deltaX === 0 && rawDeltaY === 0) return;
+    const rawDeltaZ = Number.isFinite(event.deltaZ) ? event.deltaZ : 0;
+    const isPinch = event.ctrlKey || event.metaKey || rawDeltaZ !== 0;
+    if (deltaX === 0 && rawDeltaY === 0 && rawDeltaZ === 0) return;
     // Ctrl/Meta-wheel is how browsers report trackpad pinch. Keep the gesture
     // inside the canvas instead of letting the browser zoom the whole page.
     event.preventDefault();
-    if (nativeTrackpadGestureRef.current) return;
+    // Some WebView/browser combinations expose a pinch as deltaZ instead of
+    // setting ctrlKey. Prefer the wheel event if it arrives during a legacy
+    // GestureEvent sequence so a native pinch is never swallowed.
+    if (isPinch) nativeTrackpadGestureRef.current = null;
+    else if (nativeTrackpadGestureRef.current) return;
     const gesture = wheelGestureRef.current;
     if (!gesture.camera) gesture.camera = cameraFromViewport(size, useEditorStore.getState().viewport);
-    if (event.ctrlKey || event.metaKey) {
-      const boundedDelta = Math.max(-240, Math.min(240, rawDeltaY));
+    if (isPinch) {
+      const boundedDelta = Math.max(-240, Math.min(240, rawDeltaZ !== 0 && !event.ctrlKey && !event.metaKey ? rawDeltaZ : rawDeltaY));
       gesture.zoomFactor = Math.max(.25, Math.min(4, gesture.zoomFactor * Math.pow(2, wheelZoomDelta({ deltaY: boundedDelta, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, metaKey: event.metaKey }))));
       gesture.zoomPoint = screenPoint(event);
     } else {
@@ -1950,7 +1961,17 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
     gesture.idleTimer = window.setTimeout(commitWheelGesture, 90);
     if (gesture.frame !== null) return;
     gesture.frame = requestAnimationFrame(applyWheelFrame);
-  };
+  }, [applyWheelFrame, commitWheelGesture, screenPoint, size.height, size.width]);
+
+  useEffect(() => {
+    const canvas = svgRef.current;
+    if (!canvas) return;
+    // React's delegated wheel listener can be passive in some WebViews. Listen
+    // directly so precision-touchpad pinch events can always be canceled and
+    // routed to the diagram camera instead of zooming the whole page.
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -2089,8 +2110,8 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
 
   const transform = viewportTransform(size, viewport);
   const gridSize = page?.settings.gridSize ?? 16;
-  const canvasBackground = page?.settings.background ?? '#10131c';
-  const canvasGridColor = page?.settings.canvasTheme === 'light' ? '#cbd2df' : '#2c3346';
+  const canvasBackground = page?.settings.background ?? '#ffffff';
+  const canvasGridColor = page?.settings.canvasTheme === 'light' ? '#dedede' : '#444444';
   const gridId = `grid-${page?.id ?? 'page'}`;
   const marqueeRect = marquee ? {
     x: Math.min(marquee.start.x, marquee.current.x), y: Math.min(marquee.start.y, marquee.current.y),
@@ -2252,18 +2273,18 @@ export function CanvasViewport({ fitOnMount = false, onImportFile, view = DEFAUL
       {isolatedGroupId && <nav className="canvas-breadcrumbs" aria-label="Group navigation"><button onClick={onExitGroup}> {page?.name ?? 'Page'} </button><ChevronRight size={13} /><span>{isolatedGroupLabel}</span><button className="canvas-breadcrumb-close" title="Exit group isolation" aria-label="Exit group isolation" onClick={onExitGroup}><X size={12} /></button></nav>}
       {pageIsEmpty && onCreateTemplate && !onboardingDismissed && <div className="canvas-onboarding"><div className="canvas-onboarding-card"><span className="panel-kicker">AperGlyph</span><h2>Start a diagram</h2><p>Choose a local template or drag a shape from the library.</p><div className="canvas-template-grid"><button onClick={() => startFromTemplate('flowchart')}><strong>Flowchart</strong><small>Processes and decisions</small></button><button onClick={() => startFromTemplate('erd')}><strong>ER diagram</strong><small>Entities and relationships</small></button><button onClick={() => startFromTemplate('dfd')}><strong>Data flow</strong><small>Systems and data stores</small></button><button onClick={() => startFromTemplate('use-case')}><strong>UML</strong><small>Actors and use cases</small></button></div><button className="canvas-onboarding-blank" onClick={() => startFromTemplate('blank')}>Start with a blank canvas</button></div></div>}
        {view.rulers && <CanvasRulers size={size} viewport={viewport} onGuidePointerDown={beginGuideDrag} />}
-    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDownCapture={handlePointerDownCapture} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUpCapture={handleTouchPointerEndCapture} onPointerCancelCapture={handleTouchPointerEndCapture} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onTouchEndCapture={handleTouchEndCapture} onTouchCancelCapture={handleTouchEndCapture} onWheel={handleWheel} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
+    <svg ref={svgRef} className="diagram-canvas" width={size.width} height={size.height} onPointerDownCapture={handlePointerDownCapture} onPointerDown={beginCanvasInteraction} onPointerMove={handlePointerMove} onPointerUpCapture={handleTouchPointerEndCapture} onPointerCancelCapture={handleTouchPointerEndCapture} onPointerUp={finishPointerInteraction} onPointerCancel={finishPointerInteraction} onTouchEndCapture={handleTouchEndCapture} onTouchCancelCapture={handleTouchEndCapture} onContextMenu={handleContextMenu} onDragOver={handleShapeDragOver} onDrop={handleShapeDrop} onDragLeave={(event) => { if (!event.relatedTarget || !event.currentTarget.contains(event.relatedTarget as Node)) setShapeDragPreview(null); }}>
       <defs>
          <pattern id={gridId} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke={canvasGridColor} strokeWidth="0.7" opacity={page?.settings.canvasTheme === 'light' ? '0.7' : '0.62'} /></pattern>
-        <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#8a92ab" /></marker>
-        <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8,0 L0,4 L8,8 z" fill="#8a92ab" /></marker>
-         <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#9c86ff" /></marker>
-         <marker id="distance-tick" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 2.5 0 V 5" stroke="#f0bf78" strokeWidth="1" /></marker>
+          <marker id="arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#222222" /></marker>
+         <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M8,0 L0,4 L8,8 z" fill="#222222" /></marker>
+          <marker id="arrow-end-active" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#555555" /></marker>
+          <marker id="distance-tick" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 2.5 0 V 5" stroke="#555555" strokeWidth="1" /></marker>
       </defs>
        <rect className="canvas-background" width={size.width} height={size.height} fill={canvasBackground} />
          <g ref={viewportGroupRef} transform={transform}>
           <rect x={-10000} y={-10000} width={20000} height={20000} fill={page?.settings.gridVisible ? `url(#${gridId})` : canvasBackground} />
-          {page && <>{document.diagramType !== 'erd' && <rect className="page-boundary-shadow" x={-page.settings.width / 2 + 5} y={-page.settings.height / 2 + 6} width={page.settings.width} height={page.settings.height} />}<rect className="page-boundary" x={-page.settings.width / 2} y={-page.settings.height / 2} width={page.settings.width} height={page.settings.height} aria-label={`Page boundary for ${page.name}`} /><text className="page-boundary-label" x={-page.settings.width / 2 + 12} y={-page.settings.height / 2 - 10}>{page.name}</text></>}
+           {page && <><rect className="page-boundary-shadow" x={-page.settings.width / 2 + 5} y={-page.settings.height / 2 + 6} width={page.settings.width} height={page.settings.height} /><rect className="page-boundary" x={-page.settings.width / 2} y={-page.settings.height / 2} width={page.settings.width} height={page.settings.height} aria-label={`Page boundary for ${page.name}`} /><text className="page-boundary-label" x={-page.settings.width / 2 + 12} y={-page.settings.height / 2 - 10}>{page.name}</text></>}
           {shapePreviewNode && <g className="shape-drop-preview" transform={`translate(${shapePreviewNode.position.x} ${shapePreviewNode.position.y})`} pointerEvents="none"><NodeGraphic node={shapePreviewNode} diagramType={document.diagramType} /></g>}
          {connectorDragPreview && <path className="connector-drag-preview" d={`M ${connectorDragPreview.start.x} ${connectorDragPreview.start.y} L ${connectorDragPreview.current.x} ${connectorDragPreview.current.y}`} fill="none" />}
            {view.guides && <g className="guide-layer">{(page?.guides ?? []).map((guide) => guide.orientation === 'vertical'
@@ -2331,7 +2352,7 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
   const curveStartDirection = source ? startDirection : { x: -startDirection.x, y: -startDirection.y };
   const curveEndDirection = target ? { x: -endDirection.x, y: -endDirection.y } : endDirection;
   const jumpStyle = edge.style.jumpStyle ?? 'arc';
-  const strokeColor = isErd ? '#111111' : edge.style.stroke;
+  const strokeColor = edge.style.stroke;
   const renderedJumps = jumpStyle === 'arc' ? jumps : [];
    const routing = edgeRouting(edge);
     const path = routing === 'curved' && route.length <= 2 ? curvedPath(route, curveStartDirection, curveEndDirection) : pointsToPath(route, renderedJumps, routing === 'orthogonal' ? edge.style.cornerRadius ?? 0 : 0);
@@ -2349,14 +2370,13 @@ function EdgeView({ edge, source, target, obstacles, route: providedRoute, jumps
      })}</g>
      : null;
   return <g className={`canvas-edge ${selected ? 'selected' : ''}`} data-edge-id={edge.id} onPointerEnter={() => onHover(edge.id)} onPointerLeave={() => onHover(null)} onPointerDown={(event) => onPointerDown(event, edge)} onDoubleClick={(event) => onDoubleClick(event, edge)}>
-    {!isErd && <path className="edge-shadow" d={path} fill="none" stroke="#0a0c12" strokeWidth={edge.style.strokeWidth + 5} opacity="0.72" pointerEvents="none" />}
-    {selected && <path className="edge-selection" d={path} fill="none" stroke="#a28fff" strokeWidth={isErd ? edge.style.strokeWidth + 2 : edge.style.strokeWidth + 5} opacity={isErd ? 0.18 : 0.22} pointerEvents="none" />}
+     {selected && <path className="edge-selection" d={path} fill="none" stroke="#777777" strokeWidth={edge.style.strokeWidth + 5} opacity="0.22" pointerEvents="none" />}
     {masks.map((mask, index) => <path key={`jump-mask-${index}`} d={mask} fill="none" stroke={background} strokeWidth={edge.style.strokeWidth + 4} strokeLinecap="round" pointerEvents="none" />)}
-      <path className="edge-visible" d={path} fill="none" stroke={strokeColor} strokeWidth={edge.style.strokeWidth} opacity={edge.style.opacity ?? 1} strokeDasharray={isErd ? undefined : edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
+      <path className="edge-visible" d={path} fill="none" stroke={strokeColor} strokeWidth={edge.style.strokeWidth} opacity={edge.style.opacity ?? 1} strokeDasharray={edge.style.dash === 'dashed' ? '8 6' : edge.style.dash === 'dotted' ? '2 5' : undefined} pointerEvents="none" />
     <path className="edge-hit-area" d={path} fill="none" stroke="#ffffff" strokeOpacity="0" strokeWidth={Math.max(14, edge.style.strokeWidth + 8)} pointerEvents="stroke" />
      {segmentHandles}
      {waypointHandles}
-      {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="all" onPointerDown={(event) => onLabelPointerDown(event, edge, labelPoint)}><rect x={-Math.max(28, label.length * 3.5 + 9)} y={-12} width={Math.max(56, label.length * 7 + 18)} height={22} rx={11} fill={typeof edge.data.labelBackground === 'string' ? edge.data.labelBackground : background} stroke={selected ? '#7968c5' : '#3a4258'} opacity={edge.style.opacity ?? 1} /><text className="edge-label" textAnchor="middle" y="4" style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{label}</text></g>}
+       {label && <g className="edge-label-group" transform={`translate(${labelPoint.x} ${labelPoint.y})`} pointerEvents="all" onPointerDown={(event) => onLabelPointerDown(event, edge, labelPoint)}><rect x={-Math.max(28, label.length * 3.5 + 9)} y={-12} width={Math.max(56, label.length * 7 + 18)} height={22} rx={11} fill={typeof edge.data.labelBackground === 'string' ? edge.data.labelBackground : background} stroke={selected ? '#777777' : '#aaaaaa'} opacity={edge.style.opacity ?? 1} /><text className="edge-label" textAnchor="middle" y="4" style={{ fill: edge.style.labelColor, opacity: edge.style.opacity ?? 1 }}>{label}</text></g>}
       {cardinality && <><EdgeCardinalityLabel point={start} neighbor={route[1]} value={cardinality.start} edge={edge} /><EdgeCardinalityLabel point={end} neighbor={route.at(-2) ?? start} value={cardinality.end} edge={edge} /></>}
   </g>;
 }
@@ -2390,7 +2410,7 @@ function EdgeMarkersView({ edge, source, target, obstacles, route: providedRoute
   const end = route[route.length - 1];
   const startDirection = markerDirection(start, route[1]);
   const endDirection = markerDirection(end, route.at(-2) ?? start);
-  const markerStroke = edge.data?.relationship === 'foreign-key' ? '#111111' : edge.style.stroke;
+  const markerStroke = edge.style.stroke;
   return <>{renderEndpointMarker(start, startDirection, edge.style.startMarker, markerStroke, markerFill, 'start', edge.style.opacity ?? 1)}{renderEndpointMarker(end, endDirection, edge.style.endMarker, markerStroke, markerFill, 'end', edge.style.opacity ?? 1)}</>;
 }
 
@@ -2541,6 +2561,6 @@ function NodeView({ node, position, selected, connectorStart, connectorTarget, s
   return <g className={`canvas-node ${node.container ? 'container-node' : ''} ${selected ? 'selected' : ''} ${connectorStart ? 'connector-start' : ''} ${connectorTarget ? 'connector-target' : ''}`} data-node-id={node.id} transform={`translate(${position.x} ${position.y}) rotate(${node.rotation} ${width / 2} ${height / 2})`} onPointerDown={(event) => onPointerDown(event, node)} onDoubleClick={(event) => onDoubleClick(event, node)}>
     <NodeGraphic node={node} diagramType={diagramType} />
       {showPorts && <g className="connection-ports">{ports.map((port) => <g key={port.id} className={port.fieldPort ? 'connection-port field-port' : 'connection-port'} data-port={port.id} data-connection-port={port.port} data-connection-offset={port.offset} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, node, port.port, port.offset, port.id); }}><circle cx={port.x} cy={port.y} r={port.fieldPort ? 4 : 5} />{!port.fieldPort && <path className="connection-port-glyph" d={`M ${port.x - 2.5} ${port.y} H ${port.x + 2.5} M ${port.x} ${port.y - 2.5} V ${port.y + 2.5}`} />}</g>)}</g>}
-     {selected && <g className="node-handles" pointerEvents="all"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#a28fff" strokeWidth="1.5" strokeDasharray="4 3" pointerEvents="none" />{resizeHandles.map((handle) => <rect key={handle.id} className="handle" x={handle.x} y={handle.y} width="8" height="8" style={{ cursor: handle.cursor }} onPointerDown={(event) => onResizePointerDown(event, node, handle.id)} />)}</g>}
+      {selected && <g className="node-handles" pointerEvents="all"><rect x={-5} y={-5} width={width + 10} height={height + 10} rx={node.style.radius + 3} fill="none" stroke="#666666" strokeWidth="1.5" strokeDasharray="4 3" pointerEvents="none" />{resizeHandles.map((handle) => <rect key={handle.id} className="handle" x={handle.x} y={handle.y} width="8" height="8" style={{ cursor: handle.cursor }} onPointerDown={(event) => onResizePointerDown(event, node, handle.id)} />)}</g>}
   </g>;
 }

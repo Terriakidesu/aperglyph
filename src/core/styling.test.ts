@@ -66,7 +66,7 @@ describe('styling system', () => {
     const migrated = migrateDocument(legacy);
     expect(migrated.palette.length).toBeGreaterThan(0);
     expect(migrated.stylePresets).toEqual([]);
-    expect(migrated.pages[0].settings.canvasTheme).toBe('dark');
+    expect(migrated.pages[0].settings.canvasTheme).toBe('light');
     expect(migrated.pages[0].nodes[0].style.fontSize).toBe(12);
     expect(migrated.pages[0].nodes[0].style.textWrap).toBe(true);
     expect(defaultNodeStyle.fontSize).toBe(12);

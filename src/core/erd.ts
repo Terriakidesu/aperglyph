@@ -285,7 +285,7 @@ export function relationshipForForeignKey(page: DiagramDocument['pages'][number]
     { nodeId: target.id, port: 'left', ...(targetField ? { anchorId: `field-${targetFields.indexOf(targetField)}-left` } : {}), ...(targetField ? { offset: entityFieldPortOffset(targetFields, targetFields.indexOf(targetField), target.data.columnHeaders === true, target.size.height) } : {}) },
     {
       type: 'orthogonal',
-      style: { stroke: '#111111', strokeWidth: 1.4, startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
+      style: { startMarker: relatedFields.some((candidate) => candidate.nullable) ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
       data: { cardinality: { source: field.nullable ? '0..N' : 'N', target: '1' }, relationship: 'foreign-key', sourceFieldId: field.id, targetFieldId: targetField?.id, sourceFieldIds, targetFieldIds },
     },
   );
@@ -316,7 +316,6 @@ export function foreignKeyForRelationship(document: DiagramDocument, pageId: str
   if (fields.length === 0) return next;
   source.data.fields = [...sourceFields, ...fields];
   source.size.height = entityAutoHeight(source.data.fields, source.data.entityVariant, source.data.columnHeaders === true);
-  edge.style = { ...edge.style, stroke: '#111111', strokeWidth: 1.4 };
   edge.data = { ...edge.data, relationship: 'foreign-key', constraintId, sourceFieldId: fields[0].id, targetFieldId: targetKeys[0].id, sourceFieldIds: fields.map((field) => field.id), targetFieldIds: targetKeys.map((field) => field.id) };
   return next;
 }

@@ -81,9 +81,12 @@ describe('ERD semantic model', () => {
     const customers = document.pages[0].nodes.find((node) => node.data.label === 'customers');
     const orders = document.pages[0].nodes.find((node) => node.data.label === 'orders');
     expect(customers).toBeDefined();
+    expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light' });
+    expect(customers!.style).toMatchObject({ fill: '#ffffff', stroke: '#111111', textColor: '#111111' });
     expect(normalizeEntityFields(customers!.data.fields).filter((field) => field.primaryKey)).toHaveLength(2);
     expect(normalizeEntityFields(orders!.data.fields).filter((field) => field.reference?.entityId === customers!.id)).toHaveLength(2);
     expect(document.pages[0].edges).toHaveLength(1);
+    expect(document.pages[0].edges[0].style).toMatchObject({ stroke: '#222222', strokeWidth: 1.6 });
     expect(exportErdSql(document)).toContain('ON DELETE CASCADE');
     expect(exportErdSql(document)).toContain('CREATE INDEX');
   });

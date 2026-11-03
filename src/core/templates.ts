@@ -1,4 +1,4 @@
-import { createDocument, createEdge, createNode } from './document';
+import { createDocument, createEdge, createNode, defaultErdEntityStyle, defaultErdHeaderFill } from './document';
 import { entityFieldPortOffset } from './erd';
 import type { DiagramDocument, DiagramType } from './types';
 
@@ -12,21 +12,21 @@ export function createTemplateDocument(
   if (type === 'flowchart') {
     const start = createNode('start', { x: -360, y: -170 }, {
       library: 'flowchart', size: { width: 150, height: 64 },
-      style: { fill: '#15362f', stroke: '#43d6a6', radius: 32 }, data: { label: 'Start' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 32 }, data: { label: 'Start' },
     });
     const intake = createNode('process', { x: -95, y: -170 }, {
       library: 'flowchart', data: { label: 'Collect requirements' },
     });
     const decision = createNode('decision', { x: 190, y: -170 }, {
       library: 'flowchart', size: { width: 170, height: 120 },
-      style: { fill: '#302a4c', stroke: '#9c86ff' }, data: { label: 'Ready to ship?' },
+      style: { fill: '#ffffff', stroke: '#111111' }, data: { label: 'Ready to ship?' },
     });
     const build = createNode('process', { x: 140, y: 70 }, {
       library: 'flowchart', data: { label: 'Build & test' },
     });
     const launch = createNode('start', { x: 420, y: -170 }, {
       library: 'flowchart', size: { width: 150, height: 64 },
-      style: { fill: '#15362f', stroke: '#43d6a6', radius: 32 }, data: { label: 'Launch' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 32 }, data: { label: 'Launch' },
     });
     page.nodes.push(start, intake, decision, build, launch);
     page.edges.push(
@@ -37,8 +37,8 @@ export function createTemplateDocument(
       createEdge({ nodeId: build.id }, { nodeId: intake.id }, { data: { label: 'Iterate' } }),
     );
   } else if (type === 'erd') {
-    const entityStyle = { fill: '#ffffff', stroke: '#111111', strokeWidth: 1.25, textColor: '#111111', radius: 8 };
-    const entityData = (data: Record<string, unknown>) => ({ ...data, entityVariant: 'key-field', columnHeaders: false, striped: false, headerFill: '#ffffff' });
+    const entityStyle = { ...defaultErdEntityStyle };
+    const entityData = (data: Record<string, unknown>) => ({ ...data, entityVariant: 'key-field', columnHeaders: false, striped: false, headerFill: defaultErdHeaderFill });
     const users = createNode('entity', { x: -430, y: -180 }, {
       library: 'erd', size: { width: 230, height: 142 },
       style: entityStyle,
@@ -71,24 +71,24 @@ export function createTemplateDocument(
     });
     page.nodes.push(users, coach, userHabits, habits, checkins, comments);
     page.edges.push(
-      createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'crowfoot', endMarker: 'bar' } }),
-      createEdge({ nodeId: users.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(users.data.fields, 0) }, { nodeId: userHabits.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(userHabits.data.fields, 1) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
-      createEdge({ nodeId: habits.id, port: 'left', anchorId: 'field-0-left', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: userHabits.id, port: 'right', anchorId: 'field-2-right', offset: entityFieldPortOffset(userHabits.data.fields, 2) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
-      createEdge({ nodeId: habits.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: checkins.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(checkins.data.fields, 1) }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
-      createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { stroke: '#111111', strokeWidth: 1.4, startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: users.id, port: 'bottom' }, { nodeId: coach.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'crowfoot', endMarker: 'bar' } }),
+      createEdge({ nodeId: users.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(users.data.fields, 0) }, { nodeId: userHabits.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(userHabits.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: habits.id, port: 'left', anchorId: 'field-0-left', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: userHabits.id, port: 'right', anchorId: 'field-2-right', offset: entityFieldPortOffset(userHabits.data.fields, 2) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: habits.id, port: 'right', anchorId: 'field-0-right', offset: entityFieldPortOffset(habits.data.fields, 0) }, { nodeId: checkins.id, port: 'left', anchorId: 'field-1-left', offset: entityFieldPortOffset(checkins.data.fields, 1) }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } }),
+      createEdge({ nodeId: checkins.id, port: 'bottom' }, { nodeId: comments.id, port: 'top' }, { type: 'orthogonal', style: { startMarker: 'bar', endMarker: 'crowfoot' } }),
     );
   } else if (type === 'dfd') {
     const source = createNode('external', { x: -370, y: -40 }, {
       library: 'dfd', size: { width: 170, height: 72 },
-      style: { fill: '#1b3035', stroke: '#42c8d4', radius: 2 }, data: { label: 'Customer' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 2 }, data: { label: 'Customer' },
     });
     const process = createNode('process', { x: -50, y: -64 }, {
       library: 'dfd', size: { width: 120, height: 120 },
-      style: { fill: '#2c2752', stroke: '#9c86ff', radius: 60 }, data: { label: 'Manage order' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 60 }, data: { label: 'Manage order' },
     });
     const store = createNode('store', { x: 255, y: -35 }, {
       library: 'dfd', size: { width: 190, height: 64 },
-      style: { fill: 'none', stroke: '#e0a95b', radius: 0 }, data: { label: 'Orders' },
+      style: { fill: 'none', stroke: '#111111', radius: 0 }, data: { label: 'Orders' },
     });
     page.nodes.push(source, process, store);
     page.edges.push(
@@ -98,19 +98,19 @@ export function createTemplateDocument(
   } else if (type === 'use-case') {
     const actor = createNode('actor', { x: -360, y: -65 }, {
       library: 'use-case', size: { width: 120, height: 150 },
-      style: { fill: '#182a32', stroke: '#55bed2' }, data: { label: 'Operator' },
+      style: { fill: '#ffffff', stroke: '#111111' }, data: { label: 'Operator' },
     });
     const boundary = createNode('boundary', { x: -80, y: -170 }, {
       library: 'use-case', size: { width: 500, height: 300 },
-      style: { fill: '#151927', stroke: '#747d98', radius: 18 }, data: { label: 'AperGlyph' },
+      style: { fill: 'transparent', stroke: '#333333', radius: 18 }, data: { label: 'AperGlyph' },
     });
     const open = createNode('use-case', { x: 0, y: -75 }, {
       library: 'use-case', size: { width: 170, height: 68 },
-      style: { fill: '#2a2550', stroke: '#9c86ff', radius: 34 }, data: { label: 'Open diagram' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 34 }, data: { label: 'Open diagram' },
     });
     const exportNode = createNode('use-case', { x: 215, y: 40 }, {
       library: 'use-case', size: { width: 170, height: 68 },
-      style: { fill: '#2a2550', stroke: '#9c86ff', radius: 34 }, data: { label: 'Export file' },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 34 }, data: { label: 'Export file' },
     });
     page.nodes.push(boundary, actor, open, exportNode);
     page.edges.push(

@@ -60,7 +60,7 @@ export function PageTabs() {
   const toggleCanvasTheme = () => {
     if (!activePage) return;
     const light = activePage.settings.canvasTheme !== 'light';
-    updatePageSettings({ canvasTheme: light ? 'light' : 'dark', background: light ? '#f6f7fb' : '#10131c' }, activePage.id, `Use ${light ? 'light' : 'dark'} canvas`);
+    updatePageSettings({ canvasTheme: light ? 'light' : 'dark', background: light ? '#ffffff' : '#111111' }, activePage.id, `Use ${light ? 'light' : 'dark'} canvas`);
     setMenuOpen(false);
   };
 
@@ -80,7 +80,7 @@ export function PageTabs() {
         <button onClick={() => updatePageSettings({ gridVisible: !activePage.settings.gridVisible }, activePage.id, 'Toggle grid')}>{activePage.settings.gridVisible ? 'Hide grid' : 'Show grid'}</button>
          <button onClick={() => updatePageSettings({ snapSettings: { ...getSnapSettings(activePage.settings), grid: !getSnapSettings(activePage.settings).grid } }, activePage.id, 'Toggle grid snapping')}>{getSnapSettings(activePage.settings).grid ? 'Disable grid snapping' : 'Enable grid snapping'}</button>
         <button onClick={toggleCanvasTheme}>Use {activePage.settings.canvasTheme === 'light' ? 'dark' : 'light'} canvas</button>
-        <label className="page-color-input">Canvas color<input type="color" value={/^#[0-9a-f]{6}$/i.test(activePage.settings.background) ? activePage.settings.background : '#10131c'} onChange={(event) => updatePageSettings({ background: event.target.value }, activePage.id, 'Change canvas color')} /></label>
+         <label className="page-color-input">Canvas color<input type="color" value={/^#[0-9a-f]{6}$/i.test(activePage.settings.background) ? activePage.settings.background : '#ffffff'} onChange={(event) => updatePageSettings({ background: event.target.value }, activePage.id, 'Change canvas color')} /></label>
         <button onClick={promptSettings}>Page settings</button>
         <button className="context-danger" disabled={document.pages.length <= 1} onClick={() => { deletePage(activePage.id); setMenuOpen(false); }}>Delete</button>
        </div>}

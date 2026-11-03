@@ -1,4 +1,4 @@
-import { createDocument, createEdge, createNode } from './document';
+import { createDocument, createEdge, createNode, defaultErdEntityStyle, defaultErdHeaderFill } from './document';
 import { entityAutoHeight, entityAutoWidth, normalizeEntityFields, normalizeEntityIndexes, type EntityField, type EntityIndex } from './erd';
 import type { DiagramDocument, DiagramNode } from './types';
 
@@ -25,8 +25,8 @@ export function parseErdSql(sql: string, name = 'Imported SQL schema'): DiagramD
     const node = createNode('entity', { x: (index % 4) * 330 - 420, y: Math.floor(index / 4) * 260 - 180 }, {
       library: 'erd',
       size: { width: entityAutoWidth(parsed.fields, 'key-field', true), height: entityAutoHeight(parsed.fields, 'key-field', false) },
-      style: { fill: '#ffffff', stroke: '#111111', strokeWidth: 1.25, textColor: '#111111', fontSize: 13, fontWeight: 500, radius: 8 },
-      data: { label: entry.name, fields: parsed.fields, indexes: parsed.indexes, entityVariant: 'key-field', striped: false, compact: true, columnHeaders: false, headerFill: '#ffffff' },
+      style: { ...defaultErdEntityStyle, fontSize: 13, fontWeight: 500 },
+      data: { label: entry.name, fields: parsed.fields, indexes: parsed.indexes, entityVariant: 'key-field', striped: false, compact: true, columnHeaders: false, headerFill: defaultErdHeaderFill },
     });
     page.nodes.push(node);
     addTableAliases(tables, entry.name, node);
@@ -86,7 +86,7 @@ export function parseErdSql(sql: string, name = 'Imported SQL schema'): DiagramD
       { nodeId: target.id, port: 'left', ...(firstTarget ? { anchorId: `field-${targetFields.indexOf(firstTarget)}-left` } : {}) },
       {
         type: 'orthogonal',
-        style: { stroke: '#111111', strokeWidth: 1.4, startMarker: firstSource?.nullable ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
+        style: { startMarker: firstSource?.nullable ? 'circle-crowfoot' : 'crowfoot', endMarker: 'bar' },
         data: {
           relationship: 'foreign-key',
           cardinality: { source: firstSource?.nullable ? '0..N' : 'N', target: '1' },

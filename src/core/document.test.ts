@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createEdge, createNode, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
+import { createDocument, createEdge, createNode, defaultDocumentPalette, defaultEdgeStyle, defaultErdEntityStyle, defaultErdHeaderFill, migrateDocument, parseProject, serializeProject, validateProjectDocument } from './document';
 import { createTemplateDocument } from './templates';
 
 describe('AperGlyph document model', () => {
   it('creates a versioned document with a page', () => {
     const document = createDocument('Architecture map', 'flowchart');
-    expect(document.schemaVersion).toBe(1);
+    expect(document.schemaVersion).toBe(3);
     expect(document.pages).toHaveLength(1);
     expect(document.diagramType).toBe('flowchart');
   });
@@ -54,9 +54,71 @@ describe('AperGlyph document model', () => {
     expect(parsed.pages[0].edges[0]).not.toHaveProperty('computedRoute');
   });
 
-  it('starts ERD pages on a clean white canvas', () => {
-    const document = createDocument('Schema', 'erd');
-    expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light', gridVisible: true });
+  it('starts every diagram type on the shared monochrome canvas', () => {
+    for (const diagramType of ['general', 'flowchart', 'erd', 'dfd', 'use-case'] as const) {
+      const document = createDocument('Monochrome', diagramType);
+      expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light', gridVisible: true });
+      expect(document.palette).toEqual(defaultDocumentPalette);
+    }
+  });
+
+  it('keeps every starter template monochrome', () => {
+    for (const diagramType of ['flowchart', 'erd', 'dfd', 'use-case'] as const) {
+      const document = createTemplateDocument('Starter', diagramType);
+      expect(document.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light' });
+      document.pages[0].nodes.forEach((node) => {
+        for (const color of [node.style.fill, node.style.stroke, node.style.textColor]) {
+          expect(color === 'none' || color === 'transparent' || (/^#[0-9a-f]{6}$/i.test(color) && color[1] === color[3] && color[3] === color[5])).toBe(true);
+        }
+      });
+      document.pages[0].edges.forEach((edge) => expect(edge.style.stroke).toBe(defaultEdgeStyle.stroke));
+    }
+    const erd = createTemplateDocument('Schema', 'erd');
+    expect(erd.pages[0].nodes[0].style).toMatchObject(defaultErdEntityStyle);
+    expect(erd.pages[0].nodes[0].data.headerFill).toBe(defaultErdHeaderFill);
+  });
+
+  it('migrates legacy canvas palettes and defaults to monochrome across diagram types', () => {
+    const document = createDocument('Legacy flowchart', 'flowchart');
+    document.schemaVersion = 2;
+    document.palette = ['#171b28', '#2c2752', '#1f2e43', '#15362f', '#302b24', '#f2f3f7'];
+    document.pages[0].settings = { ...document.pages[0].settings, background: '#10131c', canvasTheme: 'dark' };
+    const source = createNode('start', { x: 0, y: 0 }, {
+      style: { fill: '#15362f', stroke: '#43d6a6', textColor: '#f4f5fa' },
+      data: { label: 'Start', headerFill: '#302a4c' },
+    });
+    const target = createNode('decision', { x: 300, y: 0 }, {
+      style: { fill: '#302a4c', stroke: '#9c86ff', textColor: '#f4f5fa' },
+    });
+    document.pages[0].nodes.push(source, target);
+    document.pages[0].edges.push(createEdge({ nodeId: source.id }, { nodeId: target.id }, {
+      style: { stroke: '#8a92ab', labelColor: '#aeb5c9' },
+      data: { labelBackground: '#10131c' },
+    }));
+    document.stylePresets = [{ id: 'legacy', name: 'Legacy', style: { fill: '#1f2e43', stroke: '#76b8ff' } }];
+    document.styleDefaults = { 'flowchart:start': { fill: '#15362f', stroke: '#43d6a6' } };
+
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light' });
+    expect(migrated.palette).toEqual(defaultDocumentPalette);
+    expect(migrated.pages[0].nodes[0]).toMatchObject({ style: { fill: '#ffffff', stroke: '#111111', textColor: '#111111' }, data: { headerFill: '#ffffff' } });
+    expect(migrated.pages[0].nodes[1].style).toMatchObject({ fill: '#ffffff', stroke: '#111111', textColor: '#111111' });
+    expect(migrated.pages[0].edges[0]).toMatchObject({ style: { stroke: '#222222', labelColor: '#333333' }, data: { labelBackground: '#ffffff' } });
+    expect(migrated.stylePresets[0].style).toMatchObject({ fill: '#ffffff', stroke: '#111111' });
+    expect(migrated.styleDefaults['flowchart:start']).toMatchObject({ fill: '#ffffff', stroke: '#111111' });
+  });
+
+  it('preserves explicitly selected custom canvas colors in current documents', () => {
+    const document = createDocument('Custom ERD', 'erd');
+    document.pages[0].settings = { ...document.pages[0].settings, background: '#fefefe', canvasTheme: 'light' };
+    const customEntity = createNode('entity', { x: 0, y: 0 }, {
+      style: { fill: '#ffdddd', stroke: '#ff0000', strokeWidth: 1.25, textColor: '#220000' },
+      data: { label: 'custom_table', headerFill: '#ffdddd' },
+    });
+    document.pages[0].nodes.push(customEntity);
+    const migrated = migrateDocument(document);
+    expect(migrated.pages[0].settings).toMatchObject({ background: '#fefefe', canvasTheme: 'light' });
+    expect(migrated.pages[0].nodes[0]).toMatchObject({ style: { fill: '#ffdddd', stroke: '#ff0000', textColor: '#220000' }, data: { headerFill: '#ffdddd' } });
   });
 
   it('restores semantic defaults for legacy DFD pages', () => {

@@ -32,15 +32,15 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
        const fields = normalizeEntityFields(node.data.fields);
        const compact = node.data.compact === true;
        const isErd = diagramType === 'erd';
-       const columns = entityColumns(isErd ? 'key-field' : node.data.entityVariant, width, compact);
-       const striped = !isErd && node.data.striped !== false;
+        const columns = entityColumns(node.data.entityVariant, width, compact);
+        const striped = node.data.striped !== false;
        const isWeak = node.data.weak === true;
-       const showColumnHeaders = !isErd && node.data.columnHeaders === true;
-       const rowFill = isErd ? '#ffffff' : typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-       const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
-       const headerFill = isErd ? '#ffffff' : typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
-       const borderColor = isErd ? '#111111' : node.style.stroke;
-       const textColor = isErd ? '#111111' : node.style.textColor;
+       const showColumnHeaders = node.data.columnHeaders === true;
+       const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
+        const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e3e3' : '#f2f2f2';
+       const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
+       const borderColor = node.style.stroke;
+       const textColor = node.style.textColor;
       const { fieldTop, rowHeight } = entityLayoutMetrics(fields, height, showColumnHeaders);
       return <g opacity={node.style.opacity}>
           <rect width={width} height={height} rx={node.style.radius} fill={rowFill} />
@@ -50,7 +50,7 @@ export function NodeGraphic({ node, diagramType, showLabel = true, preview = fal
         {fields.map((field, index) => { const y = fieldTop + index * rowHeight; const baseline = y + rowHeight / 2 + 4; return <g key={field.id}><rect x="0" y={y} width={width} height={rowHeight} fill={striped && index % 2 === 1 ? stripeFill : rowFill} />{columns.map((column) => { const value = entityFieldValue(field, column.id); if (!value) return null; const isKey = column.id === 'key'; return <text key={column.id} className={isKey ? 'node-field-key' : column.id === 'field' ? 'node-field-name' : 'node-field-type'} style={{ fill: textColor }} x={isKey ? column.x + column.width / 2 : column.x + 7} y={baseline} textAnchor={isKey ? 'middle' : undefined}>{value}</text>; })}</g>; })}
         {columns.slice(0, -1).map((column) => <line key={`divider-${column.id}`} x1={column.x + column.width} y1={fieldTop} x2={column.x + column.width} y2={height} stroke={borderColor} strokeOpacity="0.7" />)}
          {showLabel && <text className="node-entity-title" style={{ fill: textColor, fontSize: isErd ? Math.max(16, node.style.fontSize) : node.style.fontSize, fontWeight: node.style.fontWeight }} x={width / 2} y="23" textAnchor="middle">{label}</text>}
-          <rect width={width} height={height} rx={node.style.radius} fill="none" stroke={borderColor} strokeWidth={isErd ? Math.max(1.5, node.style.strokeWidth) : node.style.strokeWidth} />
+          <rect width={width} height={height} rx={node.style.radius} fill="none" stroke={borderColor} strokeWidth={node.style.strokeWidth} />
           {isWeak && <rect x="4" y="4" width={Math.max(0, width - 8)} height={Math.max(0, height - 8)} rx={Math.max(0, node.style.radius - 2)} fill="none" stroke={borderColor} strokeWidth={node.style.strokeWidth} />}
       </g>;
     }
@@ -82,7 +82,7 @@ function CompactEntityPreview({ node }: { node: DiagramNode }) {
   const rowDivider = bodyTop + bodyHeight / 2;
   const headerFill = typeof node.data.headerFill === 'string' ? node.data.headerFill : node.style.stroke;
   const rowFill = typeof node.data.rowFill === 'string' ? node.data.rowFill : node.style.fill;
-  const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e5e9' : '#252c3c';
+   const stripeFill = typeof node.data.stripeFill === 'string' ? node.data.stripeFill : rowFill.toLowerCase() === '#ffffff' ? '#f2f2f2' : rowFill === '#f2f3f7' ? '#e3e3e3' : '#f2f2f2';
    const isWeak = node.data.weak === true;
    const striped = node.data.striped !== false;
   return <g opacity={node.style.opacity}>

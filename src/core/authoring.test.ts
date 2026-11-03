@@ -134,6 +134,15 @@ describe('authoring transactions', () => {
     ]))).toThrow(/not a container/);
   });
 
+  it('keeps newly created pages on the shared monochrome canvas', () => {
+    const document = createDocument('Schema', 'erd');
+    const result = applyAuthoringBatch(document, document.pages[0].id, prepareAuthoringBatch([
+      { op: 'page.create', name: 'Page 2' },
+    ]));
+
+    expect(result.document.pages[1].settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light' });
+  });
+
   it('records a whole successful batch as one undoable command and stores no history on failure', () => {
     const document = createDocument();
     const pageId = document.pages[0].id;

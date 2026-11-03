@@ -150,7 +150,8 @@ test.describe('diagram editing workflow', () => {
 
     await page.getByLabel('Shape library category').selectOption('erd');
     await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg text')).toHaveCount(0);
-    await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg line')).toHaveCount(3);
+    // Compact entity stencils draw a header rule and a key-column divider.
+    await expect(page.locator('.shape-item[title="Drag Entity onto the canvas"] .shape-preview-svg line')).toHaveCount(2);
   });
 
   test('offers starter templates from an empty canvas', async ({ page }) => {
@@ -395,6 +396,15 @@ test.describe('diagram editing workflow', () => {
     expect(pinchPrevented).toBe(true);
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeZoom);
+    const beforeDeltaZPinch = await page.getByLabel('Zoom percentage').textContent();
+    const deltaZPinchPrevented = await canvas.evaluate((element, point) => {
+      const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaZ: 40, deltaMode: 0, clientX: point.clientX, clientY: point.clientY });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, { clientX, clientY });
+    expect(deltaZPinchPrevented).toBe(true);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect.poll(() => page.getByLabel('Zoom percentage').textContent()).not.toBe(beforeDeltaZPinch);
     const rulerTicksAfterZoom = await page.locator('.canvas-ruler-top [data-ruler-value]').evaluateAll((ticks) => ticks.map((tick) => ({ value: tick.getAttribute('data-ruler-value'), left: Number.parseFloat((tick as HTMLElement).style.left) })));
     const afterPositions = new Map(rulerTicksAfterZoom.map((tick) => [tick.value, tick.left]));
     expect(rulerTicksBeforeZoom.some((tick) => {
@@ -631,8 +641,8 @@ test.describe('diagram editing workflow', () => {
     await page.mouse.up();
 
     const selectionBox = node.locator('.node-handles > rect').first();
-    await expect.poll(async () => Number(await selectionBox.getAttribute('height'))).toBeGreaterThanOrEqual(98);
-    await expect.poll(async () => Number(await node.locator('.node-entity-title').evaluate((element) => element.closest('g')?.querySelector('rect')?.getAttribute('height') ?? '0'))).toBeGreaterThanOrEqual(88);
+    await expect.poll(async () => Number(await selectionBox.getAttribute('height'))).toBe(90);
+    await expect.poll(async () => Number(await node.locator('.node-entity-title').evaluate((element) => element.closest('g')?.querySelector('rect')?.getAttribute('height') ?? '0'))).toBe(80);
   });
 
   test('keeps circles square when editing their dimensions', async ({ page }) => {
@@ -852,8 +862,20 @@ test.describe('diagram editing workflow', () => {
     await page.getByRole('button', { name: 'Entity relationship Model your data system 3 entities · 2 relations' }).click();
     const nodes = page.locator('[data-node-id]');
     await expect(nodes).toHaveCount(6);
+    await expect(page.locator('.page-boundary-shadow')).toHaveCSS('fill', 'none');
+    await expect(page.locator('.edge-shadow')).toHaveCount(0);
+    await expect(page.locator('.canvas-background')).toHaveAttribute('fill', '#ffffff');
+    await expect(nodes.first().locator('rect').first()).toHaveAttribute('fill', '#ffffff');
+    await expect(nodes.first().locator('rect').nth(1)).toHaveAttribute('fill', '#ffffff');
+    await expect(nodes.first().locator('rect').last()).toHaveAttribute('stroke', '#111111');
+    await expect(nodes.first().locator('.node-entity-title')).toHaveCSS('fill', 'rgb(17, 17, 17)');
+    await expect(nodes.first().locator('.node-field-name').first()).toHaveCSS('fill', 'rgb(17, 17, 17)');
+    await expect(page.locator('.edge-visible').first()).toHaveAttribute('stroke', '#222222');
 
     await nodes.first().click();
+    await expect(nodes.first().locator('.node-handles > rect').first()).toHaveAttribute('stroke', '#666666');
+    await expect(nodes.first().locator('.node-handles .handle').first()).toHaveCSS('fill', 'rgb(255, 255, 255)');
+    await expect(nodes.first().locator('.connection-port circle').first()).toHaveCSS('fill', 'rgb(85, 85, 85)');
     await page.getByLabel('Attribute 1 name').fill('AccountID');
     await expect(nodes.first().locator('.node-field-name').first()).toHaveText('AccountID');
     await page.getByTitle('Add attribute').click();
@@ -861,7 +883,12 @@ test.describe('diagram editing workflow', () => {
     await page.getByLabel('Attribute 5 name').fill('CreatedAt');
     await expect(nodes.first().locator('.node-field-name').last()).toHaveText('CreatedAt');
     const layout = page.getByLabel('Entity table layout');
+    await layout.selectOption('key-field-type');
+    await expect(nodes.first().locator('.node-field-type').first()).toHaveText('uuid');
     await layout.selectOption('key-field');
+    await page.getByTitle('Toggle row striping').click();
+    await expect(nodes.first().locator('rect').nth(3)).toHaveAttribute('fill', '#f2f2f2');
+    await page.getByTitle('Toggle row striping').click();
     await page.locator('.entity-layout-properties .toggle-button').click();
     await expect(nodes.first().locator('.node-field-column-header')).toHaveText(['Key', 'Field']);
 
@@ -870,7 +897,8 @@ test.describe('diagram editing workflow', () => {
     await nodes.nth(0).locator('[data-port="field-0-right"]').dispatchEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 });
     await nodes.nth(1).locator('[data-port="field-1-left"]').dispatchEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 });
     await expect(page.locator('[data-edge-id]')).toHaveCount(initialEdges + 1);
-    await expect(page.locator('.edge-visible').last()).toHaveAttribute('d', /M -200 -111\.5/);
+    await expect(page.locator('.edge-visible').last()).toHaveAttribute('stroke', '#222222');
+    await expect(page.locator('.edge-visible').last()).toHaveAttribute('d', /M -200 -116\.5/);
   });
 
   test('imports an SQL schema and exposes ERD export actions', async ({ page }) => {
@@ -1007,8 +1035,8 @@ test.describe('diagram editing workflow', () => {
     const nextBox = await node.boundingBox();
     expect(nextBox?.height ?? 0).toBeGreaterThan(initialBox?.height ?? 0);
     await page.getByTitle('Page actions').click();
-    await page.getByRole('button', { name: 'Use light canvas' }).click();
-    await expect(canvas.locator('.canvas-background')).toHaveAttribute('fill', '#f6f7fb');
+    await page.getByRole('button', { name: 'Use dark canvas' }).click();
+    await expect(canvas.locator('.canvas-background')).toHaveAttribute('fill', '#111111');
   });
 
   test('persists a per-shape default style and exposes paper presets', async ({ page }) => {

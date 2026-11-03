@@ -184,7 +184,7 @@ export function EditorScreen({ onExit }: EditorScreenProps) {
     addNode(buildNode('text', point, {
       library: 'general',
       size: { width: 380, height: 180 },
-      style: { fill: '#151925', stroke: '#59627a', radius: 8, textAlign: 'left', verticalAlign: 'top', autoHeight: false, textWrap: true },
+      style: { fill: '#ffffff', stroke: '#111111', radius: 8, textAlign: 'left', verticalAlign: 'top', autoHeight: false, textWrap: true },
       data: { label: source },
     }));
     setDetectedCode(null);

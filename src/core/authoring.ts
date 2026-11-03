@@ -182,7 +182,6 @@ export function applyAuthoringBatch(
         const page = structuredClone(operation.page as DiagramPage);
         if (!page.name.trim()) throw new Error('Page name cannot be empty.');
         page.name = page.name.trim();
-        if (next.diagramType === 'erd') page.settings = { ...page.settings, background: page.settings.background === '#10131c' ? '#ffffff' : page.settings.background, canvasTheme: 'light' };
         if (next.diagramType === 'dfd' && !page.data) {
           const parent = next.pages.find((candidate) => candidate.id === defaultPageId);
           page.data = { dfdLevel: typeof parent?.data?.dfdLevel === 'number' ? parent.data.dfdLevel : 0, dataDictionary: [] };

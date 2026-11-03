@@ -21,12 +21,14 @@ describe('code to diagram compiler', () => {
       CREATE TABLE booking (id BIGINT PRIMARY KEY, customer_id BIGINT NOT NULL, FOREIGN KEY (customer_id) REFERENCES customer(id));`, 'sql');
     const page = result.document?.pages[0];
     expect(page?.nodes).toHaveLength(2);
+    expect(page?.settings).toMatchObject({ background: '#ffffff', canvasTheme: 'light' });
+    expect(page?.nodes[0].style).toMatchObject({ fill: '#ffffff', stroke: '#111111', textColor: '#111111' });
     expect(page?.nodes.every((node) => node.type === 'entity')).toBe(true);
     expect(page?.edges[0]?.data.relationship).toBe('foreign-key');
     expect(page?.edges[0]?.source.anchorId).toContain('field-');
     expect(page?.edges[0]?.source.port).toMatch(/left|right/);
     expect(page?.edges[0]?.target.port).toMatch(/left|right/);
-    expect(page?.edges[0]?.style).toMatchObject({ startMarker: 'crowfoot', endMarker: 'bar' });
+    expect(page?.edges[0]?.style).toMatchObject({ stroke: '#222222', strokeWidth: 1.6, startMarker: 'crowfoot', endMarker: 'bar' });
     expect(page?.edges[0]?.data.cardinality).toEqual({ source: 'N', target: '1' });
     expect(page?.edges[0]?.data.label).toBeUndefined();
     const customer = page?.nodes.find((node) => node.data.label === 'customer');

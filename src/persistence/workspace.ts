@@ -199,10 +199,10 @@ function parseStoredDocument(value: unknown, path: string): StoredDocument {
   if (!isRecord(value) || !isRecord(value.document)) throw new Error(`${path} is invalid.`);
   const errors = validateProjectDocument(value.document);
   if (errors.length > 0) throw new Error(`${path}.document is invalid: ${errors[0]}`);
+  if (value.schemaVersion !== undefined && value.schemaVersion !== (value.document.schemaVersion ?? 1)) throw new Error(`${path}.schemaVersion does not match its document.`);
   const document = migrateDocument(value.document as Partial<DiagramDocument>);
   if (typeof value.id !== 'string' || value.id !== document.id) throw new Error(`${path}.id does not match its document.`);
   if (value.diagramType !== undefined && value.diagramType !== document.diagramType) throw new Error(`${path}.diagramType does not match its document.`);
-  if (value.schemaVersion !== undefined && value.schemaVersion !== document.schemaVersion) throw new Error(`${path}.schemaVersion does not match its document.`);
   if (value.name !== undefined && value.name !== document.name) throw new Error(`${path}.name does not match its document.`);
   if (!Number.isFinite(value.createdAt) || Number(value.createdAt) !== document.createdAt) throw new Error(`${path}.createdAt does not match its document.`);
   if (!Number.isFinite(value.updatedAt) || Number(value.updatedAt) !== document.updatedAt) throw new Error(`${path}.updatedAt does not match its document.`);
